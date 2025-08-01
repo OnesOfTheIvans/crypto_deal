@@ -1,0 +1,5 @@
+build/
+config.ini
+config.md
+.vscode/
+test.sh
