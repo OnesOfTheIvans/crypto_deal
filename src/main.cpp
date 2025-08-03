@@ -26,7 +26,7 @@ std::string secret_key;
 
 void initConfigVariables() {
     boost::property_tree::ptree pt;
-    boost::property_tree::ini_parser::read_ini("../config.ini", pt);
+    boost::property_tree::ini_parser::read_ini(CONFIG_FILE, pt);
     host = pt.get<std::string>("API.BINANCE_HOST");
     api_key = pt.get<std::string>("API.BINANCE_API_KEY");
     secret_key = pt.get<std::string>("API.BINANCE_SECRET_KEY");
