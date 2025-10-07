@@ -23,16 +23,31 @@ int main() {
     initConfigVariables();
     DealService dealService(host, apiKey, secretKey);
 
+    std::cout << "-------------------------------------------------------\n" << "BUY\n"
+        << "-------------------------------------------------------" << std::endl;
+
     std::string baseAsset = "USDC";
     std::string quoteAsset = "USDT";
-    int quantit = 100;
-    bool success = dealService.buyCrypto(baseAsset, quoteAsset, quantit);
+    int quantity = 100;
+    bool success = dealService.buyCrypto(baseAsset, quoteAsset, quantity);
     if (success) {
         std::cout << "Order succeed" << std::endl;
     } else {
         std::cout << "Order failed" << std::endl;
     }
 
+    std::cout << "-------------------------------------------------------\n" << "SELL\n"
+        << "-------------------------------------------------------" << std::endl;
+
+    baseAsset = "USDC";
+    quoteAsset = "USDT";
+    quantity = 10;
+    success = dealService.sellCrypto(baseAsset, quoteAsset, quantity);
+    if (success) {
+        std::cout << "Order succeed" << std::endl;
+    } else {
+        std::cout << "Order failed" << std::endl;
+    }
 
     return 0;
 }
