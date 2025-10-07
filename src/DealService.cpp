@@ -8,12 +8,12 @@
 
 using namespace std;
 
-bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
+std::string DealService::createQuery(const std::string& baseAsset, const std::string& quoteAsset, const OrderOperation& operation, const OrderType& type, int quantity) {
     auto server_time = std::chrono::system_clock::now();
     std::ostringstream qs;
     qs << "symbol=" << baseAsset << quoteAsset
-       << "&side=BUY"
-       << "&type=MARKET"
+       << "&side=" << orderOperation::operationToString.at(operation)
+       << "&type=" << orderType::typeToString.at(type)
        << "&quantity=" << quantity
        << "&recvWindow=" << recvWindow
        << "&timestamp=" << chrono::duration_cast<std::chrono::milliseconds>(
@@ -22,9 +22,11 @@ bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, i
 
     std::string query_string = qs.str();
     std::string signature = hmac_sha256(secretKey, query_string);
-    std::string full_query = query_string + "&signature=" + signature;
+    return query_string + "&signature=" + signature;
+}
 
-    std::string test_target = "/api/v3/order/test?" + full_query;
+bool DealService::sendOrder(const std::string& query) {
+    std::string test_target = "/api/v3/order/test?" + query;
 
     std::cout << "Sending test order..." << std::endl;
     std::string response = https_post(ioc, ctx, test_target, host, apiKey);
@@ -32,7 +34,7 @@ bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, i
 
     if (response == "{}") {
         std::cout << "Test passed, sending real order..." << std::endl;
-        std::string real_target = "/api/v3/order?" + full_query;
+        std::string real_target = "/api/v3/order?" + query;
         std::string real_response = https_post(ioc, ctx, real_target, host, apiKey);
         std::cout << "Real order response: " << real_response << std::endl;
         return true;
@@ -40,6 +42,16 @@ bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, i
         std::cout << "Test order failed or unexpected response, not placing real order." << std::endl;
         return false;
     }
+}
+
+bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
+    std::string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity);
+    return sendOrder(query);
+}
+
+bool DealService::sellCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
+   std::string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity);
+   return sendOrder(query);
 }
 
 // Correct HMAC SHA256 returning hex string
