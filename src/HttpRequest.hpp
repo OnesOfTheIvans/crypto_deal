@@ -19,7 +19,7 @@
 //debug
 #include <iostream>
 
-std::string https_get(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host);
-std::string https_post(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host, const std::string apiKey);
+std::string httpsGet(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host);
+std::string httpsPost(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host, const std::string apiKey);
 
 #endif

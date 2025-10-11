@@ -1,4 +1,4 @@
-#include "http_response.hpp"
+#include "HttpRequest.hpp"
 
 using namespace std;
 namespace beast = boost::beast;
@@ -8,7 +8,7 @@ namespace ssl = boost::asio::ssl;
 using tcp = net::ip::tcp;
 
 // https_get function unchanged except added logs:
-string https_get(net::io_context& ioc, ssl::context& ctx, const string& target, const string host) {
+string httpsGet(net::io_context& ioc, ssl::context& ctx, const string& target, const string host) {
     try {
         tcp::resolver resolver(ioc);
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);
@@ -56,7 +56,7 @@ string https_get(net::io_context& ioc, ssl::context& ctx, const string& target, 
 }
 
 // https_post unchanged except added logs:
-string https_post(net::io_context& ioc, ssl::context& ctx, const string& target, const string host, const string apiKey) {
+string httpsPost(net::io_context& ioc, ssl::context& ctx, const string& target, const string host, const string apiKey) {
     try {
         tcp::resolver resolver(ioc);
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);

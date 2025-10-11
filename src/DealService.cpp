@@ -1,5 +1,6 @@
 #include "DealService.hpp"
-#include "http_response.hpp"
+#include "HttpRequest.hpp"
+#include "EnumStringConverter.hpp"
 
 #include <sstream>
 #include <chrono>
@@ -12,8 +13,8 @@ std::string DealService::createQuery(const std::string& baseAsset, const std::st
     auto server_time = std::chrono::system_clock::now();
     std::ostringstream qs;
     qs << "symbol=" << baseAsset << quoteAsset
-       << "&side=" << orderOperation::operationToString.at(operation)
-       << "&type=" << orderType::typeToString.at(type)
+       << "&side=" << EnumStringConverter<OrderOperation>::toString(operation)
+       << "&type=" << EnumStringConverter<OrderType>::toString(type)
        << "&quantity=" << quantity
        << "&recvWindow=" << recvWindow
        << "&timestamp=" << chrono::duration_cast<std::chrono::milliseconds>(
@@ -29,13 +30,13 @@ bool DealService::sendOrder(const std::string& query) {
     std::string test_target = "/api/v3/order/test?" + query;
 
     std::cout << "Sending test order..." << std::endl;
-    std::string response = https_post(ioc, ctx, test_target, host, apiKey);
+    std::string response = httpsPost(ioc, ctx, test_target, host, apiKey);
     std::cout << "Test order response: " << response << std::endl;
 
     if (response == "{}") {
         std::cout << "Test passed, sending real order..." << std::endl;
         std::string real_target = "/api/v3/order?" + query;
-        std::string real_response = https_post(ioc, ctx, real_target, host, apiKey);
+        std::string real_response = httpsPost(ioc, ctx, real_target, host, apiKey);
         std::cout << "Real order response: " << real_response << std::endl;
         return true;
     } else {
