@@ -2,4 +2,6 @@ build/
 config.ini
 config.md
 .vscode/
-test.sh
+test_binance.sh
+test_bybit.sh
+TODO.md

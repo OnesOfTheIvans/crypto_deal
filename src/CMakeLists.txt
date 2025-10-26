@@ -1,3 +1,5 @@
-add_executable(CryptoDeal main.cpp HttpRequest.cpp DealService.cpp)
+add_executable(CryptoDeal main.cpp)
 
-target_link_libraries(CryptoDeal PRIVATE Boost::system Boost::filesystem Boost::thread OpenSSL::SSL OpenSSL::Crypto)
+add_subdirectory(DealService)
+
+target_link_libraries(CryptoDeal PRIVATE DealLib Boost::system Boost::filesystem Boost::thread OpenSSL::SSL OpenSSL::Crypto)

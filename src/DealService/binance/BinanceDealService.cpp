@@ -1,6 +1,6 @@
-#include "DealService.hpp"
-#include "HttpRequest.hpp"
-#include "EnumStringConverter.hpp"
+#include "BinanceDealService.hpp"
+#include "../common/HttpRequest.hpp"
+#include "../common/EnumStringConverter.hpp"
 
 #include <sstream>
 #include <chrono>
@@ -8,8 +8,9 @@
 #include <iostream>
 
 using namespace std;
+using namespace binance;
 
-std::string DealService::createQuery(const std::string& baseAsset, const std::string& quoteAsset, const OrderOperation& operation, const OrderType& type, int quantity) {
+std::string BinanceDealService::createQuery(const std::string& baseAsset, const std::string& quoteAsset, const OrderOperation& operation, const OrderType& type, int quantity) {
     auto server_time = std::chrono::system_clock::now();
     std::ostringstream qs;
     qs << "symbol=" << baseAsset << quoteAsset
@@ -26,7 +27,7 @@ std::string DealService::createQuery(const std::string& baseAsset, const std::st
     return query_string + "&signature=" + signature;
 }
 
-bool DealService::sendOrder(const std::string& query) {
+bool BinanceDealService::sendOrder(const std::string& query) {
     std::string test_target = "/api/v3/order/test?" + query;
 
     std::cout << "Sending test order..." << std::endl;
@@ -45,27 +46,12 @@ bool DealService::sendOrder(const std::string& query) {
     }
 }
 
-bool DealService::buyCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
+bool BinanceDealService::buyCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
     std::string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity);
     return sendOrder(query);
 }
 
-bool DealService::sellCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
+bool BinanceDealService::sellCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
    std::string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity);
    return sendOrder(query);
-}
-
-// Correct HMAC SHA256 returning hex string
-string DealService::hmac_sha256(const string& key, const string& data) const {
-    unsigned char digest[EVP_MAX_MD_SIZE];
-    unsigned int digest_len = 0;
-    HMAC(EVP_sha256(),
-         key.data(), (int)key.size(),
-         (const unsigned char*)data.data(), data.size(),
-         digest, &digest_len);
-
-    ostringstream oss;
-    for (unsigned int i = 0; i < digest_len; ++i)
-        oss << hex << setw(2) << setfill('0') << (int)digest[i];
-    return oss.str();
 }
