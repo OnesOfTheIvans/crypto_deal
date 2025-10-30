@@ -1,5 +1,6 @@
 #include "DealService.hpp"
 #include "binance/BinanceDealService.hpp"
+#include "bybit/BybitDealService.hpp"
 
 //Boost.PropertyTree
 #include <boost/property_tree/ptree.hpp>
@@ -58,10 +59,14 @@ void testOperations(DealService* dealService, const std::string& title) {
 
 int main() {
     initConfigVariables();
-    DealService* dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
+    DealService* dealService;
+    // dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
+    // testOperations(dealService, "BINANCE");
 
-    testOperations(dealService, "BINANCE");
-    // testOperations(dealService, "BYBIT");
+    // delete dealService;
+
+    dealService = new BybitDealService(bybitHost, bybitApiKey, bybitSecretKey);
+    testOperations(dealService, "BYBIT");
 
     delete dealService;
 

@@ -3,6 +3,8 @@
 
 #include "../binance/OrderOperation.hpp"
 #include "../binance/OrderType.hpp"
+#include "../bybit/OrderOperation.hpp"
+#include "../bybit/OrderType.hpp"
 
 #include <type_traits>
 #include <string>
@@ -21,14 +23,27 @@ public:
 };
 
 template<>
-const std::unordered_map<binance::OrderOperation, std::string> EnumStringConverter<binance::OrderOperation>::conversionalMap {
+inline const std::unordered_map<binance::OrderOperation, std::string> EnumStringConverter<binance::OrderOperation>::conversionalMap {
     { binance::OrderOperation::BUY,  "BUY" },
     { binance::OrderOperation::SELL, "SELL" }
 };
 
 template<>
-const std::unordered_map<binance::OrderType, std::string> EnumStringConverter<binance::OrderType>::conversionalMap {
-    { binance::OrderType::MARKET,  "MARKET" }
+inline const std::unordered_map<binance::OrderType, std::string> EnumStringConverter<binance::OrderType>::conversionalMap {
+    { binance::OrderType::MARKET,  "MARKET" },
+    { binance::OrderType::LIMIT,  "LIMIT" }
+};
+
+template<>
+inline const std::unordered_map<bybit::OrderOperation, std::string> EnumStringConverter<bybit::OrderOperation>::conversionalMap {
+    { bybit::OrderOperation::BUY,  "Buy" },
+    { bybit::OrderOperation::SELL, "Sell" }
+};
+
+template<>
+inline const std::unordered_map<bybit::OrderType, std::string> EnumStringConverter<bybit::OrderType>::conversionalMap {
+    { bybit::OrderType::MARKET,  "Market" },
+    { bybit::OrderType::LIMIT,  "Limit" }
 };
 
 #endif

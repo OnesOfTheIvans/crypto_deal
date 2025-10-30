@@ -31,7 +31,7 @@ string BinanceDealService::createQuery(const string& baseAsset, const string& qu
 
 flat_map<string, string> BinanceDealService::createHeaders(const string& apiKey) {
     return {
-            {"X-MBX-APIKEY", apiKey}
+        {"X-MBX-APIKEY", apiKey}
     };
 }
 

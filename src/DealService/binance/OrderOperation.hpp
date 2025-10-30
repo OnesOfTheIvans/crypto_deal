@@ -1,5 +1,5 @@
-#ifndef ORDER_OPERATION_H
-#define ORDER_OPERATION_H
+#ifndef BINANCE_ORDER_OPERATION_H
+#define BINANCE_ORDER_OPERATION_H
 
 namespace binance {
     enum class OrderOperation {
