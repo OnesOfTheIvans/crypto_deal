@@ -10,16 +10,17 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+//Boost.Containers
+#include <boost/container/flat_map.hpp>
 //OpenSSL
 #include <openssl/hmac.h>
 
 #include <string>
 #include <sstream>
 #include <iomanip>
-//debug
-#include <iostream>
 
-std::string httpsGet(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host);
-std::string httpsPost(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string host, const std::string apiKey);
+std::string httpsGet(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string& host);
+std::string httpsPost(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target,
+    const std::string& host, const std::string& apiKey, const boost::container::flat_map<std::string, std::string>& headers);
 
 #endif

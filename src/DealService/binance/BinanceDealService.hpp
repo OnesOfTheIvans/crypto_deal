@@ -8,6 +8,7 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/container/flat_map.hpp>
 
 #include <string>
 
@@ -16,7 +17,9 @@ private:
     std::string createQuery(const std::string& baseAsset, const std::string& quoteAsset,
         const binance::OrderOperation& operation, const binance::OrderType& type, int quantity);
 
-    bool sendOrder(const std::string& query);
+    boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey);
+
+    bool sendOrder(const std::string& query, const boost::container::flat_map<std::string, std::string>& headers);
 public:
     BinanceDealService(const std::string& host, const std::string& apiKey, const std::string& secretKey, const int recvWindow = 5000):
         DealService(host, apiKey, secretKey, recvWindow) {}
