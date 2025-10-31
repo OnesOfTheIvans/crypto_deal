@@ -50,6 +50,11 @@ void setRequestHeaders(http::request<http::string_body>& req, const flat_map<str
     }
 }
 
+void setRequestBody(http::request<http::string_body>& req, const string& body) {
+    req.body() = body;
+    req.prepare_payload();
+}
+
 // https_get function unchanged except added logs:
 string httpsGet(net::io_context& ioc, ssl::context& ctx, const string& target, const string& host) {
     try {
@@ -84,13 +89,16 @@ string httpsGet(net::io_context& ioc, ssl::context& ctx, const string& target, c
 
 // https_post unchanged except added logs:
 string httpsPost(net::io_context& ioc, ssl::context& ctx, const string& target, const string& host,
-    const string& apiKey, const flat_map<string, string>& headers) {
+    const string& apiKey, const flat_map<string, string>& headers, const string& body) {
     try {
         auto resolver = createResolver(ioc);
         auto stream = createNetworkStream(ioc, ctx);
         auto req = prepareRequest(http::verb::post, resolver, stream, target, host);
 
         setRequestHeaders(req, headers);
+        if (!body.empty()) {
+            setRequestBody(req, body);
+        }
 
         cout << "---- HTTP REQUEST ----\n" << req << "----------------------\n";
 

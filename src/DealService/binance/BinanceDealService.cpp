@@ -13,7 +13,7 @@ template <typename K, typename V>
 using flat_map = boost::container::flat_map<K, V>;
 
 string BinanceDealService::createQuery(const string& baseAsset, const string& quoteAsset, const OrderOperation& operation, const OrderType& type, int quantity) {
-    auto server_time = chrono::system_clock::now();
+    auto timestamp = chrono::system_clock::now();
     ostringstream qs;
     qs << "symbol=" << baseAsset << quoteAsset
        << "&side=" << EnumStringConverter<OrderOperation>::toString(operation)
@@ -21,7 +21,7 @@ string BinanceDealService::createQuery(const string& baseAsset, const string& qu
        << "&quantity=" << quantity
        << "&recvWindow=" << recvWindow
        << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(
-        server_time.time_since_epoch()
+        timestamp.time_since_epoch()
     ).count();
 
     string query_string = qs.str();

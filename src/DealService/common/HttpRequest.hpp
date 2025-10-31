@@ -21,6 +21,7 @@
 
 std::string httpsGet(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target, const std::string& host);
 std::string httpsPost(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx, const std::string& target,
-    const std::string& host, const std::string& apiKey, const boost::container::flat_map<std::string, std::string>& headers);
+    const std::string& host, const std::string& apiKey, const boost::container::flat_map<std::string,
+    std::string>& headers, const std::string& body= "");
 
 #endif

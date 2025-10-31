@@ -11,15 +11,19 @@
 #include <boost/container/flat_map.hpp>
 
 #include <string>
+#include <chrono>
 
 class BybitDealService: public DealService {
 private:
+    std::chrono::milliseconds::rep getTimestamp();
+
     std::string createQuery(const std::string& baseAsset, const std::string& quoteAsset,
         const bybit::OrderOperation& operation, const bybit::OrderType& type, int quantity);
 
-    boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey, const std::string& signature);
+    boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey,
+        const std::string& signature, const std::chrono::milliseconds::rep& timestamp);
     
-    std::string getSignature(const std::string& query);
+    std::string getSignature(const std::string& query, const std::chrono::milliseconds::rep& timestamp);
 
     bool sendOrder(const std::string& query, const boost::container::flat_map<std::string, std::string>& headers);
 public:
