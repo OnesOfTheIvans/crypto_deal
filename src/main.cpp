@@ -60,10 +60,10 @@ void testOperations(DealService* dealService, const std::string& title) {
 int main() {
     initConfigVariables();
     DealService* dealService;
-    // dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
-    // testOperations(dealService, "BINANCE");
+    dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
+    testOperations(dealService, "BINANCE");
 
-    // delete dealService;
+    delete dealService;
 
     dealService = new BybitDealService(bybitHost, bybitApiKey, bybitSecretKey);
     testOperations(dealService, "BYBIT");
