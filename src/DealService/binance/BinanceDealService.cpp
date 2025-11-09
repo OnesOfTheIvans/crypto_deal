@@ -10,6 +10,7 @@
 
 using namespace std;
 using namespace binance;
+namespace http = boost::beast::http;
 template <typename K, typename V>
 using flat_map = boost::container::flat_map<K, V>;
 
@@ -40,6 +41,7 @@ flat_map<string, string> BinanceDealService::createHeaders(const string& apiKey)
 bool BinanceDealService::sendOrder(const string& query, const flat_map<string, string>& headers) {
     string test_target = "/api/v3/order/test?" + query;
     HttpRequestContext context(ioc, ctx, host, test_target);
+    context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
 
     cout << "Sending test order..." << endl;
@@ -49,7 +51,8 @@ bool BinanceDealService::sendOrder(const string& query, const flat_map<string, s
     if (response == "{}") {
         cout << "Test passed, sending real order..." << endl;
         string real_target = "/api/v3/order?" + query;
-        HttpRequestContext context(ioc, ctx, host, test_target);
+        HttpRequestContext context(ioc, ctx, host, real_target);
+        context.prepareRequest(http::verb::post);
         context.setRequestHeaders(headers);
         string real_response = httpsPost(context);
         cout << "Real order response: " << real_response << endl;

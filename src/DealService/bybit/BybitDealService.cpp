@@ -8,6 +8,7 @@
 
 using namespace std;
 using namespace bybit;
+namespace http = boost::beast::http;
 template <typename K, typename V>
 using flat_map = boost::container::flat_map<K, V>;
 using msec = chrono::milliseconds::rep;
@@ -54,7 +55,9 @@ bool BybitDealService::sendOrder(const string& body, const flat_map<string, stri
     cout << "Sending order..." << endl;
     string target = "/v5/order/create";
     HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
+    context.setRequestBody(body);
     string response = httpsPost(context);
     cout << "Order response: " << response << endl;
     return true;

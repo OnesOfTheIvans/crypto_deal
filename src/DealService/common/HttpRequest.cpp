@@ -11,8 +11,6 @@ namespace ssl = boost::asio::ssl;
 
 string httpsGet(HttpRequestContext& context) {
     try {
-        context.prepareRequest(http::verb::get);
-
         cout << "[*] Writing GET request..." << endl;
         http::write(context.getStream(), context.getRequest());
 
@@ -40,8 +38,6 @@ string httpsGet(HttpRequestContext& context) {
 
 string httpsPost(HttpRequestContext& context) {
     try {
-        context.prepareRequest(http::verb::get);
-
         cout << "---- HTTP REQUEST ----\n" << context.getRequest() << "----------------------\n";
 
         cout << "[*] Writing POST request..." << endl;
