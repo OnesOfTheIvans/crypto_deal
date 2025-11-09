@@ -5,6 +5,7 @@
 #include "../binance/OrderType.hpp"
 #include "../bybit/OrderOperation.hpp"
 #include "../bybit/OrderType.hpp"
+#include "../bybit/OrderCategory.hpp"
 
 #include <type_traits>
 #include <string>
@@ -44,6 +45,11 @@ template<>
 inline const std::unordered_map<bybit::OrderType, std::string> EnumStringConverter<bybit::OrderType>::conversionalMap {
     { bybit::OrderType::MARKET,  "Market" },
     { bybit::OrderType::LIMIT,  "Limit" }
+};
+
+template<>
+inline const std::unordered_map<bybit::OrderCategory, std::string> EnumStringConverter<bybit::OrderCategory>::conversionalMap {
+    { bybit::OrderCategory::SPOT,  "spot" }
 };
 
 #endif
