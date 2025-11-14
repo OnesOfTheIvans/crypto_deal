@@ -8,6 +8,7 @@
 
 using namespace std;
 using namespace bybit;
+namespace http = boost::beast::http;
 template <typename K, typename V>
 using flat_map = boost::container::flat_map<K, V>;
 using msec = chrono::milliseconds::rep;
@@ -18,13 +19,12 @@ msec BybitDealService::getTimestamp() {
     ).count();
 }
 
-string BybitDealService::createQuery(const string& baseAsset, const string& quoteAsset,
+string BybitDealService::createBody(const string& baseAsset, const string& quoteAsset, const OrderCategory& category,
     const OrderOperation& operation, const OrderType& type, int quantity) {
     ostringstream body;
-    //TODO new enum for the category
     //TODO maybe prepare json file with parameters
     body << "{"
-       << "\"category\":\"spot\","
+       << "\"category\":\"" << EnumStringConverter<OrderCategory>::toString(category) << "\","
        << "\"symbol\":\"" << baseAsset << quoteAsset << "\","
        << "\"side\":\"" << EnumStringConverter<OrderOperation>::toString(operation) << "\","
        << "\"orderType\":\"" << EnumStringConverter<OrderType>::toString(type) << "\","
@@ -54,14 +54,18 @@ string BybitDealService::getSignature(const string& body, const msec& timestamp)
 bool BybitDealService::sendOrder(const string& body, const flat_map<string, string>& headers) {
     cout << "Sending order..." << endl;
     string target = "/v5/order/create";
-    string response = httpsPost(ioc, ctx, target, host, apiKey, headers, body);
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::post);
+    context.setRequestHeaders(headers);
+    context.setRequestBody(body);
+    string response = httpsPost(context);
     cout << "Order response: " << response << endl;
     return true;
 }
 
 bool BybitDealService::buyCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
     msec timestamp = getTimestamp();
-    string body = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity);
+    string body = createBody(baseAsset, quoteAsset, OrderCategory::SPOT, OrderOperation::BUY, OrderType::MARKET, quantity);
     string signature = getSignature(body, timestamp);
     flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
     return sendOrder(body, headers);
@@ -69,7 +73,7 @@ bool BybitDealService::buyCrypto(const string& baseAsset, const string& quoteAss
 
 bool BybitDealService::sellCrypto(const string& baseAsset, const string& quoteAsset, int quantity) {
     msec timestamp = getTimestamp();
-    string body = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity);
+    string body = createBody(baseAsset, quoteAsset, OrderCategory::SPOT, OrderOperation::SELL, OrderType::MARKET, quantity);
     string signature = getSignature(body, timestamp);
     flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
     return sendOrder(body, headers);

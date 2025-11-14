@@ -3,6 +3,7 @@ add_library(DealLib
     binance/BinanceDealService.cpp
     bybit/BybitDealService.cpp
     common/HttpRequest.cpp
+    common/HttpRequestContext.cpp
 )
 
 target_include_directories(DealLib

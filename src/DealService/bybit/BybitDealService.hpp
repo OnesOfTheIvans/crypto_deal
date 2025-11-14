@@ -4,6 +4,7 @@
 #include "../DealService.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
+#include "OrderCategory.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -17,7 +18,7 @@ class BybitDealService: public DealService {
 private:
     std::chrono::milliseconds::rep getTimestamp();
 
-    std::string createQuery(const std::string& baseAsset, const std::string& quoteAsset,
+    std::string createBody(const std::string& baseAsset, const std::string& quoteAsset, const bybit::OrderCategory& category,
         const bybit::OrderOperation& operation, const bybit::OrderType& type, int quantity);
 
     boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey,
