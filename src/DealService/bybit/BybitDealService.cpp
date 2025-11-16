@@ -1,6 +1,6 @@
 #include "BybitDealService.hpp"
 #include "../common/EnumStringConverter.hpp"
-#include "../common/HttpRequest.hpp"
+#include "../common/http_request.hpp"
 
 #include <sstream>
 // DEBUG

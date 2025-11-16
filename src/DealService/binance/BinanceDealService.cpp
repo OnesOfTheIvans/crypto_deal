@@ -1,7 +1,7 @@
 #include "BinanceDealService.hpp"
 #include "../common/EnumStringConverter.hpp"
-#include "../common/HttpRequest.hpp"
 #include "../common/HttpRequestContext.hpp"
+#include "../common/http_request.hpp"
 
 #include <chrono>
 #include <sstream>
