@@ -14,10 +14,13 @@
 #include <chrono>
 #include <string>
 
+using msec = std::chrono::milliseconds::rep;
+template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
+
 class BybitDealService : public DealService
 {
   private:
-    std::chrono::milliseconds::rep getTimestamp();
+    msec getTimestamp();
 
     std::string createBody(const std::string &baseAsset,
                            const std::string &quoteAsset,
@@ -26,13 +29,12 @@ class BybitDealService : public DealService
                            const bybit::OrderType &type,
                            int quantity);
 
-    boost::container::flat_map<std::string, std::string> createHeaders(const std::string &apiKey,
-                                                                       const std::string &signature,
-                                                                       const std::chrono::milliseconds::rep &timestamp);
+    flat_map<std::string, std::string>
+    createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
 
-    std::string getSignature(const std::string &query, const std::chrono::milliseconds::rep &timestamp);
+    std::string getSignature(const std::string &query, const msec &timestamp);
 
-    bool sendOrder(const std::string &query, const boost::container::flat_map<std::string, std::string> &headers);
+    bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
   public:
     BybitDealService(const std::string &host,

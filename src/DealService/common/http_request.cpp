@@ -3,11 +3,9 @@
 // DEBUG
 #include <iostream>
 
+#include "type_aliasing.hpp"
+
 using namespace std;
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace net = boost::asio;
-namespace ssl = boost::asio::ssl;
 
 string httpsGet(HttpRequestContext &context)
 {

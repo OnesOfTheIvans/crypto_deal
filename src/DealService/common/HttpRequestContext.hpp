@@ -13,34 +13,36 @@
 
 #include <string>
 
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace net = boost::asio;
+namespace ssl = boost::asio::ssl;
+
 class HttpRequestContext
 {
   private:
     const int HTTP_PROTOCOL_VERSION = 11;
 
-    boost::asio::io_context &ioc;
-    boost::asio::ssl::context &ctx;
+    net::io_context &ioc;
+    ssl::context &ctx;
     std::string host;
     std::string target;
-    boost::asio::ip::tcp::resolver resolver;
-    boost::beast::ssl_stream<boost::beast::tcp_stream> stream;
-    boost::beast::http::request<boost::beast::http::string_body> request;
+    net::ip::tcp::resolver resolver;
+    beast::ssl_stream<beast::tcp_stream> stream;
+    http::request<http::string_body> request;
 
   public:
-    HttpRequestContext(boost::asio::io_context &ioc,
-                       boost::asio::ssl::context &ctx,
-                       const std::string &host,
-                       const std::string &target)
+    HttpRequestContext(net::io_context &ioc, ssl::context &ctx, const std::string &host, const std::string &target)
         : ioc(ioc), ctx(ctx), host(host), target(target), resolver(ioc), stream(ioc, ctx)
     {}
 
-    void prepareRequest(const boost::beast::http::verb &type);
+    void prepareRequest(const http::verb &type);
 
-    const boost::beast::http::request<boost::beast::http::string_body> &getRequest() const;
+    const http::request<http::string_body> &getRequest() const;
 
-    const boost::beast::ssl_stream<boost::beast::tcp_stream> &getStream() const;
+    const beast::ssl_stream<beast::tcp_stream> &getStream() const;
 
-    boost::beast::ssl_stream<boost::beast::tcp_stream> &getStream();
+    beast::ssl_stream<beast::tcp_stream> &getStream();
 
     void setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers);
 

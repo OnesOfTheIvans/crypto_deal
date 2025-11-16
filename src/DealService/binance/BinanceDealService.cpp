@@ -8,10 +8,10 @@
 // DEBUG
 #include <iostream>
 
+#include "../common/type_aliasing.hpp"
+
 using namespace std;
 using namespace binance;
-namespace http = boost::beast::http;
-template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
 string BinanceDealService::createQuery(const string &baseAsset,
                                        const string &quoteAsset,

@@ -12,6 +12,8 @@
 
 #include <string>
 
+template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
+
 class BinanceDealService : public DealService
 {
   private:
@@ -21,9 +23,9 @@ class BinanceDealService : public DealService
                             const binance::OrderType &type,
                             int quantity);
 
-    boost::container::flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
+    flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
-    bool sendOrder(const std::string &query, const boost::container::flat_map<std::string, std::string> &headers);
+    bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
   public:
     BinanceDealService(const std::string &host,

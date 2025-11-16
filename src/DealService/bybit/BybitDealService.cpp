@@ -6,11 +6,10 @@
 // DEBUG
 #include <iostream>
 
+#include "../common/type_aliasing.hpp"
+
 using namespace std;
 using namespace bybit;
-namespace http = boost::beast::http;
-template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
-using msec = chrono::milliseconds::rep;
 
 msec BybitDealService::getTimestamp()
 {
