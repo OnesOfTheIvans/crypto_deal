@@ -2,7 +2,8 @@
 #define BYBIT_ORDER_CATEGORY_H
 
 namespace bybit {
-    enum class OrderCategory {
+    enum class OrderCategory
+    {
         SPOT
     };
 }

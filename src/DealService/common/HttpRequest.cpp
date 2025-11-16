@@ -1,6 +1,6 @@
 #include "HttpRequest.hpp"
 
-//DEBUG
+// DEBUG
 #include <iostream>
 
 using namespace std;
@@ -9,8 +9,10 @@ namespace http = beast::http;
 namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
 
-string httpsGet(HttpRequestContext& context) {
-    try {
+string httpsGet(HttpRequestContext &context)
+{
+    try
+    {
         cout << "[*] Writing GET request..." << endl;
         http::write(context.getStream(), context.getRequest());
 
@@ -23,21 +25,29 @@ string httpsGet(HttpRequestContext& context) {
 
         beast::error_code ec;
         context.getStream().shutdown(ec);
-        if(ec == net::error::eof || ec == ssl::error::stream_truncated)
+        if (ec == net::error::eof || ec == ssl::error::stream_truncated)
+        {
             ec = {};
-        if(ec)
+        }
+        if (ec)
+        {
             throw beast::system_error{ec};
+        }
         cout << "[*] Shutdown complete" << endl;
 
         return res.body();
-    } catch(exception const& e) {
+    }
+    catch (exception const &e)
+    {
         cerr << "HTTPS GET error: " << e.what() << endl;
         return "";
     }
 }
 
-string httpsPost(HttpRequestContext& context) {
-    try {
+string httpsPost(HttpRequestContext &context)
+{
+    try
+    {
         cout << "---- HTTP REQUEST ----\n" << context.getRequest() << "----------------------\n";
 
         cout << "[*] Writing POST request..." << endl;
@@ -54,14 +64,20 @@ string httpsPost(HttpRequestContext& context) {
 
         beast::error_code ec;
         context.getStream().shutdown(ec);
-        if(ec == net::error::eof || ec == ssl::error::stream_truncated)
+        if (ec == net::error::eof || ec == ssl::error::stream_truncated)
+        {
             ec = {};
-        if(ec)
+        }
+        if (ec)
+        {
             throw beast::system_error{ec};
+        }
         cout << "[*] Shutdown complete" << endl;
 
         return res.body();
-    } catch(exception const& e) {
+    }
+    catch (exception const &e)
+    {
         cerr << "HTTPS POST error: " << e.what() << endl;
         return "";
     }

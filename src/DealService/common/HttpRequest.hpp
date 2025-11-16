@@ -3,17 +3,17 @@
 
 #include "HttpRequestContext.hpp"
 
-//Boost.Beast
+// Boost.Beast
 #include <boost/beast/http.hpp>
-//Boost.Asio
+// Boost.Asio
 #include <boost/asio/ssl.hpp>
 
-#include <string>
-#include <sstream>
 #include <iomanip>
+#include <sstream>
+#include <string>
 
-std::string httpsGet(HttpRequestContext& context);
+std::string httpsGet(HttpRequestContext &context);
 
-std::string httpsPost(HttpRequestContext& context);
+std::string httpsPost(HttpRequestContext &context);
 
 #endif

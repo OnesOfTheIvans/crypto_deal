@@ -2,9 +2,9 @@
 #include "binance/BinanceDealService.hpp"
 #include "bybit/BybitDealService.hpp"
 
-//Boost.PropertyTree
-#include <boost/property_tree/ptree.hpp>
+// Boost.PropertyTree
 #include <boost/property_tree/ini_parser.hpp>
+#include <boost/property_tree/ptree.hpp>
 
 #include <iostream>
 #include <string>
@@ -16,7 +16,8 @@ std::string bybitHost;
 std::string bybitApiKey;
 std::string bybitSecretKey;
 
-void initConfigVariables() {
+void initConfigVariables()
+{
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini(CONFIG_FILE, pt);
     binanceHost = pt.get<std::string>("API.BINANCE_HOST");
@@ -27,39 +28,49 @@ void initConfigVariables() {
     bybitSecretKey = pt.get<std::string>("API.BYBIT_SECRET_KEY");
 }
 
-void testOperations(DealService* dealService, const std::string& title) {
-    std::cout << "<------------------------------------------------------\n" << title
-        << "\n------------------------------------------------------>" << std::endl;
-    std::cout << "-------------------------------------------------------\n" << "BUY\n"
-        << "-------------------------------------------------------" << std::endl;
+void testOperations(DealService *dealService, const std::string &title)
+{
+    std::cout << "<------------------------------------------------------\n"
+              << title << "\n------------------------------------------------------>" << std::endl;
+    std::cout << "-------------------------------------------------------\n"
+              << "BUY\n"
+              << "-------------------------------------------------------" << std::endl;
 
     std::string baseAsset = "USDC";
     std::string quoteAsset = "USDT";
     int quantity = 100;
     bool success = dealService->buyCrypto(baseAsset, quoteAsset, quantity);
-    if (success) {
+    if (success)
+    {
         std::cout << "Order succeed" << std::endl;
-    } else {
+    }
+    else
+    {
         std::cout << "Order failed" << std::endl;
     }
 
-    std::cout << "-------------------------------------------------------\n" << "SELL\n"
-        << "-------------------------------------------------------" << std::endl;
+    std::cout << "-------------------------------------------------------\n"
+              << "SELL\n"
+              << "-------------------------------------------------------" << std::endl;
 
     baseAsset = "USDC";
     quoteAsset = "USDT";
     quantity = 10;
     success = dealService->sellCrypto(baseAsset, quoteAsset, quantity);
-    if (success) {
+    if (success)
+    {
         std::cout << "Order succeed" << std::endl;
-    } else {
+    }
+    else
+    {
         std::cout << "Order failed" << std::endl;
     }
 }
 
-int main() {
+int main()
+{
     initConfigVariables();
-    DealService* dealService;
+    DealService *dealService;
     dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
     testOperations(dealService, "BINANCE");
 

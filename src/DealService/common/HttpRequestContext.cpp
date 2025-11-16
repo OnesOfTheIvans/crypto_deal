@@ -1,6 +1,6 @@
 #include "HttpRequestContext.hpp"
 
-//DEBUG
+// DEBUG
 #include <iostream>
 
 using namespace std;
@@ -9,15 +9,19 @@ namespace http = beast::http;
 namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
 
-void HttpRequestContext::prepareRequest(const http::verb& type) {
+void HttpRequestContext::prepareRequest(const http::verb &type)
+{
     cout << "[*] Resolving host: " << host << endl;
     auto const results = resolver.resolve(host, "https");
 
     cout << "[*] Connecting..." << endl;
     beast::get_lowest_layer(stream).connect(results);
 
-    if(!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
-        throw beast::system_error{beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category())};
+    if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
+    {
+        throw beast::system_error{
+            beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category())};
+    }
 
     cout << "[*] Performing SSL handshake..." << endl;
     stream.handshake(ssl::stream_base::client);
@@ -28,25 +32,31 @@ void HttpRequestContext::prepareRequest(const http::verb& type) {
     request.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 }
 
-void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std::string, std::string>& headers) {
-    for (auto header: headers) {
+void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers)
+{
+    for (auto header : headers)
+    {
         request.set(header.first, header.second);
     }
 }
 
-void HttpRequestContext::setRequestBody(const std::string& body) {
+void HttpRequestContext::setRequestBody(const std::string &body)
+{
     request.body() = body;
     request.prepare_payload();
 }
 
-const http::request<http::string_body>& HttpRequestContext::getRequest() const {
+const http::request<http::string_body> &HttpRequestContext::getRequest() const
+{
     return request;
 }
 
-const beast::ssl_stream<beast::tcp_stream>& HttpRequestContext::getStream() const {
+const beast::ssl_stream<beast::tcp_stream> &HttpRequestContext::getStream() const
+{
     return stream;
 }
 
-beast::ssl_stream<beast::tcp_stream>& HttpRequestContext::getStream() {
+beast::ssl_stream<beast::tcp_stream> &HttpRequestContext::getStream()
+{
     return stream;
 }

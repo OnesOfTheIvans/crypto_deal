@@ -2,7 +2,8 @@
 #define BINANCE_ORDER_TYPE_H
 
 namespace binance {
-    enum class OrderType {
+    enum class OrderType
+    {
         MARKET,
         LIMIT
     };

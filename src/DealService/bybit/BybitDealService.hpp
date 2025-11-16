@@ -2,38 +2,49 @@
 #define BYBIT_DEAL_SERVICE_H
 
 #include "../DealService.hpp"
+#include "OrderCategory.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
-#include "OrderCategory.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
 
-#include <string>
 #include <chrono>
+#include <string>
 
-class BybitDealService: public DealService {
-private:
+class BybitDealService : public DealService
+{
+  private:
     std::chrono::milliseconds::rep getTimestamp();
 
-    std::string createBody(const std::string& baseAsset, const std::string& quoteAsset, const bybit::OrderCategory& category,
-        const bybit::OrderOperation& operation, const bybit::OrderType& type, int quantity);
+    std::string createBody(const std::string &baseAsset,
+                           const std::string &quoteAsset,
+                           const bybit::OrderCategory &category,
+                           const bybit::OrderOperation &operation,
+                           const bybit::OrderType &type,
+                           int quantity);
 
-    boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey,
-        const std::string& signature, const std::chrono::milliseconds::rep& timestamp);
-    
-    std::string getSignature(const std::string& query, const std::chrono::milliseconds::rep& timestamp);
+    boost::container::flat_map<std::string, std::string> createHeaders(const std::string &apiKey,
+                                                                       const std::string &signature,
+                                                                       const std::chrono::milliseconds::rep &timestamp);
 
-    bool sendOrder(const std::string& query, const boost::container::flat_map<std::string, std::string>& headers);
-public:
-    BybitDealService(const std::string& host, const std::string& apiKey, const std::string& secretKey, const int recvWindow = 5000):
-        DealService(host, apiKey, secretKey, recvWindow) {}
+    std::string getSignature(const std::string &query, const std::chrono::milliseconds::rep &timestamp);
 
-    bool buyCrypto(const std::string& baseAsset, const std::string& quoteAsset, int quantity) override;
+    bool sendOrder(const std::string &query, const boost::container::flat_map<std::string, std::string> &headers);
 
-    bool sellCrypto(const std::string& baseAsset, const std::string& quoteAsset, int quantity) override;
+  public:
+    BybitDealService(const std::string &host,
+                     const std::string &apiKey,
+                     const std::string &secretKey,
+                     const int recvWindow = 5000)
+        : DealService(host, apiKey, secretKey, recvWindow)
+    {}
+
+    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+
+    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
 };
 
 #endif

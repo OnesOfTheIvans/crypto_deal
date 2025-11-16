@@ -12,21 +12,30 @@
 
 #include <string>
 
-class BinanceDealService: public DealService {
-private:
-    std::string createQuery(const std::string& baseAsset, const std::string& quoteAsset,
-        const binance::OrderOperation& operation, const binance::OrderType& type, int quantity);
+class BinanceDealService : public DealService
+{
+  private:
+    std::string createQuery(const std::string &baseAsset,
+                            const std::string &quoteAsset,
+                            const binance::OrderOperation &operation,
+                            const binance::OrderType &type,
+                            int quantity);
 
-    boost::container::flat_map<std::string, std::string> createHeaders(const std::string& apiKey);
+    boost::container::flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
-    bool sendOrder(const std::string& query, const boost::container::flat_map<std::string, std::string>& headers);
-public:
-    BinanceDealService(const std::string& host, const std::string& apiKey, const std::string& secretKey, const int recvWindow = 5000):
-        DealService(host, apiKey, secretKey, recvWindow) {}
+    bool sendOrder(const std::string &query, const boost::container::flat_map<std::string, std::string> &headers);
 
-    bool buyCrypto(const std::string& baseAsset, const std::string& quoteAsset, int quantity) override;
+  public:
+    BinanceDealService(const std::string &host,
+                       const std::string &apiKey,
+                       const std::string &secretKey,
+                       const int recvWindow = 5000)
+        : DealService(host, apiKey, secretKey, recvWindow)
+    {}
 
-    bool sellCrypto(const std::string& baseAsset, const std::string& quoteAsset, int quantity) override;
+    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+
+    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
 };
 
 #endif

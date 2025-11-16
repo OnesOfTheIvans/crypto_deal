@@ -1,45 +1,50 @@
 #ifndef HTTP_REQUEST_CONTEXT_H
 #define HTTP_REQUEST_CONTEXT_H
 
-//Boost.Beast
-#include <boost/beast/ssl.hpp>
+// Boost.Beast
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/beast/version.hpp>
-//Boost.Asio
+// Boost.Asio
 #include <boost/asio/ip/tcp.hpp>
-//Boost.Containers
+// Boost.Containers
 #include <boost/container/flat_map.hpp>
 
 #include <string>
 
 class HttpRequestContext
 {
-private:
+  private:
     const int HTTP_PROTOCOL_VERSION = 11;
 
-    boost::asio::io_context& ioc;
-    boost::asio::ssl::context& ctx;
+    boost::asio::io_context &ioc;
+    boost::asio::ssl::context &ctx;
     std::string host;
     std::string target;
     boost::asio::ip::tcp::resolver resolver;
     boost::beast::ssl_stream<boost::beast::tcp_stream> stream;
     boost::beast::http::request<boost::beast::http::string_body> request;
-public:
-    HttpRequestContext(boost::asio::io_context& ioc, boost::asio::ssl::context& ctx,
-        const std::string& host, const std::string& target): ioc(ioc), ctx(ctx), host(host), target(target), resolver(ioc), stream(ioc, ctx) {}
 
-    void prepareRequest(const boost::beast::http::verb& type);
+  public:
+    HttpRequestContext(boost::asio::io_context &ioc,
+                       boost::asio::ssl::context &ctx,
+                       const std::string &host,
+                       const std::string &target)
+        : ioc(ioc), ctx(ctx), host(host), target(target), resolver(ioc), stream(ioc, ctx)
+    {}
 
-    const boost::beast::http::request<boost::beast::http::string_body>& getRequest() const;
+    void prepareRequest(const boost::beast::http::verb &type);
 
-    const boost::beast::ssl_stream<boost::beast::tcp_stream>& getStream() const;
+    const boost::beast::http::request<boost::beast::http::string_body> &getRequest() const;
 
-    boost::beast::ssl_stream<boost::beast::tcp_stream>& getStream();
+    const boost::beast::ssl_stream<boost::beast::tcp_stream> &getStream() const;
 
-    void setRequestHeaders(const boost::container::flat_map<std::string, std::string>& headers);
+    boost::beast::ssl_stream<boost::beast::tcp_stream> &getStream();
 
-    void setRequestBody(const std::string& body);
+    void setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers);
+
+    void setRequestBody(const std::string &body);
 };
 
 #endif

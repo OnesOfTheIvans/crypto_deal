@@ -2,7 +2,8 @@
 #define BYBIT_ORDER_TYPE_H
 
 namespace bybit {
-    enum class OrderType {
+    enum class OrderType
+    {
         MARKET,
         LIMIT
     };

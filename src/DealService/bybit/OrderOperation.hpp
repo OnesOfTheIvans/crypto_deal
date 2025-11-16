@@ -2,7 +2,8 @@
 #define BYBIT_ORDER_OPERATION_H
 
 namespace bybit {
-    enum class OrderOperation {
+    enum class OrderOperation
+    {
         BUY,
         SELL
     };
