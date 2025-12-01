@@ -1,5 +1,5 @@
-#ifndef TYPE_ALIASING_H
-#define TYPE_ALIASING_H
+#ifndef DEAL_SERVICE_TYPE_ALIASING_H
+#define DEAL_SERVICE_TYPE_ALIASING_H
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>

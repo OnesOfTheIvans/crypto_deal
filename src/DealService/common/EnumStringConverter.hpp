@@ -1,11 +1,11 @@
 #ifndef ENUM_STRING_CONVERTER_H
 #define ENUM_STRING_CONVERTER_H
 
-#include "../binance/OrderOperation.hpp"
-#include "../binance/OrderType.hpp"
-#include "../bybit/OrderCategory.hpp"
-#include "../bybit/OrderOperation.hpp"
-#include "../bybit/OrderType.hpp"
+#include "binance/OrderOperation.hpp"
+#include "binance/OrderType.hpp"
+#include "bybit/OrderCategory.hpp"
+#include "bybit/OrderOperation.hpp"
+#include "bybit/OrderType.hpp"
 
 #include <string>
 #include <type_traits>

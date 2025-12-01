@@ -1,12 +1,12 @@
 #include "BybitDealService.hpp"
-#include "../common/EnumStringConverter.hpp"
-#include "../common/http_request.hpp"
+#include "common/EnumStringConverter.hpp"
+#include "common/http_request.hpp"
 
 #include <sstream>
 // DEBUG
 #include <iostream>
 
-#include "../common/type_aliasing.hpp"
+#include "common/type_aliasing.hpp"
 
 using namespace std;
 using namespace bybit;

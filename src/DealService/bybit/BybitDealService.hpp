@@ -1,7 +1,8 @@
 #ifndef BYBIT_DEAL_SERVICE_H
 #define BYBIT_DEAL_SERVICE_H
 
-#include "../DealService.hpp"
+#include "DealService.hpp"
+#include "ExchangerType.hpp"
 #include "OrderCategory.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
@@ -41,7 +42,7 @@ class BybitDealService : public DealService
                      const std::string &apiKey,
                      const std::string &secretKey,
                      const int recvWindow = 5000)
-        : DealService(host, apiKey, secretKey, recvWindow)
+        : DealService(host, apiKey, secretKey, recvWindow, ExchangerType::BYBIT)
     {}
 
     bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;

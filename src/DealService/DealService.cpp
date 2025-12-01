@@ -24,3 +24,8 @@ string DealService::hmac_sha256(const string &key, const string &data) const
     }
     return oss.str();
 }
+
+ExchangerType DealService::getExchangerType() const
+{
+    return exchangerType;
+}
