@@ -21,7 +21,7 @@ string BybitDealService::createBody(const string &baseAsset,
                                     const OrderCategory &category,
                                     const OrderOperation &operation,
                                     const OrderType &type,
-                                    int quantity)
+                                    double quantity)
 {
     ostringstream body;
     // TODO maybe prepare json file with parameters
@@ -68,7 +68,7 @@ bool BybitDealService::sendOrder(const string &body, const flat_map<string, stri
     return true;
 }
 
-bool BybitDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, int quantity)
+bool BybitDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
     msec timestamp = getTimestamp();
     string body =
@@ -78,7 +78,7 @@ bool BybitDealService::buyCrypto(const string &baseAsset, const string &quoteAss
     return sendOrder(body, headers);
 }
 
-bool BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, int quantity)
+bool BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
     msec timestamp = getTimestamp();
     string body =
@@ -87,3 +87,7 @@ bool BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAs
     flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
     return sendOrder(body, headers);
 }
+
+vector<AssetBalance> BybitDealService::getBalances() {}
+
+optional<AssetBalance> BybitDealService::getBalance(const std::string &asset) {}

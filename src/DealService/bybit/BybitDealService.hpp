@@ -28,7 +28,7 @@ class BybitDealService : public DealService
                            const bybit::OrderCategory &category,
                            const bybit::OrderOperation &operation,
                            const bybit::OrderType &type,
-                           int quantity);
+                           double quantity);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -45,9 +45,13 @@ class BybitDealService : public DealService
         : DealService(host, apiKey, secretKey, recvWindow, ExchangerType::BYBIT)
     {}
 
-    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
-    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+
+    std::vector<AssetBalance> getBalances() override;
+
+    std::optional<AssetBalance> getBalance(const std::string &asset) override;
 };
 
 #endif

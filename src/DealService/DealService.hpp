@@ -1,13 +1,16 @@
 #ifndef DEAL_SERVICE_H
 #define DEAL_SERVICE_H
 
+#include "AssetBalance.hpp"
 #include "ExchangerType.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 
+#include <optional>
 #include <string>
+#include <vector>
 
 class DealService
 {
@@ -32,9 +35,13 @@ class DealService
           secretKey(secretKey), exchangerType(exchangerType)
     {}
 
-    virtual bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) = 0;
+    virtual bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
 
-    virtual bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) = 0;
+    virtual bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+
+    virtual std::vector<AssetBalance> getBalances() = 0;
+
+    virtual std::optional<AssetBalance> getBalance(const std::string &asset) = 0;
 
     ExchangerType getExchangerType() const;
 

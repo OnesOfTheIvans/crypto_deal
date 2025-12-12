@@ -5,6 +5,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/json.hpp>
 
 #include <chrono>
 
@@ -14,5 +15,7 @@ namespace http = beast::http;
 namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
 using msec = std::chrono::milliseconds::rep;
+
+namespace json = boost::json;
 
 #endif

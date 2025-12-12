@@ -22,11 +22,15 @@ class BinanceDealService : public DealService
                             const std::string &quoteAsset,
                             const binance::OrderOperation &operation,
                             const binance::OrderType &type,
-                            int quantity);
+                            double quantity);
+
+    std::string createInfoQuery();
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
     bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
+
+    std::vector<AssetBalance> parseBalances(const std::string &response);
 
   public:
     BinanceDealService(const std::string &host,
@@ -36,9 +40,13 @@ class BinanceDealService : public DealService
         : DealService(host, apiKey, secretKey, recvWindow, ExchangerType::BINANCE)
     {}
 
-    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
-    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, int quantity) override;
+    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+
+    std::vector<AssetBalance> getBalances() override;
+
+    std::optional<AssetBalance> getBalance(const std::string &asset) override;
 };
 
 #endif

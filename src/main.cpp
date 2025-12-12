@@ -38,7 +38,7 @@ void testOperations(DealService *dealService, const std::string &title)
 
     std::string baseAsset = "USDC";
     std::string quoteAsset = "USDT";
-    int quantity = 100;
+    double quantity = 100;
     bool success = dealService->buyCrypto(baseAsset, quoteAsset, quantity);
     if (success)
     {
