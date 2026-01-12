@@ -12,9 +12,11 @@
 std::string binanceHost;
 std::string binanceApiKey;
 std::string binanceSecretKey;
+std::string binanceWebsocketHost;
 std::string bybitHost;
 std::string bybitApiKey;
 std::string bybitSecretKey;
+std::string bybitWebsocketHost;
 
 void initConfigVariables()
 {
@@ -23,9 +25,11 @@ void initConfigVariables()
     binanceHost = pt.get<std::string>("API.BINANCE_HOST");
     binanceApiKey = pt.get<std::string>("API.BINANCE_API_KEY");
     binanceSecretKey = pt.get<std::string>("API.BINANCE_SECRET_KEY");
+    binanceWebsocketHost = pt.get<std::string>("API.BINANCE_WEBSOCKET_HOST");
     bybitHost = pt.get<std::string>("API.BYBIT_HOST");
     bybitApiKey = pt.get<std::string>("API.BYBIT_API_KEY");
     bybitSecretKey = pt.get<std::string>("API.BYBIT_SECRET_KEY");
+    bybitWebsocketHost = pt.get<std::string>("API.BYBIT_WEBSOCKET_HOST");
 }
 
 void testOperations(DealService *dealService, const std::string &title)
@@ -71,12 +75,13 @@ int main()
 {
     initConfigVariables();
     DealService *dealService;
-    dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
+    dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey, binanceWebsocketHost);
     testOperations(dealService, "BINANCE");
 
     delete dealService;
 
-    dealService = new BybitDealService(bybitHost, bybitApiKey, bybitSecretKey);
+    // Passing empty string for WS host for Bybit as it's not configured yet
+    dealService = new BybitDealService(bybitHost, bybitApiKey, bybitSecretKey, bybitWebsocketHost);
     testOperations(dealService, "BYBIT");
 
     delete dealService;

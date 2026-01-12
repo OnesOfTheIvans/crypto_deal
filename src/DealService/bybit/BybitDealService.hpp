@@ -11,6 +11,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
+#include <boost/json.hpp>
 
 #include <chrono>
 #include <string>
@@ -21,6 +22,15 @@ template <typename K, typename V> using flat_map = boost::container::flat_map<K,
 class BybitDealService : public DealService
 {
   private:
+    mutable std::mutex balanceMutex;
+    flat_map<std::string, AssetBalance> balances;
+
+    double parseAmount(const boost::json::object &jsonObject, const char *key);
+
+    AssetBalance parseBalance(const boost::json::object &coinObject);
+
+    void updateBalanceCache(const std::string &asset, double free, double locked);
+
     msec getTimestamp();
 
     std::string createBody(const std::string &baseAsset,
@@ -37,21 +47,26 @@ class BybitDealService : public DealService
 
     bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
+    void handleWalletStreamMessage(const std::string &msg);
+
   public:
     BybitDealService(const std::string &host,
                      const std::string &apiKey,
                      const std::string &secretKey,
+                     const std::string &websocketHost,
                      const int recvWindow = 5000)
-        : DealService(host, apiKey, secretKey, recvWindow, ExchangerType::BYBIT)
+        : DealService(host, apiKey, secretKey, websocketHost, recvWindow, ExchangerType::BYBIT)
     {}
 
     bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
     bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
-    std::vector<AssetBalance> getBalances() override;
+    flat_map<std::string, AssetBalance> getBalances() const override;
 
-    std::optional<AssetBalance> getBalance(const std::string &asset) override;
+    std::optional<AssetBalance> getBalance(const std::string &asset) const override;
+
+    void startWalletStream();
 };
 
 #endif

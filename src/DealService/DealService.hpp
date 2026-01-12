@@ -7,10 +7,13 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/container/flat_map.hpp>
 
 #include <optional>
 #include <string>
 #include <vector>
+
+template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
 class DealService
 {
@@ -21,6 +24,7 @@ class DealService
     std::string host;
     std::string apiKey;
     std::string secretKey;
+    std::string websocketHost;
     ExchangerType exchangerType;
 
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
@@ -29,19 +33,20 @@ class DealService
     DealService(std::string host,
                 std::string apiKey,
                 std::string secretKey,
+                std::string websocketHost,
                 int recvWindow,
                 ExchangerType exchangerType)
         : ioc(), ctx(boost::asio::ssl::context::tls_client), recvWindow(recvWindow), host(host), apiKey(apiKey),
-          secretKey(secretKey), exchangerType(exchangerType)
+          secretKey(secretKey), websocketHost(websocketHost), exchangerType(exchangerType)
     {}
 
     virtual bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
 
     virtual bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
 
-    virtual std::vector<AssetBalance> getBalances() = 0;
+    virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 
-    virtual std::optional<AssetBalance> getBalance(const std::string &asset) = 0;
+    virtual std::optional<AssetBalance> getBalance(const std::string &asset) const = 0;
 
     ExchangerType getExchangerType() const;
 

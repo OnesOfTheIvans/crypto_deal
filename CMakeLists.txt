@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.28)
 
 project(CryptoDeal)
 
@@ -15,7 +15,7 @@ endif()
 add_compile_definitions(CONFIG_FILE="${CMAKE_SOURCE_DIR}/config.ini")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-find_package(Boost REQUIRED COMPONENTS system filesystem thread)
+find_package(Boost REQUIRED COMPONENTS system filesystem thread json)
 find_package(OpenSSL REQUIRED)
 find_package(GTest REQUIRED)
 
