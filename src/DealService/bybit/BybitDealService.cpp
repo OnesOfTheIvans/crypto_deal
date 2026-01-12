@@ -120,14 +120,18 @@ void BybitDealService::handleWalletStreamMessage(const string &msg)
     json::object &root = jsonValue.as_object();
 
     auto *topicValue = root.if_contains("topic");
-    if (!topicValue || !topicValue->is_string())
+    if (!topicValue)
     {
-        throw runtime_error("Bybit stream: missing or invalid 'topic' field");
+        return;
     }
+    if (!topicValue->is_string())
+    {
+        throw runtime_error("Bybit stream: 'topic' field is not a string");
+    }
+
     if (topicValue->as_string() != "wallet")
     {
-        const json::string &topic = topicValue->as_string();
-        throw runtime_error("Bybit stream: unexpected topic: " + string(topic.c_str(), topic.size()));
+        return;
     }
 
     auto *dataValue = root.if_contains("data");

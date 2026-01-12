@@ -135,9 +135,14 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
     json::object &rootObject = jsonValue.as_object();
 
     auto *eventTypeValue = rootObject.if_contains("event");
-    if (!eventTypeValue || !eventTypeValue->is_object())
+    if (!eventTypeValue)
     {
-        throw runtime_error("User stream message missing or invalid 'event' field");
+        return;
+    }
+
+    if (!eventTypeValue->is_object())
+    {
+        throw runtime_error("User stream message has invalid 'event' field (not an object)");
     }
 
     json::object &eventObject = eventTypeValue->as_object();
@@ -151,7 +156,7 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
     const json::string &eventType = eventTypeNameValue->as_string();
     if (eventType != "outboundAccountPosition")
     {
-        throw runtime_error("Unexpected event type: " + string(eventType.c_str(), eventType.size()));
+        return;
     }
 
     auto *balancesArrayValue = eventObject.if_contains("B");
