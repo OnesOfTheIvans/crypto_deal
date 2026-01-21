@@ -18,6 +18,7 @@
 
 using msec = std::chrono::milliseconds::rep;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
+namespace json = boost::json;
 
 class BybitDealService : public DealService
 {
@@ -39,6 +40,12 @@ class BybitDealService : public DealService
                            const bybit::OrderOperation &operation,
                            const bybit::OrderType &type,
                            double quantity);
+
+    OrderInfo createOrderInfo(const json::object &result,
+                              const PlaceOrderRequest &request,
+                              const std::string &side,
+                              const std::string &type,
+                              msec timestamp);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -62,11 +69,15 @@ class BybitDealService : public DealService
 
     bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
+    OrderInfo placeOrder(const PlaceOrderRequest &request) override;
+
     flat_map<std::string, AssetBalance> getBalances() const override;
 
     std::optional<AssetBalance> getBalance(const std::string &asset) const override;
 
-    void startWalletStream();
+    void startUserStream() override;
+
+    void stopUserStream() override;
 };
 
 #endif

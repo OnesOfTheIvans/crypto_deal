@@ -166,43 +166,70 @@ void BybitDealService::handleWalletStreamMessage(const string &msg)
     }
 }
 
-void BybitDealService::startWalletStream()
+void BybitDealService::startUserStream()
 {
-    const string ws_port = "443";
-    const string ws_target = "/v5/private";
-
-    tcp::resolver resolver(ioc);
-    auto results = resolver.resolve(websocketHost, ws_port);
-
-    beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
-    beast::get_lowest_layer(tls).connect(results);
-    tls.handshake(ssl::stream_base::client);
-
-    ws::stream<beast::ssl_stream<beast::tcp_stream>> socket(move(tls));
-    socket.set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
-    socket.handshake(websocketHost, ws_target);
-
-    const long long expires = getTimestamp() + 1000;
-    const string payload = "GET/realtime" + to_string(expires);
-    const string sig = hmac_sha256(secretKey, payload);
-
-    json::object auth;
-    auth["op"] = "auth";
-    auth["args"] = json::array{apiKey, expires, sig};
-    socket.write(net::buffer(json::serialize(auth)));
-
-    json::object sub;
-    sub["op"] = "subscribe";
-    sub["args"] = json::array{"wallet"};
-    socket.write(net::buffer(json::serialize(sub)));
-
-    while (true)
+    if (userStream)
     {
-        beast::flat_buffer buffer;
-        socket.read(buffer);
+        return;
+    }
+    userStream = true;
 
-        const string msg = beast::buffers_to_string(buffer.data());
-        handleWalletStreamMessage(msg);
+    runner = std::thread(
+        [this]()
+        {
+            try
+            {
+                const string wsPort = "443";
+                const string wsTarget = "/v5/private";
+
+                tcp::resolver resolver(ioc);
+                auto results = resolver.resolve(websocketHost, wsPort);
+
+                beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
+                beast::get_lowest_layer(tls).connect(results);
+                tls.handshake(ssl::stream_base::client);
+
+                ws::stream<beast::ssl_stream<beast::tcp_stream>> socket(move(tls));
+                socket.set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
+                socket.handshake(websocketHost, wsTarget);
+
+                const long long expires = getTimestamp() + 1000;
+                const string payload = "GET/realtime" + to_string(expires);
+                const string sig = hmac_sha256(secretKey, payload);
+
+                json::object auth;
+                auth["op"] = "auth";
+                auth["args"] = json::array{apiKey, expires, sig};
+                socket.write(net::buffer(json::serialize(auth)));
+
+                json::object sub;
+                sub["op"] = "subscribe";
+                sub["args"] = json::array{"wallet"};
+                socket.write(net::buffer(json::serialize(sub)));
+
+                while (userStream)
+                {
+                    beast::flat_buffer buffer;
+                    socket.read(buffer);
+
+                    const string msg = beast::buffers_to_string(buffer.data());
+                    handleWalletStreamMessage(msg);
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cerr << "Bybit stream error: " << e.what() << std::endl;
+                userStream = false;
+            }
+        });
+}
+
+void BybitDealService::stopUserStream()
+{
+    userStream = false;
+    if (runner.joinable())
+    {
+        runner.join();
     }
 }
 
@@ -237,6 +264,174 @@ bool BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAs
     string signature = getSignature(body, timestamp);
     flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
     return sendOrder(body, headers);
+}
+
+OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
+{
+    if (request.symbol.empty())
+    {
+        throw runtime_error("Symbol cannot be empty");
+    }
+    if (request.quantity <= 0)
+    {
+        throw runtime_error("Quantity must be greater than 0");
+    }
+    if (request.side != "BUY" && request.side != "SELL")
+    {
+        throw runtime_error("Invalid side: " + request.side);
+    }
+    if (request.type != "MARKET" && request.type != "LIMIT")
+    {
+        throw runtime_error("Invalid type: " + request.type);
+    }
+    if (request.type == "LIMIT")
+    {
+        if (!request.price.has_value() || *request.price <= 0)
+        {
+            throw runtime_error("Price must be > 0 for LIMIT orders");
+        }
+        if (!request.timeInForce.has_value() || request.timeInForce->empty())
+        {
+            throw runtime_error("TimeInForce required for LIMIT orders");
+        }
+    }
+
+    string side = (request.side == "BUY") ? "Buy" : "Sell";
+    string type = (request.type == "MARKET") ? "Market" : "Limit";
+    string category = request.category;
+    if (category.empty())
+    {
+        category = "spot";
+    }
+
+    json::object body;
+    body["category"] = category;
+    body["symbol"] = request.symbol;
+    body["side"] = side;
+    body["orderType"] = type;
+    body["qty"] = to_string(request.quantity);
+
+    if (request.type == "LIMIT")
+    {
+        body["price"] = to_string(*request.price);
+        body["timeInForce"] = *request.timeInForce;
+    }
+
+    if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
+    {
+        body["orderLinkId"] = *request.clientOrderId;
+    }
+
+    string bodyStr = json::serialize(body);
+
+    msec timestamp = getTimestamp();
+    string signature = getSignature(bodyStr, timestamp);
+    auto headers = createHeaders(apiKey, signature, timestamp);
+    string target = "/v5/order/create";
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::post);
+    context.setRequestHeaders(headers);
+    context.setRequestBody(bodyStr);
+
+    string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value jsonValue = json::parse(response, ec);
+    if (ec)
+    {
+        throw runtime_error("JSON parse error: " + ec.message());
+    }
+    if (!jsonValue.is_object())
+    {
+        throw runtime_error("Response is not a JSON object");
+    }
+
+    json::object &obj = jsonValue.as_object();
+
+    int retCode = -1;
+    if (obj.contains("retCode") && obj.at("retCode").is_number())
+    {
+        retCode = obj.at("retCode").as_int64();
+    }
+
+    if (retCode != 0)
+    {
+        string msg = "Unknown Error";
+        if (obj.contains("retMsg") && obj.at("retMsg").is_string())
+        {
+            msg = obj.at("retMsg").as_string().c_str();
+        }
+        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + msg);
+    }
+
+    if (!obj.contains("result") || !obj.at("result").is_object())
+    {
+        throw runtime_error("Missing result object in response");
+    }
+
+    json::object &result = obj.at("result").as_object();
+
+    return createOrderInfo(result, request, side, type, timestamp);
+}
+
+OrderInfo BybitDealService::createOrderInfo(const json::object &result,
+                                            const PlaceOrderRequest &request,
+                                            const std::string &side,
+                                            const std::string &type,
+                                            msec timestamp)
+{
+    OrderInfo info;
+    info.symbol = request.symbol;
+
+    if (request.category.empty())
+    {
+        info.category = "spot";
+    }
+    else
+    {
+        info.category = request.category;
+    }
+
+    if (result.contains("orderId") && result.at("orderId").is_string())
+    {
+        info.orderId = result.at("orderId").as_string().c_str();
+    }
+    else
+    {
+        throw runtime_error("Missing orderId in response");
+    }
+
+    if (result.contains("orderLinkId") && result.at("orderLinkId").is_string())
+    {
+        info.clientOrderId = result.at("orderLinkId").as_string().c_str();
+    }
+
+    info.side = side;
+    info.type = type;
+
+    info.status = "New";
+
+    if (request.timeInForce.has_value())
+    {
+        info.timeInForce = *request.timeInForce;
+    }
+
+    if (request.price.has_value())
+    {
+        info.price = *request.price;
+    }
+
+    info.origQty = request.quantity;
+    info.leavesQty = request.quantity;
+
+    info.executedQty = 0.0;
+    info.cumQuoteQty = 0.0;
+    info.avgPrice = 0.0;
+
+    info.createdTimeMs = timestamp;
+    info.updatedTimeMs = timestamp;
+
+    return info;
 }
 
 flat_map<string, AssetBalance> BybitDealService::getBalances() const

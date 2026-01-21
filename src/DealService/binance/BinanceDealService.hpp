@@ -5,6 +5,7 @@
 #include "ExchangerType.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
+#include "common/OrderInfo.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -42,6 +43,8 @@ class BinanceDealService : public DealService
 
     std::string buildUserStreamSubscribeRequestJson();
 
+    OrderInfo createOrderInfo(const json::object &obj);
+
   public:
     BinanceDealService(const std::string &host,
                        const std::string &apiKey,
@@ -59,7 +62,11 @@ class BinanceDealService : public DealService
 
     std::optional<AssetBalance> getBalance(const std::string &asset) const override;
 
-    void startUserStream();
+    void startUserStream() override;
+
+    OrderInfo placeOrder(const PlaceOrderRequest &request) override;
+
+    void stopUserStream() override;
 };
 
 #endif

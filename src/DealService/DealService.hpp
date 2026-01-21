@@ -3,6 +3,8 @@
 
 #include "AssetBalance.hpp"
 #include "ExchangerType.hpp"
+#include "common/OrderInfo.hpp"
+#include "common/PlaceOrderRequest.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -12,6 +14,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <thread>
+#include <atomic>
 
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
@@ -26,6 +30,8 @@ class DealService
     std::string secretKey;
     std::string websocketHost;
     ExchangerType exchangerType;
+    std::atomic<bool> userStream;
+    std::thread runner;
 
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
 
@@ -37,7 +43,7 @@ class DealService
                 int recvWindow,
                 ExchangerType exchangerType)
         : ioc(), ctx(boost::asio::ssl::context::tls_client), recvWindow(recvWindow), host(host), apiKey(apiKey),
-          secretKey(secretKey), websocketHost(websocketHost), exchangerType(exchangerType)
+          secretKey(secretKey), websocketHost(websocketHost), exchangerType(exchangerType), userStream(false)
     {}
 
     virtual bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
@@ -47,6 +53,12 @@ class DealService
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 
     virtual std::optional<AssetBalance> getBalance(const std::string &asset) const = 0;
+
+    virtual void startUserStream() = 0;
+
+    virtual void stopUserStream() = 0;
+
+    virtual OrderInfo placeOrder(const PlaceOrderRequest &request) = 0;
 
     ExchangerType getExchangerType() const;
 
