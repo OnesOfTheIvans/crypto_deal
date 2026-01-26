@@ -5,13 +5,20 @@
 #include "ExchangerType.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
+#include "OrderType.hpp"
 #include "common/OrderInfo.hpp"
+#include "common/SymbolInfo.hpp"
+#include "common/OcoInfo.hpp"
+#include "common/PlaceOcoRequest.hpp"
+#include "common/OrderListQuery.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
+
+#include "common/OrderQuery.hpp"
 
 #include <mutex>
 #include <string>
@@ -45,6 +52,14 @@ class BinanceDealService : public DealService
 
     OrderInfo createOrderInfo(const json::object &obj);
 
+    SymbolInfo createSymbolInfo(const json::object &symbolObject);
+
+    std::string buildOcoQuery(const PlaceOcoRequest& request, long long timestamp);
+
+    std::string buildOcoCancelQuery(const OrderListQuery& request, long long timestamp);
+    
+    OcoInfo createOcoInfo(const json::object& object);
+
   public:
     BinanceDealService(const std::string &host,
                        const std::string &apiKey,
@@ -65,6 +80,16 @@ class BinanceDealService : public DealService
     void startUserStream() override;
 
     OrderInfo placeOrder(const PlaceOrderRequest &request) override;
+
+    OrderInfo cancelOrder(const OrderQuery &request) override;
+
+    OrderInfo getOrder(const OrderQuery &request) override;
+
+    SymbolInfo getSymbolInfo(const std::string& symbol, const std::string& category = "spot") override;
+
+    OcoInfo placeOco(const PlaceOcoRequest& request) override;
+
+    OcoInfo cancelOco(const OrderListQuery& request) override;
 
     void stopUserStream() override;
 };
