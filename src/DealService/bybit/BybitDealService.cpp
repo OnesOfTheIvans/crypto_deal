@@ -877,12 +877,13 @@ SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, co
     return info;
 }
 
-OcoInfo BybitDealService::placeOco(const PlaceOcoRequest& request)
+OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
-    throw runtime_error("Bybit placeOco: not supported via API (emulate: place two orders and cancel the other on fill via websocket)");
+    throw runtime_error(
+        "Bybit placeOco: not supported via API (emulate: place two orders and cancel the other on fill via websocket)");
 }
 
-OcoInfo BybitDealService::cancelOco(const OrderListQuery& request)
+OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
 {
     throw runtime_error("Bybit cancelOco: not supported via API");
 }

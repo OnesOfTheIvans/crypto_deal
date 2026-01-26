@@ -10,5 +10,4 @@ struct AssetBalance
     double locked;
 };
 
-
 #endif

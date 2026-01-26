@@ -6,10 +6,10 @@
 #include "OrderCategory.hpp"
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
-#include "common/SymbolInfo.hpp"
 #include "common/OcoInfo.hpp"
-#include "common/PlaceOcoRequest.hpp"
 #include "common/OrderListQuery.hpp"
+#include "common/PlaceOcoRequest.hpp"
+#include "common/SymbolInfo.hpp"
 
 #include "common/OrderQuery.hpp"
 
@@ -53,9 +53,7 @@ class BybitDealService : public DealService
                               const std::string &type,
                               msec timestamp);
 
-    OrderInfo createOrderInfo(const json::object &result,
-                              const OrderQuery &request,
-                              msec timestamp);
+    OrderInfo createOrderInfo(const json::object &result, const OrderQuery &request, msec timestamp);
 
     OrderInfo createDetailedOrderInfo(const json::object &orderObj,
                                       const OrderQuery &request,
@@ -87,16 +85,16 @@ class BybitDealService : public DealService
     bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
     OrderInfo placeOrder(const PlaceOrderRequest &request) override;
-    
+
     OrderInfo cancelOrder(const OrderQuery &request) override;
 
     OrderInfo getOrder(const OrderQuery &request) override;
 
-    SymbolInfo getSymbolInfo(const std::string& symbol, const std::string& category = "spot") override;
+    SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") override;
 
-    OcoInfo placeOco(const PlaceOcoRequest& request) override;
+    OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
-    OcoInfo cancelOco(const OrderListQuery& request) override;
+    OcoInfo cancelOco(const OrderListQuery &request) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 

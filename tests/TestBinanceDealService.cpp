@@ -1,0 +1,140 @@
+#include "../src/DealService/binance/BinanceDealService.hpp"
+#include "../src/DealService/common/OrderInfo.hpp"
+#include "MockHttpRequest.hpp"
+#include <gtest/gtest.h>
+
+class BinanceDealServiceTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        MockNetwork::instance().reset();
+    }
+
+    BinanceDealService createService()
+    {
+        return BinanceDealService("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    }
+};
+
+TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
+{
+    auto service = createService();
+
+    std::string responseJson = R"({
+        "symbol": "BTCUSDT",
+        "orderId": 2831923,
+        "orderListId": -1,
+        "clientOrderId": "iso_cancel_test",
+        "transactTime": 1507725176595,
+        "price": "50000.00000000",
+        "origQty": "1.00000000",
+        "executedQty": "0.00000000",
+        "cummulativeQuoteQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "workingTime": 1507725176595,
+        "selfTradePreventionMode": "NONE"
+    })";
+
+    MockNetwork::instance().setResponse("/api/v3/order/test", "{}");
+    MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "BUY";
+    req.type = "LIMIT";
+    req.quantity = 1.0;
+    req.price = 50000.0;
+    req.timeInForce = "GTC";
+
+    OrderInfo info = service.placeOrder(req);
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "2831923");
+    EXPECT_EQ(info.status, "NEW");
+    EXPECT_EQ(info.side, "BUY");
+    EXPECT_EQ(info.type, "LIMIT");
+    EXPECT_DOUBLE_EQ(info.price, 50000.0);
+    EXPECT_DOUBLE_EQ(info.origQty, 1.0);
+}
+
+TEST_F(BinanceDealServiceTest, CancelOrder_Success)
+{
+    auto service = createService();
+
+    std::string responseJson = R"({
+        "symbol": "BTCUSDT",
+        "origClientOrderId": "my_order_1",
+        "orderId": 12345,
+        "orderListId": -1,
+        "clientOrderId": "cancel_req_1",
+        "price": "55000.00000000",
+        "origQty": "0.50000000",
+        "executedQty": "0.00000000",
+        "cummulativeQuoteQty": "0.00000000",
+        "status": "CANCELED",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "SELL"
+    })";
+
+    MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "12345";
+
+    OrderInfo info = service.cancelOrder(query);
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "12345");
+    EXPECT_EQ(info.status, "CANCELED");
+}
+
+TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
+{
+    auto service = createService();
+
+    std::string responseJson = R"({
+        "symbols": [{
+            "symbol": "ETHUSDT",
+            "status": "TRADING",
+            "baseAsset": "ETH",
+            "baseAssetPrecision": 8,
+            "quoteAsset": "USDT",
+            "quotePrecision": 8,
+            "filters": [
+                {
+                    "filterType": "PRICE_FILTER",
+                    "minPrice": "0.01000000",
+                    "maxPrice": "1000000.00000000",
+                    "tickSize": "0.01000000"
+                },
+                {
+                    "filterType": "LOT_SIZE",
+                    "minQty": "0.00010000",
+                    "maxQty": "9000.00000000",
+                    "stepSize": "0.00010000"
+                },
+                {
+                    "filterType": "MIN_NOTIONAL",
+                    "minNotional": "10.00000000"
+                }
+            ]
+        }]
+    })";
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", responseJson);
+
+    SymbolInfo info = service.getSymbolInfo("ETHUSDT");
+
+    EXPECT_EQ(info.symbol, "ETHUSDT");
+    EXPECT_EQ(info.baseAsset, "ETH");
+    EXPECT_EQ(info.quoteAsset, "USDT");
+    EXPECT_DOUBLE_EQ(info.minPrice, 0.01);
+    EXPECT_DOUBLE_EQ(info.minQty, 0.0001);
+    EXPECT_DOUBLE_EQ(info.minNotional, 10.0);
+}

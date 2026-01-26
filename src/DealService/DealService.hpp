@@ -3,25 +3,24 @@
 
 #include "AssetBalance.hpp"
 #include "ExchangerType.hpp"
-#include "common/OrderInfo.hpp"
-#include "common/OrderInfo.hpp"
-#include "common/PlaceOrderRequest.hpp"
-#include "common/OrderQuery.hpp"
-#include "common/SymbolInfo.hpp"
-#include "common/PlaceOcoRequest.hpp"
 #include "common/OcoInfo.hpp"
+#include "common/OrderInfo.hpp"
 #include "common/OrderListQuery.hpp"
+#include "common/OrderQuery.hpp"
+#include "common/PlaceOcoRequest.hpp"
+#include "common/PlaceOrderRequest.hpp"
+#include "common/SymbolInfo.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
 
+#include <atomic>
 #include <optional>
 #include <string>
-#include <vector>
 #include <thread>
-#include <atomic>
+#include <vector>
 
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
@@ -70,11 +69,11 @@ class DealService
 
     virtual OrderInfo getOrder(const OrderQuery &request) = 0;
 
-    virtual SymbolInfo getSymbolInfo(const std::string& symbol, const std::string& category = "spot") = 0;
+    virtual SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") = 0;
 
-    virtual OcoInfo placeOco(const PlaceOcoRequest& request) = 0;
+    virtual OcoInfo placeOco(const PlaceOcoRequest &request) = 0;
 
-    virtual OcoInfo cancelOco(const OrderListQuery& request) = 0;
+    virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
 
     ExchangerType getExchangerType() const;
 

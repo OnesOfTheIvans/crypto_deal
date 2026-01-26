@@ -1,8 +1,8 @@
 #ifndef ORDER_QUERY_H
 #define ORDER_QUERY_H
 
-#include <string>
 #include <optional>
+#include <string>
 
 struct OrderQuery
 {
