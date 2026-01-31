@@ -1,6 +1,7 @@
 #include "BybitDealService.hpp"
 #include "common/EnumStringConverter.hpp"
 #include "common/http_request.hpp"
+#include <cstdlib>
 
 #include <sstream>
 // DEBUG
@@ -104,68 +105,6 @@ AssetBalance BybitDealService::parseBalance(const json::object &coinObject)
     return AssetBalance{asset, free, locked};
 }
 
-void BybitDealService::handleWalletStreamMessage(const string &msg)
-{
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(msg, ec);
-    if (ec)
-    {
-        throw runtime_error("Bybit stream: JSON parse error: " + ec.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Bybit stream: message is not an object");
-    }
-
-    json::object &root = jsonValue.as_object();
-
-    auto *topicValue = root.if_contains("topic");
-    if (!topicValue)
-    {
-        return;
-    }
-    if (!topicValue->is_string())
-    {
-        throw runtime_error("Bybit stream: 'topic' field is not a string");
-    }
-
-    if (topicValue->as_string() != "wallet")
-    {
-        return;
-    }
-
-    auto *dataValue = root.if_contains("data");
-    if (!dataValue || !dataValue->is_array())
-    {
-        throw runtime_error("Bybit wallet stream: missing or invalid 'data' field");
-    }
-
-    json::array &dataArray = dataValue->as_array();
-    for (json::value &itemValue : dataArray)
-    {
-        if (itemValue.is_object())
-        {
-            json::object &itemObject = itemValue.as_object();
-
-            auto *coinValue = itemObject.if_contains("coin");
-            if (coinValue && coinValue->is_array())
-            {
-                json::array &coins = coinValue->as_array();
-                for (json::value &coinItem : coins)
-                {
-                    if (coinItem.is_object())
-                    {
-                        json::object &coinObject = coinItem.as_object();
-
-                        AssetBalance balance = parseBalance(coinObject);
-                        updateBalanceCache(balance.asset, balance.free, balance.locked);
-                    }
-                }
-            }
-        }
-    }
-}
-
 void BybitDealService::startUserStream()
 {
     if (userStream)
@@ -174,7 +113,7 @@ void BybitDealService::startUserStream()
     }
     userStream = true;
 
-    runner = std::thread(
+    runner = thread(
         [this]()
         {
             try
@@ -204,21 +143,48 @@ void BybitDealService::startUserStream()
 
                 json::object sub;
                 sub["op"] = "subscribe";
-                sub["args"] = json::array{"wallet"};
+                sub["args"] = json::array{"wallet", "order"};
                 socket.write(net::buffer(json::serialize(sub)));
 
-                while (userStream)
                 {
                     beast::flat_buffer buffer;
                     socket.read(buffer);
+                    string msg = beast::buffers_to_string(buffer.data());
+                    boost::system::error_code ec;
+                    json::value val = json::parse(msg, ec);
+                    if (!ec && val.is_object())
+                    {
+                        json::object &root = val.as_object();
+                        if (root.contains("op") && root.at("op").as_string() == "auth")
+                        {
+                            if (!root.contains("success") || !root.at("success").as_bool())
+                            {
+                                throw runtime_error("Bybit stream: auth failed: " + msg);
+                            }
+                        }
+                    }
+                }
 
-                    const string msg = beast::buffers_to_string(buffer.data());
-                    handleWalletStreamMessage(msg);
+                while (userStream)
+                {
+                    try
+                    {
+                        beast::flat_buffer buffer;
+                        socket.read(buffer);
+
+                        const string msg = beast::buffers_to_string(buffer.data());
+                        handleUserStreamMessage(msg);
+                    }
+                    catch (const exception &e)
+                    {
+                        cerr << "Bybit stream read loop error: " << e.what() << endl;
+                        // Continue loop
+                    }
                 }
             }
-            catch (const std::exception &e)
+            catch (const exception &e)
             {
-                std::cerr << "Bybit stream error: " << e.what() << std::endl;
+                cerr << "Bybit stream error: " << e.what() << endl;
                 userStream = false;
             }
         });
@@ -320,6 +286,19 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
     if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
     {
         body["orderLinkId"] = *request.clientOrderId;
+    }
+
+    if (request.triggerPrice.has_value() && !request.triggerPrice->empty())
+    {
+        body["triggerPrice"] = *request.triggerPrice;
+    }
+    if (request.orderFilter.has_value() && !request.orderFilter->empty())
+    {
+        body["orderFilter"] = *request.orderFilter;
+    }
+    if (request.marketUnit.has_value() && !request.marketUnit->empty())
+    {
+        body["marketUnit"] = *request.marketUnit;
     }
 
     string bodyStr = json::serialize(body);
@@ -591,8 +570,8 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result, const Or
 
 OrderInfo BybitDealService::createOrderInfo(const json::object &result,
                                             const PlaceOrderRequest &request,
-                                            const std::string &side,
-                                            const std::string &type,
+                                            const string &side,
+                                            const string &type,
                                             msec timestamp)
 {
     OrderInfo info;
@@ -649,7 +628,7 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result,
     return info;
 }
 
-SymbolInfo BybitDealService::getSymbolInfo(const std::string &symbol, const std::string &category)
+SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &category)
 {
     if (symbol.empty())
     {
@@ -721,7 +700,7 @@ SymbolInfo BybitDealService::getSymbolInfo(const std::string &symbol, const std:
 
 OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj,
                                                     const OrderQuery &request,
-                                                    const std::string &category,
+                                                    const string &category,
                                                     msec timestamp)
 {
     OrderInfo info;
@@ -819,7 +798,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
     return info;
 }
 
-SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, const std::string &symbol)
+SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, const string &symbol)
 {
     SymbolInfo info;
     info.symbol = symbol;
@@ -877,15 +856,296 @@ SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, co
     return info;
 }
 
+namespace {
+    bool isTerminalStatus(const string &status)
+    {
+        return status == "Filled" || status == "Cancelled" || status == "Rejected" || status == "Deactivated" ||
+               status == "Triggered";
+    }
+}
+
 OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
-    throw runtime_error(
-        "Bybit placeOco: not supported via API (emulate: place two orders and cancel the other on fill via websocket)");
+    if (request.symbol.empty())
+    {
+        throw runtime_error("Symbol cannot be empty");
+    }
+    if (request.quantity <= 0)
+    {
+        throw runtime_error("Quantity must be greater than 0");
+    }
+    if (request.price <= 0)
+    {
+        throw runtime_error("Price must be greater than 0");
+    }
+    if (request.stopPrice <= 0)
+    {
+        throw runtime_error("StopPrice must be greater than 0");
+    }
+    if (request.side != "BUY" && request.side != "SELL")
+    {
+        throw runtime_error("Invalid side: " + request.side);
+    }
+    if (request.stopLimitPrice.has_value() && *request.stopLimitPrice <= 0)
+    {
+        throw runtime_error("StopLimitPrice must be greater than 0 if set");
+    }
+
+    string groupId;
+    if (request.listClientOrderId.has_value() && !request.listClientOrderId->empty())
+    {
+        groupId = *request.listClientOrderId;
+    }
+    else
+    {
+        msec now = getTimestamp();
+        int randomSuffix = rand() % 10000;
+        groupId = "OCO_" + to_string(now) + "_" + to_string(randomSuffix);
+    }
+
+    string takeProfitOrderLinkId = groupId + "_TP";
+    string stopLossOrderLinkId = groupId + "_SL";
+    if (takeProfitOrderLinkId.length() > 36)
+    {
+        takeProfitOrderLinkId = takeProfitOrderLinkId.substr(0, 36);
+    }
+    if (stopLossOrderLinkId.length() > 36)
+    {
+        stopLossOrderLinkId = stopLossOrderLinkId.substr(0, 36);
+    }
+
+    PlaceOrderRequest takeProfitRequest;
+    takeProfitRequest.symbol = request.symbol;
+    takeProfitRequest.side = request.side;
+    takeProfitRequest.type = "LIMIT";
+    takeProfitRequest.quantity = request.quantity;
+    takeProfitRequest.price = request.price;
+    takeProfitRequest.timeInForce = "GTC";
+    takeProfitRequest.clientOrderId = takeProfitOrderLinkId;
+    takeProfitRequest.category = "spot";
+
+    OrderInfo takeProfitOrderInfo;
+    try
+    {
+        takeProfitOrderInfo = placeOrder(takeProfitRequest);
+    }
+    catch (const exception &e)
+    {
+        throw runtime_error("Bybit placeOco: failed to place TP leg: " + string(e.what()));
+    }
+
+    PlaceOrderRequest stopLossRequest;
+    stopLossRequest.symbol = request.symbol;
+    stopLossRequest.side = request.side;
+    stopLossRequest.category = "spot";
+    stopLossRequest.clientOrderId = stopLossOrderLinkId;
+    stopLossRequest.quantity = request.quantity;
+
+    stopLossRequest.orderFilter = "StopOrder";
+    stopLossRequest.triggerPrice = to_string(request.stopPrice);
+
+    if (request.stopLimitPrice.has_value())
+    {
+        stopLossRequest.type = "LIMIT";
+        stopLossRequest.price = *request.stopLimitPrice;
+        stopLossRequest.timeInForce = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : "GTC";
+    }
+    else
+    {
+        stopLossRequest.type = "MARKET";
+        stopLossRequest.marketUnit = "baseCoin";
+    }
+
+    OrderInfo stopLossOrderInfo;
+    try
+    {
+        stopLossOrderInfo = placeOrder(stopLossRequest);
+    }
+    catch (const exception &e)
+    {
+        string rollbackError;
+        try
+        {
+            OrderQuery rollbackQuery;
+            rollbackQuery.symbol = request.symbol;
+            rollbackQuery.clientOrderId = takeProfitOrderLinkId;
+            cancelOrder(rollbackQuery);
+        }
+        catch (const exception &rollbackEx)
+        {
+            rollbackError = "; Rollback failed: " + string(rollbackEx.what());
+        }
+        throw runtime_error("Bybit placeOco: failed to place SL leg: " + string(e.what()) + rollbackError);
+    }
+
+    {
+        lock_guard<mutex> lock(ocoMutex);
+
+        BybitOcoGroup group;
+        group.groupId = groupId;
+
+        group.takeProfit.symbol = request.symbol;
+        group.takeProfit.orderId = takeProfitOrderInfo.orderId;
+        group.takeProfit.clientOrderId = takeProfitOrderLinkId;
+        group.takeProfit.category = "spot";
+
+        group.stopLeg.symbol = request.symbol;
+        group.stopLeg.orderId = stopLossOrderInfo.orderId;
+        group.stopLeg.clientOrderId = stopLossOrderLinkId;
+        group.stopLeg.category = "spot";
+
+        group.tpOrderLinkId = takeProfitOrderLinkId;
+        group.slOrderLinkId = stopLossOrderLinkId;
+
+        ocoGroups[groupId] = group;
+        ocoLegToGroup[takeProfitOrderLinkId] = groupId;
+        ocoLegToGroup[stopLossOrderLinkId] = groupId;
+    }
+
+    OcoInfo ocoInfo;
+    ocoInfo.orderListId = groupId;
+    ocoInfo.listClientOrderId = groupId;
+    ocoInfo.transactTimeMs = takeProfitOrderInfo.createdTimeMs;
+    ocoInfo.orders.push_back(takeProfitOrderInfo);
+    ocoInfo.orders.push_back(stopLossOrderInfo);
+
+    return ocoInfo;
 }
 
 OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
 {
-    throw runtime_error("Bybit cancelOco: not supported via API");
+    string groupId;
+    if (request.orderListId.has_value())
+    {
+        groupId = *request.orderListId;
+    }
+    else if (request.listClientOrderId.has_value())
+    {
+        groupId = *request.listClientOrderId;
+    }
+    else
+    {
+        throw runtime_error("Bybit cancelOco: missing orderListId or listClientOrderId");
+    }
+
+    BybitOcoGroup ocoGroup;
+    bool found = false;
+
+    {
+        lock_guard<mutex> lock(ocoMutex);
+        auto it = ocoGroups.find(groupId);
+        if (it != ocoGroups.end())
+        {
+            ocoGroup = it->second;
+            found = true;
+        }
+    }
+
+    if (!found)
+    {
+        throw runtime_error("Bybit cancelOco: unknown group params");
+    }
+
+    OrderInfo takeProfitCancelInfo, stopLossCancelInfo;
+    bool tpTerminal = false;
+    bool slTerminal = false;
+    string errorMsg;
+
+    try
+    {
+        takeProfitCancelInfo = cancelOrder(ocoGroup.takeProfit);
+        tpTerminal = true;
+    }
+    catch (const exception &e)
+    {
+        try
+        {
+            OrderInfo check = getOrder(ocoGroup.takeProfit);
+            takeProfitCancelInfo = check;
+            if (isTerminalStatus(check.status))
+            {
+                tpTerminal = true;
+            }
+            else
+            {
+                errorMsg += "TP cancel failed and not terminal: " + string(e.what()) + "; ";
+            }
+        }
+        catch (...)
+        {
+            errorMsg += "TP cancel failed and status check failed: " + string(e.what()) + "; ";
+        }
+
+        if (!tpTerminal)
+        {
+            takeProfitCancelInfo.status = "ERROR";
+            takeProfitCancelInfo.symbol = ocoGroup.takeProfit.symbol;
+            if (ocoGroup.takeProfit.orderId)
+            {
+                takeProfitCancelInfo.orderId = *ocoGroup.takeProfit.orderId;
+            }
+        }
+    }
+
+    try
+    {
+        stopLossCancelInfo = cancelOrder(ocoGroup.stopLeg);
+        slTerminal = true;
+    }
+    catch (const exception &e)
+    {
+        try
+        {
+            OrderInfo check = getOrder(ocoGroup.stopLeg);
+            stopLossCancelInfo = check;
+            if (isTerminalStatus(check.status))
+            {
+                slTerminal = true;
+            }
+            else
+            {
+                errorMsg += "SL cancel failed and not terminal: " + string(e.what()) + "; ";
+            }
+        }
+        catch (...)
+        {
+            errorMsg += "SL cancel failed and status check failed: " + string(e.what()) + "; ";
+        }
+
+        if (!slTerminal)
+        {
+            stopLossCancelInfo.status = "ERROR";
+            stopLossCancelInfo.symbol = ocoGroup.stopLeg.symbol;
+            if (ocoGroup.stopLeg.orderId)
+            {
+                stopLossCancelInfo.orderId = *ocoGroup.stopLeg.orderId;
+            }
+        }
+    }
+
+    if (tpTerminal && slTerminal)
+    {
+        lock_guard<mutex> lock(ocoMutex);
+        auto it = ocoGroups.find(groupId);
+        if (it != ocoGroups.end())
+        {
+            ocoLegToGroup.erase(ocoGroup.tpOrderLinkId);
+            ocoLegToGroup.erase(ocoGroup.slOrderLinkId);
+            ocoGroups.erase(it);
+        }
+    }
+    else
+    {
+        throw runtime_error("Bybit cancelOco incomplete: " + errorMsg);
+    }
+
+    OcoInfo ocoCancelResult;
+    ocoCancelResult.orderListId = groupId;
+    ocoCancelResult.listClientOrderId = groupId;
+    ocoCancelResult.orders.push_back(takeProfitCancelInfo);
+    ocoCancelResult.orders.push_back(stopLossCancelInfo);
+
+    return ocoCancelResult;
 }
 
 flat_map<string, AssetBalance> BybitDealService::getBalances() const
@@ -905,4 +1165,198 @@ optional<AssetBalance> BybitDealService::getBalance(const string &asset) const
     }
 
     return it->second;
+}
+
+void BybitDealService::handleUserStreamMessage(const string &msg)
+{
+    try
+    {
+        boost::system::error_code ec;
+        json::value jsonValue = json::parse(msg, ec);
+        if (ec)
+        {
+            cerr << "Bybit stream: JSON parse error: " << ec.message() << endl;
+            return;
+        }
+        if (!jsonValue.is_object())
+        {
+            return;
+        }
+
+        json::object &root = jsonValue.as_object();
+
+        auto *topicValue = root.if_contains("topic");
+        if (!topicValue || !topicValue->is_string())
+        {
+            return;
+        }
+
+        string topic = topicValue->as_string().c_str();
+
+        if (topic == "wallet")
+        {
+            handleWalletUpdate(root);
+        }
+        else if (topic == "order")
+        {
+            handleOrderUpdate(root);
+        }
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit stream internal error: " << e.what() << endl;
+    }
+}
+
+void BybitDealService::handleWalletUpdate(const json::object &root)
+{
+    auto *dataValue = root.if_contains("data");
+    if (dataValue && dataValue->is_array())
+    {
+        const json::array &dataArray = dataValue->as_array();
+        for (const json::value &itemValue : dataArray)
+        {
+            if (itemValue.is_object())
+            {
+                const json::object &itemObject = itemValue.as_object();
+                auto *coinValue = itemObject.if_contains("coin");
+                if (coinValue && coinValue->is_array())
+                {
+                    const json::array &coins = coinValue->as_array();
+                    for (const json::value &coinItem : coins)
+                    {
+                        if (coinItem.is_object())
+                        {
+                            try
+                            {
+                                AssetBalance balance = parseBalance(coinItem.as_object());
+                                updateBalanceCache(balance.asset, balance.free, balance.locked);
+                            }
+                            catch (const exception &e)
+                            {
+                                cerr << "Bybit stream wallet parsing error: " << e.what() << endl;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void BybitDealService::handleOrderUpdate(const json::object &root)
+{
+    auto *dataValue = root.if_contains("data");
+    if (dataValue && dataValue->is_array())
+    {
+        const json::array &dataArray = dataValue->as_array();
+        for (const json::value &itemValue : dataArray)
+        {
+            if (itemValue.is_object())
+            {
+                const json::object &order = itemValue.as_object();
+                string status;
+                if (order.contains("orderStatus"))
+                {
+                    status = order.at("orderStatus").as_string().c_str();
+                }
+
+                if (status == "Filled")
+                {
+                    string orderLinkId;
+                    if (order.contains("orderLinkId"))
+                    {
+                        orderLinkId = order.at("orderLinkId").as_string().c_str();
+                    }
+
+                    if (!orderLinkId.empty())
+                    {
+                        processOcoUpdate(orderLinkId);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void BybitDealService::processOcoUpdate(const string &orderLinkId)
+{
+    string groupId;
+    OrderQuery otherLegQuery;
+    bool shouldCancel = false;
+
+    {
+        lock_guard<mutex> lock(ocoMutex);
+        auto legIt = ocoLegToGroup.find(orderLinkId);
+        if (legIt != ocoLegToGroup.end())
+        {
+            groupId = legIt->second;
+            auto groupIt = ocoGroups.find(groupId);
+            if (groupIt != ocoGroups.end())
+            {
+                BybitOcoGroup &group = groupIt->second;
+                if (!group.closing)
+                {
+                    group.closing = true;
+                    shouldCancel = true;
+                    if (orderLinkId == group.tpOrderLinkId)
+                    {
+                        otherLegQuery = group.stopLeg;
+                    }
+                    else
+                    {
+                        otherLegQuery = group.takeProfit;
+                    }
+                }
+            }
+        }
+    }
+
+    if (shouldCancel)
+    {
+        bool cancellationSuccessfulOrTerminal = false;
+        string cancelError;
+        try
+        {
+            cancelOrder(otherLegQuery);
+            cancellationSuccessfulOrTerminal = true;
+        }
+        catch (const exception &e)
+        {
+            cancelError = e.what();
+            try
+            {
+                OrderInfo info = getOrder(otherLegQuery);
+                if (isTerminalStatus(info.status))
+                {
+                    cancellationSuccessfulOrTerminal = true;
+                }
+            }
+            catch (const exception &statusEx)
+            {
+                cancelError += "; Status check failed: " + string(statusEx.what());
+            }
+            catch (...)
+            {
+                cancelError += "; Status check failed: Unknown error";
+            }
+        }
+
+        lock_guard<mutex> lock(ocoMutex);
+        auto groupIt = ocoGroups.find(groupId);
+        if (groupIt != ocoGroups.end())
+        {
+            if (cancellationSuccessfulOrTerminal)
+            {
+                ocoLegToGroup.erase(groupIt->second.tpOrderLinkId);
+                ocoLegToGroup.erase(groupIt->second.slOrderLinkId);
+                ocoGroups.erase(groupIt);
+            }
+            else
+            {
+                groupIt->second.closing = false;
+                groupIt->second.lastError = cancelError;
+            }
+        }
+    }
 }

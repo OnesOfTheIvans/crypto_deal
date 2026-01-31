@@ -1,7 +1,6 @@
 #include "../src/DealService/common/HttpRequestContext.hpp"
 #include <iostream>
 
-
 void HttpRequestContext::prepareRequest(const http::verb &type)
 {
     request.method(type);

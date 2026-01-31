@@ -16,6 +16,10 @@ struct PlaceOrderRequest
     std::optional<std::string> clientOrderId;
 
     std::string category = "spot"; // Bybit uses it; Binance ignores
+
+    std::optional<std::string> triggerPrice;
+    std::optional<std::string> orderFilter;
+    std::optional<std::string> marketUnit;
 };
 
 #endif

@@ -113,3 +113,32 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
     EXPECT_DOUBLE_EQ(info.tickSize, 0.01);
     EXPECT_DOUBLE_EQ(info.stepSize, 0.0001);
 }
+
+TEST_F(BybitDealServiceTest, PlaceOco_Success)
+{
+    auto service = createService();
+
+    std::string responseJson = R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "OCO_LEG_ID",
+            "orderLinkId": "OCO_LEG_LINK_ID"
+        }
+    })";
+
+    MockNetwork::instance().setResponse("/v5/order/create", responseJson);
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "BUY";
+    req.quantity = 0.5;
+    req.price = 45000.0;
+    req.stopPrice = 40000.0;
+    req.stopLimitPrice = 39900.0;
+
+    OcoInfo info = service.placeOco(req);
+
+
+    EXPECT_EQ(info.orders.size(), 2);
+}

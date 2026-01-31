@@ -32,6 +32,21 @@ class BybitDealService : public DealService
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
 
+    struct BybitOcoGroup
+    {
+        std::string groupId;
+        OrderQuery takeProfit;
+        OrderQuery stopLeg;
+        std::string tpOrderLinkId;
+        std::string slOrderLinkId;
+        bool closing = false;
+        std::string lastError;
+    };
+
+    mutable std::mutex ocoMutex;
+    flat_map<std::string, BybitOcoGroup> ocoGroups;
+    flat_map<std::string, std::string> ocoLegToGroup;
+
     double parseAmount(const boost::json::object &jsonObject, const char *key);
 
     AssetBalance parseBalance(const boost::json::object &coinObject);
@@ -69,7 +84,11 @@ class BybitDealService : public DealService
 
     bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
-    void handleWalletStreamMessage(const std::string &msg);
+    void handleUserStreamMessage(const std::string &msg);
+
+    void handleWalletUpdate(const boost::json::object &root);
+    void handleOrderUpdate(const boost::json::object &root);
+    void processOcoUpdate(const std::string &orderLinkId);
 
   public:
     BybitDealService(const std::string &host,
