@@ -136,5 +136,47 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.quoteAsset, "USDT");
     EXPECT_DOUBLE_EQ(info.minPrice, 0.01);
     EXPECT_DOUBLE_EQ(info.minQty, 0.0001);
+    EXPECT_DOUBLE_EQ(info.minQty, 0.0001);
     EXPECT_DOUBLE_EQ(info.minNotional, 10.0);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
+{
+    auto service = createService();
+    PlaceOrderRequest req;
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error); // Empty symbol
+
+    req.symbol = "ETHUSDT";
+    req.quantity = 0;
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
+{
+    auto service = createService();
+    std::string errorJson = R"({
+        "code": -1102,
+        "msg": "Mandatory parameter 'timeInForce' was not sent, was empty/null, or malformed."
+    })";
+    
+    MockNetwork::instance().setResponse("/api/v3/order", errorJson);
+
+    PlaceOrderRequest req;
+    req.symbol = "ETHUSDT";
+    req.side = "BUY";
+    req.type = "LIMIT";
+    req.quantity = 1.0;
+    req.price = 2000;
+    req.timeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
+{
+    auto service = createService();
+    std::string emptyResponse = "{}"; 
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", emptyResponse);
+    
+    EXPECT_THROW(service.getSymbolInfo("UNKNOWN"), std::runtime_error);
 }

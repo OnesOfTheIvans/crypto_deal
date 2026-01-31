@@ -142,3 +142,108 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
 
     EXPECT_EQ(info.orders.size(), 2);
 }
+
+TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
+{
+    auto service = createService();
+    PlaceOrderRequest req;
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+
+    req.symbol = "BTCUSDT";
+    req.quantity = -1.0;
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
+{
+    auto service = createService();
+    std::string errorJson = R"({
+        "retCode": 10001,
+        "retMsg": "Params Error"
+    })";
+    MockNetwork::instance().setResponse("/v5/order/create", errorJson);
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "BUY";
+    req.type = "LIMIT";
+    req.quantity = 0.1;
+    req.price = 50000;
+    
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, CancelOrder_ApiError)
+{
+    auto service = createService();
+    std::string errorJson = R"({
+        "retCode": 20002,
+        "retMsg": "Order not found"
+    })";
+    MockNetwork::instance().setResponse("/v5/order/cancel", errorJson);
+
+    OrderQuery q;
+    q.symbol = "BTCUSDT";
+    q.orderId = "999";
+    EXPECT_THROW(service.cancelOrder(q), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
+{
+    auto service = createService();
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "HOLD"; // Invalid
+    req.quantity = 1;
+    req.price = 100;
+    req.stopPrice = 90;
+    
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+
+    req.side = "BUY";
+    req.stopLimitPrice = -50.0;
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
+{
+    auto service = createService();
+
+    std::string tpSuccess = R"({
+        "retCode": 0,
+        "result": { "orderId": "TP_ID", "orderLinkId": "TP_LINK" }
+    })";
+    
+    std::string slFailure = R"({
+        "retCode": 10002,
+        "retMsg": "Invalid Price"
+    })";
+
+    std::string rollbackSuccess = R"({
+        "retCode": 0,
+        "result": { "orderId": "TP_ID" }
+    })";
+
+    MockNetwork::instance().setResponse("/v5/order/create", tpSuccess); // TP
+    MockNetwork::instance().setResponse("/v5/order/create", slFailure); // SL
+    MockNetwork::instance().setResponse("/v5/order/cancel", rollbackSuccess); // Rollback
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "SELL";
+    req.quantity = 0.5;
+    req.price = 60000;
+    req.stopPrice = 55000;
+
+    try
+    {
+        service.placeOco(req);
+        FAIL() << "Expected placeOco to throw";
+    }
+    catch (const std::runtime_error &e)
+    {
+        std::string msg = e.what();
+        EXPECT_TRUE(msg.find("failed to place SL leg") != std::string::npos);
+        EXPECT_TRUE(msg.find("Rollback failed") == std::string::npos);
+    }
+}

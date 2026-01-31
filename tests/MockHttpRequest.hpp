@@ -24,7 +24,7 @@ class MockNetwork
 
     void setResponse(const std::string &targetSubstring, const std::string &response)
     {
-        responses[targetSubstring] = response;
+        responses[targetSubstring].push(response);
     }
 
     void setDefaultResponse(const std::string &response)
@@ -34,10 +34,18 @@ class MockNetwork
 
     std::string getResponse(const std::string &target)
     {
-        for (const auto &[key, resp] : responses)
+        for (auto &[key, queue] : responses)
         {
             if (target.find(key) != std::string::npos)
             {
+                if (queue.empty())
+                {
+                    return defaultResponse;
+                }
+                std::string resp = queue.front();
+                if (queue.size() > 1) {
+                    queue.pop();
+                }
                 return resp;
             }
         }
@@ -45,7 +53,7 @@ class MockNetwork
     }
 
   private:
-    std::map<std::string, std::string> responses;
+    std::map<std::string, std::queue<std::string>> responses;
     std::string defaultResponse = "{}";
 };
 
