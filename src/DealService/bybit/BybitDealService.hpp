@@ -40,6 +40,17 @@ class BybitDealService : public DealService
     std::map<std::string, SymbolInfo> symbolInfoCache;
     std::mutex symbolInfoMutex;
 
+    using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
+    std::mutex userWebsocketMutex;
+    std::shared_ptr<WebsocketStream> userWebsocketStream;
+
+    StreamStatus streamStatus = StreamStatus::STOPPED;
+    std::string streamLastError;
+    mutable std::mutex streamStatusMutex;
+
+    long long serverTimeOffset = 0;
+    bool timeSynced = false;
+
     struct BybitOcoGroup
     {
         std::string groupId;
@@ -99,19 +110,9 @@ class BybitDealService : public DealService
     void handleOrderUpdate(const boost::json::object &root);
     void processOcoUpdate(const std::string &orderLinkId);
 
-    using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
-    std::mutex userWebsocketMutex;
-    std::shared_ptr<WebsocketStream> userWebsocketStream;
-
-    StreamStatus streamStatus = StreamStatus::STOPPED;
-    std::string streamLastError;
-    mutable std::mutex streamStatusMutex;
-
     void setStreamStatus(StreamStatus status);
     void setStreamError(const std::string &error);
 
-    long long serverTimeOffset = 0;
-    bool timeSynced = false;
     long long getServerTime();
     void syncTime();
     long long getTimestamp();
@@ -169,6 +170,8 @@ class BybitDealService : public DealService
     std::string getUserStreamLastError() const override;
 
     bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
+
+    flat_map<std::string, AssetBalance> getBalancesRest() override;
 };
 
 #endif

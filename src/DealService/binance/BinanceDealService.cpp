@@ -21,7 +21,7 @@ string BinanceDealService::createQuery(const string &baseAsset,
                                        double quantity,
                                        double stepSize)
 {
-    const std::string qtyStr = DealUtils::formatByStep(quantity, stepSize);
+    const string qtyStr = DealUtils::formatByStep(quantity, stepSize);
     DealUtils::verifyNoScientificNotation(qtyStr);
 
     auto timestamp = chrono::system_clock::now();
@@ -47,7 +47,7 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
 
 bool BinanceDealService::binanceResponseOk(const string &response, string *errOut)
 {
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (ec)
     {
@@ -175,7 +175,7 @@ void BinanceDealService::updateBalanceCache(const string &asset, double free, do
 
 void BinanceDealService::handleUserStreamMessage(const string &msg)
 {
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value jsonValue = json::parse(msg, ec);
     if (ec)
     {
@@ -278,7 +278,7 @@ long long BinanceDealService::getServerTime()
     context.prepareRequest(http::verb::get);
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (!ec && val.is_object())
     {
@@ -333,6 +333,16 @@ void BinanceDealService::startUserStream()
     {
         return;
     }
+
+    try
+    {
+        getBalancesRest();
+    }
+    catch (const exception &e)
+    {
+        cerr << "Binance REST balances seed failed (continuing): " << e.what() << endl;
+    }
+
     userStream = true;
     setStreamStatus(StreamStatus::CONNECTING);
 
@@ -371,7 +381,7 @@ void BinanceDealService::startUserStream()
                     sharedWebsocketStream->read(buffer);
                     string msg = beast::buffers_to_string(buffer.data());
 
-                    boost::system::error_code ec;
+                    beast::error_code ec;
                     json::value val = json::parse(msg, ec);
                     bool ok = false;
                     if (!ec && val.is_object())
@@ -400,7 +410,7 @@ void BinanceDealService::startUserStream()
                     try
                     {
                         beast::flat_buffer buffer;
-                        boost::system::error_code errorCode;
+                        beast::error_code errorCode;
 
                         sharedWebsocketStream->read(buffer, errorCode);
 
@@ -411,7 +421,7 @@ void BinanceDealService::startUserStream()
                                 cout << "User stream stopped gracefully." << endl;
                                 break;
                             }
-                            if (errorCode == boost::asio::error::operation_aborted)
+                            if (errorCode == net::error::operation_aborted)
                             {
                                 break;
                             }
@@ -463,7 +473,7 @@ void BinanceDealService::stopUserStream()
     if (sharedWebsocketStream)
     {
         cout << "Forcing socket closure to unblock read..." << endl;
-        boost::system::error_code ec;
+        beast::error_code ec;
         // Close the lowest layer (TCP socket) to force read to return error
         beast::get_lowest_layer(*sharedWebsocketStream).socket().close(ec);
         if (ec)
@@ -495,7 +505,7 @@ double BinanceDealService::getTickerPrice(const string &symbol)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (!ec && val.is_object())
     {
@@ -647,7 +657,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value jsonValue = json::parse(response, ec);
     if (ec)
     {
@@ -707,7 +717,7 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value jsonValue = json::parse(response, ec);
     if (ec)
     {
@@ -767,7 +777,7 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value jsonValue = json::parse(response, ec);
     if (ec)
     {
@@ -958,38 +968,56 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 
 string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
 {
-    ostringstream queryStringStream;
-    queryStringStream << "symbol=" << request.symbol << "&side=" << request.side << "&quantity=" << request.quantity
-                      << "&price=" << request.price << "&stopPrice=" << request.stopPrice;
-
-    if (request.stopLimitPrice.has_value())
+    if (request.symbol.empty())
     {
-        queryStringStream << "&stopLimitPrice=" << *request.stopLimitPrice;
+        throw runtime_error("Binance placeOco: symbol cannot be empty");
+    }
+    if (request.side.empty())
+    {
+        throw runtime_error("Binance placeOco: side cannot be empty");
+    }
+    if (request.quantity <= 0.0)
+    {
+        throw runtime_error("Binance placeOco: quantity must be > 0");
+    }
+    if (request.price <= 0.0)
+    {
+        throw runtime_error("Binance placeOco: price must be > 0");
+    }
+    if (request.stopPrice <= 0.0)
+    {
+        throw runtime_error("Binance placeOco: stopPrice must be > 0");
     }
 
-    if (request.stopLimitTimeInForce.has_value())
-    {
-        queryStringStream << "&stopLimitTimeInForce=" << *request.stopLimitTimeInForce;
-    }
+    const double belowPrice = request.stopLimitPrice.has_value() ? *request.stopLimitPrice : request.stopPrice;
+    const string belowTif = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : string("GTC");
+
+    ostringstream qs;
+    qs << "symbol=" << request.symbol << "&side=" << request.side << "&quantity=" << request.quantity
+
+       << "&aboveType=LIMIT_MAKER" << "&abovePrice=" << request.price
+
+       << "&belowType=STOP_LOSS_LIMIT" << "&belowStopPrice=" << request.stopPrice << "&belowPrice=" << belowPrice
+       << "&belowTimeInForce=" << belowTif;
 
     if (request.listClientOrderId.has_value())
     {
-        queryStringStream << "&listClientOrderId=" << *request.listClientOrderId;
+        qs << "&listClientOrderId=" << *request.listClientOrderId;
     }
 
     if (request.limitClientOrderId.has_value())
     {
-        queryStringStream << "&limitClientOrderId=" << *request.limitClientOrderId;
+        qs << "&aboveClientOrderId=" << *request.limitClientOrderId;
     }
 
     if (request.stopClientOrderId.has_value())
     {
-        queryStringStream << "&stopClientOrderId=" << *request.stopClientOrderId;
+        qs << "&belowClientOrderId=" << *request.stopClientOrderId;
     }
 
-    queryStringStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
+    qs << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
 
-    return queryStringStream.str();
+    return qs.str();
 }
 
 string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, long long timestamp)
@@ -1277,33 +1305,33 @@ flat_map<string, AssetBalance> BinanceDealService::getBalances() const
     return balances;
 }
 
-bool BinanceDealService::cancelAllOpenOrders(const std::string &symbol, const std::string &category)
+bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &category)
 {
     (void)category;
 
     if (symbol.empty())
     {
-        throw std::runtime_error("Binance cancelAllOpenOrders: symbol cannot be empty");
+        throw runtime_error("Binance cancelAllOpenOrders: symbol cannot be empty");
     }
 
-    std::ostringstream qs;
+    ostringstream qs;
     qs << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
 
-    const std::string queryString = qs.str();
-    const std::string signature = hmac_sha256(secretKey, queryString);
-    const std::string target = "/api/v3/openOrders?" + queryString + "&signature=" + signature;
+    const string queryString = qs.str();
+    const string signature = hmac_sha256(secretKey, queryString);
+    const string target = "/api/v3/openOrders?" + queryString + "&signature=" + signature;
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 
-    const std::string response = httpsPost(context);
+    const string response = httpsPost(context);
 
     boost::system::error_code ec;
     json::value jsonValue = json::parse(response, ec);
     if (ec)
     {
-        throw std::runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + ec.message());
+        throw runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + ec.message());
     }
 
     if (jsonValue.is_object())
@@ -1312,8 +1340,14 @@ bool BinanceDealService::cancelAllOpenOrders(const std::string &symbol, const st
         if (obj.contains("code") && obj.contains("msg"))
         {
             long long code = obj.at("code").is_number() ? obj.at("code").as_int64() : 0;
-            std::string msg = obj.at("msg").is_string() ? std::string(obj.at("msg").as_string().c_str()) : "";
-            throw std::runtime_error("Binance Error " + std::to_string(code) + ": " + msg);
+            string msg = obj.at("msg").is_string() ? string(obj.at("msg").as_string().c_str()) : "";
+
+            if (code == -2011 || code == -2013)
+            {
+                return true;
+            }
+
+            throw runtime_error("Binance Error " + to_string(code) + ": " + msg);
         }
 
         return true;
@@ -1324,5 +1358,65 @@ bool BinanceDealService::cancelAllOpenOrders(const std::string &symbol, const st
         return true;
     }
 
-    throw std::runtime_error("Binance cancelAllOpenOrders: Unexpected response type");
+    throw runtime_error("Binance cancelAllOpenOrders: Unexpected response type");
+}
+
+flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
+{
+    ostringstream qs;
+    qs << "recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
+
+    const string queryString = qs.str();
+    const string signature = hmac_sha256(secretKey, queryString);
+    const string target = "/api/v3/account?" + queryString + "&signature=" + signature;
+
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+
+    const string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value jsonValue = json::parse(response, ec);
+    if (ec)
+    {
+        throw runtime_error("Binance getBalancesRest: JSON parse error: " + ec.message());
+    }
+    if (!jsonValue.is_object())
+    {
+        throw runtime_error("Binance getBalancesRest: Response is not a JSON object");
+    }
+
+    const json::object &obj = jsonValue.as_object();
+    if (obj.contains("code") && obj.contains("msg"))
+    {
+        long long code = obj.at("code").is_number() ? obj.at("code").as_int64() : 0;
+        string msg = obj.at("msg").is_string() ? string(obj.at("msg").as_string().c_str()) : "";
+        throw runtime_error("Binance Error " + to_string(code) + ": " + msg);
+    }
+
+    const auto it = obj.find("balances");
+    if (it == obj.end() || !it->value().is_array())
+    {
+        throw runtime_error("Binance getBalancesRest: Missing 'balances' array");
+    }
+
+    const json::array &arr = it->value().as_array();
+    for (const auto &v : arr)
+    {
+        if (v.is_object())
+        {
+            const json::object &bo = v.as_object();
+            if (bo.contains("asset") && bo.at("asset").is_string())
+            {
+                const string asset = string(bo.at("asset").as_string().c_str());
+                const double free = parseAmount(bo, "free");
+                const double locked = parseAmount(bo, "locked");
+
+                updateBalanceCache(asset, free, locked);
+            }
+        }
+    }
+
+    return getBalances();
 }

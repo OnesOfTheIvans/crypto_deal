@@ -71,9 +71,9 @@ static string normalizeOrderStatus(const string &status)
 
     for (unsigned char character : status)
     {
-        if (std::isalnum(character))
+        if (isalnum(character))
         {
-            normalized.push_back(static_cast<char>(std::tolower(character)));
+            normalized.push_back(static_cast<char>(tolower(character)));
         }
     }
 
@@ -100,17 +100,17 @@ static bool isOrderOpenForCancel(const OrderInfo &orderInfo)
     return statusAllowsCancel && (getRemainingQuantity(orderInfo) > 0.0);
 }
 
-static void cancelAllBeforeTests(DealService &dealService, const std::string &symbol, const std::string &category)
+static void cancelAllBeforeTests(DealService &dealService, const string &symbol, const string &category)
 {
     printTitle("CANCEL ALL OPEN ORDERS (PRE-TEST)");
     try
     {
         dealService.cancelAllOpenOrders(symbol, category);
-        std::cout << "cancelAllOpenOrders ok\n";
+        cout << "cancelAllOpenOrders ok\n";
     }
-    catch (const std::exception &e)
+    catch (const exception &e)
     {
-        std::cout << "cancelAllOpenOrders failed (continuing): " << e.what() << "\n";
+        cout << "cancelAllOpenOrders failed (continuing): " << e.what() << "\n";
     }
 }
 
@@ -254,9 +254,9 @@ static void testSimpleBuySellOperations(DealService &dealService)
 {
     printTitle("BUY");
 
-    const std::string baseAsset = "BTC";
-    const std::string quoteAsset = "USDT";
-    const std::string symbol = baseAsset + quoteAsset;
+    const string baseAsset = "BTC";
+    const string quoteAsset = "USDT";
+    const string symbol = baseAsset + quoteAsset;
 
     // Use only SymbolInfo fields (no getLastPrice(), no extra API assumptions).
     // Conservative fallback price for local minNotional -> qty conversion.
@@ -274,7 +274,7 @@ static void testSimpleBuySellOperations(DealService &dealService)
         // Ensure minNotional satisfied using fallback price + safety margin.
         const double requiredQtyByNotional = (minNotional * 1.10) / kFallbackPrice;
 
-        double targetQty = std::max(minQty, requiredQtyByNotional);
+        double targetQty = max(minQty, requiredQtyByNotional);
 
         // Round UP to step size to avoid "LOT_SIZE" rejections due to precision.
         if (info.stepSize > 0.0)
@@ -299,24 +299,22 @@ static void testSimpleBuySellOperations(DealService &dealService)
             quantity = (info.stepSize > 0.0) ? roundUpToStep(targetQty, info.stepSize) : targetQty;
         }
 
-        std::cout << "Calculated safe Market Qty: " << quantity << " (minNotional=" << minNotional
-                  << ", fallbackPrice=" << kFallbackPrice << ", step=" << info.stepSize << ", minQty=" << minQty
-                  << ")\n";
+        cout << "Calculated safe Market Qty: " << quantity << " (minNotional=" << minNotional
+             << ", fallbackPrice=" << kFallbackPrice << ", step=" << info.stepSize << ", minQty=" << minQty << ")\n";
     }
-    catch (const std::exception &e)
+    catch (const exception &e)
     {
-        std::cout << "Warning: getSymbolInfo failed; using default qty=" << quantity << ". Reason: " << e.what()
-                  << "\n";
+        cout << "Warning: getSymbolInfo failed; using default qty=" << quantity << ". Reason: " << e.what() << "\n";
     }
 
     try
     {
         const bool ok = dealService.buyCrypto(baseAsset, quoteAsset, quantity);
-        std::cout << (ok ? "Order succeed\n" : "Order failed\n");
+        cout << (ok ? "Order succeed\n" : "Order failed\n");
     }
-    catch (const std::exception &e)
+    catch (const exception &e)
     {
-        std::cout << "buyCrypto exception: " << e.what() << "\n";
+        cout << "buyCrypto exception: " << e.what() << "\n";
     }
 
     printTitle("SELL");
@@ -326,16 +324,16 @@ static void testSimpleBuySellOperations(DealService &dealService)
         const bool ok = dealService.sellCrypto(baseAsset, quoteAsset, quantity);
         if (ok)
         {
-            std::cout << "Order succeed\n";
+            cout << "Order succeed\n";
         }
         else
         {
-            std::cout << "Order failed (Expected if insufficient balance)\n";
+            cout << "Order failed (Expected if insufficient balance)\n";
         }
     }
-    catch (const std::exception &e)
+    catch (const exception &e)
     {
-        std::cout << "sellCrypto exception: " << e.what() << "\n";
+        cout << "sellCrypto exception: " << e.what() << "\n";
     }
 }
 
@@ -391,7 +389,7 @@ static void testAllOperations(DealService &dealService, const string &title)
         cancelAllBeforeTests(dealService, symbol, category);
         cout << "cancelAllOpenOrders ok\n";
     }
-    catch (const std::exception &e)
+    catch (const exception &e)
     {
         cout << "cancelAllOpenOrders failed: " << e.what() << "\n";
     }

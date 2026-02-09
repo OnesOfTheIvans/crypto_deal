@@ -62,8 +62,14 @@ class DealService
     virtual void startUserStream() = 0;
 
     virtual void stopUserStream() = 0;
-    
-    enum class StreamStatus { STOPPED, CONNECTING, CONNECTED, ERROR };
+
+    enum class StreamStatus
+    {
+        STOPPED,
+        CONNECTING,
+        CONNECTED,
+        ERROR
+    };
     virtual StreamStatus getUserStreamStatus() const = 0;
     virtual std::string getUserStreamLastError() const = 0;
 
@@ -80,6 +86,8 @@ class DealService
     virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
 
     virtual bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) = 0;
+
+    virtual flat_map<std::string, AssetBalance> getBalancesRest() = 0;
 
     ExchangerType getExchangerType() const;
 

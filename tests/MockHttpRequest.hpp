@@ -43,7 +43,8 @@ class MockNetwork
                     return defaultResponse;
                 }
                 std::string resp = queue.front();
-                if (queue.size() > 1) {
+                if (queue.size() > 1)
+                {
                     queue.pop();
                 }
                 return resp;

@@ -22,3 +22,9 @@ find_package(GTest REQUIRED)
 enable_testing()
 add_subdirectory(src)
 add_subdirectory(tests)
+
+option(BUILD_INTEGRATION_TESTS "Build real-exchange integration tests (no mocks, hits network)" OFF)
+
+if(BUILD_INTEGRATION_TESTS)
+    add_subdirectory(integration_tests EXCLUDE_FROM_ALL)
+endif()

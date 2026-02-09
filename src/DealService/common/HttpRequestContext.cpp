@@ -26,7 +26,7 @@ void HttpRequestContext::prepareRequest(const http::verb &type)
     request.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 }
 
-void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers)
+void HttpRequestContext::setRequestHeaders(const flat_map<string, string> &headers)
 {
     for (auto header : headers)
     {
@@ -34,7 +34,7 @@ void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std:
     }
 }
 
-void HttpRequestContext::setRequestBody(const std::string &body)
+void HttpRequestContext::setRequestBody(const string &body)
 {
     request.body() = body;
     request.prepare_payload();

@@ -139,7 +139,6 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
 
     OcoInfo info = service.placeOco(req);
 
-
     EXPECT_EQ(info.orders.size(), 2);
 }
 
@@ -169,7 +168,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
     req.type = "LIMIT";
     req.quantity = 0.1;
     req.price = 50000;
-    
+
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
@@ -197,7 +196,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
     req.quantity = 1;
     req.price = 100;
     req.stopPrice = 90;
-    
+
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 
     req.side = "BUY";
@@ -213,7 +212,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
         "retCode": 0,
         "result": { "orderId": "TP_ID", "orderLinkId": "TP_LINK" }
     })";
-    
+
     std::string slFailure = R"({
         "retCode": 10002,
         "retMsg": "Invalid Price"
@@ -224,8 +223,8 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
         "result": { "orderId": "TP_ID" }
     })";
 
-    MockNetwork::instance().setResponse("/v5/order/create", tpSuccess); // TP
-    MockNetwork::instance().setResponse("/v5/order/create", slFailure); // SL
+    MockNetwork::instance().setResponse("/v5/order/create", tpSuccess);       // TP
+    MockNetwork::instance().setResponse("/v5/order/create", slFailure);       // SL
     MockNetwork::instance().setResponse("/v5/order/cancel", rollbackSuccess); // Rollback
 
     PlaceOcoRequest req;

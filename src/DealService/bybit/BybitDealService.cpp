@@ -47,7 +47,7 @@ void BybitDealService::syncTime()
     context.prepareRequest(http::verb::get);
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (!ec && val.is_object())
     {
@@ -79,39 +79,38 @@ long long BybitDealService::getTimestamp()
     return localTime + serverTimeOffset;
 }
 
-void BybitDealService::refreshBalancesFromRest(const std::string &accountType,
-                                               const std::optional<std::string> &coinFilter)
+void BybitDealService::refreshBalancesFromRest(const string &accountType, const optional<string> &coinFilter)
 {
-    std::ostringstream queryStream;
+    ostringstream queryStream;
     queryStream << "accountType=" << accountType;
     if (coinFilter.has_value() && !coinFilter->empty())
     {
         queryStream << "&coin=" << *coinFilter;
     }
-    const std::string queryString = queryStream.str();
+    const string queryString = queryStream.str();
 
     const msec timestamp = getTimestamp();
-    const std::string signature = getSignature(queryString, timestamp);
+    const string signature = getSignature(queryString, timestamp);
     const auto headers = createHeaders(apiKey, signature, timestamp);
 
-    const std::string target = "/v5/account/wallet-balance?" + queryString;
+    const string target = "/v5/account/wallet-balance?" + queryString;
     HttpRequestContext requestContext(ioc, ctx, host, target);
     requestContext.prepareRequest(http::verb::get);
     requestContext.setRequestHeaders(headers);
 
-    const std::string response = httpsPost(requestContext);
+    const string response = httpsPost(requestContext);
 
-    std::string errorMessage;
+    string errorMessage;
     if (!bybitResponseOk(response, &errorMessage))
     {
-        throw std::runtime_error("Bybit wallet-balance failed: " + errorMessage);
+        throw runtime_error("Bybit wallet-balance failed: " + errorMessage);
     }
 
-    boost::system::error_code jsonError;
+    beast::error_code jsonError;
     json::value parsedValue = json::parse(response, jsonError);
     if (jsonError || !parsedValue.is_object())
     {
-        throw std::runtime_error("Bybit wallet-balance JSON parse error");
+        throw runtime_error("Bybit wallet-balance JSON parse error");
     }
 
     const json::object &rootObject = parsedValue.as_object();
@@ -158,7 +157,7 @@ void BybitDealService::refreshBalancesFromRest(const std::string &accountType,
                 continue;
             }
 
-            const std::string assetName = std::string(coinNameValue->as_string().c_str());
+            const string assetName = string(coinNameValue->as_string().c_str());
 
             const double walletBalance = parseAmount(coinObject, "walletBalance");
 
@@ -176,7 +175,7 @@ void BybitDealService::refreshBalancesFromRest(const std::string &accountType,
             }
             if (lockedAmount <= 0.0 && walletBalance > 0.0 && freeAmount > 0.0)
             {
-                lockedAmount = std::max(0.0, walletBalance - freeAmount);
+                lockedAmount = max(0.0, walletBalance - freeAmount);
             }
 
             updateBalanceCache(assetName, freeAmount, lockedAmount);
@@ -184,7 +183,7 @@ void BybitDealService::refreshBalancesFromRest(const std::string &accountType,
     }
 }
 
-void BybitDealService::ensureBalancesSeeded(const std::optional<std::string> &coinFilter)
+void BybitDealService::ensureBalancesSeeded(const optional<string> &coinFilter)
 {
     {
         lock_guard<mutex> lock(balanceMutex);
@@ -209,8 +208,10 @@ void BybitDealService::ensureBalancesSeeded(const std::optional<std::string> &co
     {
         refreshBalancesFromRest("UNIFIED", coinFilter);
     }
-    catch (const std::exception &)
-    {}
+    catch (const exception &e)
+    {
+        cerr << "Bybit balance REST seed (UNIFIED) failed: " << e.what() << endl;
+    }
 
     {
         lock_guard<mutex> lock(balanceMutex);
@@ -235,8 +236,10 @@ void BybitDealService::ensureBalancesSeeded(const std::optional<std::string> &co
     {
         refreshBalancesFromRest("SPOT", coinFilter);
     }
-    catch (const std::exception &)
-    {}
+    catch (const exception &e)
+    {
+        cerr << "Bybit balance REST seed (SPOT) failed: " << e.what() << endl;
+    }
 
     if (coinFilter.has_value() && !coinFilter->empty())
     {
@@ -248,26 +251,28 @@ void BybitDealService::ensureBalancesSeeded(const std::optional<std::string> &co
     }
 }
 
-void BybitDealService::ensureBalancesSeeded(const std::string &coinFilter)
+void BybitDealService::ensureBalancesSeeded(const string &coinFilter)
 {
-    ensureBalancesSeeded(std::optional<std::string>(coinFilter));
+    ensureBalancesSeeded(optional<string>(coinFilter));
 }
 
 bool BybitDealService::capMarketQtyByBalance(bool isBuy,
-                                             const std::string &baseAsset,
-                                             const std::string &quoteAsset,
+                                             const string &baseAsset,
+                                             const string &quoteAsset,
                                              const SymbolInfo &symbolInfo,
                                              double lastPrice,
                                              double &qtyInBase,
-                                             std::string &reason)
+                                             string &reason)
 {
     try
     {
         ensureBalancesSeeded(quoteAsset);
         ensureBalancesSeeded(baseAsset);
     }
-    catch (const std::exception &)
-    {}
+    catch (const exception &e)
+    {
+        cerr << "Bybit capMarketQtyByBalance: ensureBalancesSeeded failed (continuing): " << e.what() << endl;
+    }
 
     const double stepSize = symbolInfo.stepSize > 0.0 ? symbolInfo.stepSize : 0.0;
     const double minQty = symbolInfo.minQty > 0.0 ? symbolInfo.minQty : 0.0;
@@ -298,7 +303,7 @@ bool BybitDealService::capMarketQtyByBalance(bool isBuy,
         }
 
         const double maximumQtyByQuote = (quoteFree * 0.99) / price;
-        qtyInBase = std::min(qtyInBase, maximumQtyByQuote);
+        qtyInBase = min(qtyInBase, maximumQtyByQuote);
     }
     else
     {
@@ -311,12 +316,12 @@ bool BybitDealService::capMarketQtyByBalance(bool isBuy,
             return false;
         }
 
-        qtyInBase = std::min(qtyInBase, baseFree);
+        qtyInBase = min(qtyInBase, baseFree);
     }
 
     if (stepSize > 0.0)
     {
-        qtyInBase = std::floor(qtyInBase / stepSize) * stepSize;
+        qtyInBase = floor(qtyInBase / stepSize) * stepSize;
     }
 
     if (minQty > 0.0 && qtyInBase < minQty)
@@ -340,6 +345,16 @@ void BybitDealService::startUserStream()
     {
         return;
     }
+
+    try
+    {
+        getBalancesRest();
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit REST balances seed failed (continuing): " << e.what() << endl;
+    }
+
     userStream = true;
     setStreamStatus(StreamStatus::CONNECTING);
 
@@ -358,9 +373,9 @@ void BybitDealService::startUserStream()
 
                 if (!SSL_set_tlsext_host_name(tls.native_handle(), websocketHost.c_str()))
                 {
-                    throw boost::system::system_error(boost::system::error_code(static_cast<int>(::ERR_get_error()),
-                                                                                boost::asio::error::get_ssl_category()),
-                                                      "Bybit SSL_set_tlsext_host_name");
+                    throw beast::system_error(
+                        beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()),
+                        "Bybit SSL_set_tlsext_host_name");
                 }
 
                 beast::get_lowest_layer(tls).connect(results);
@@ -391,7 +406,7 @@ void BybitDealService::startUserStream()
                     sharedWebsocketStream->read(buffer);
                     string msg = beast::buffers_to_string(buffer.data());
 
-                    boost::system::error_code ec;
+                    beast::error_code ec;
                     json::value val = json::parse(msg, ec);
                     if (!ec && val.is_object())
                     {
@@ -423,30 +438,28 @@ void BybitDealService::startUserStream()
                 {
                     ensureBalancesSeeded();
                 }
-                catch (const std::exception &exception)
+                catch (const exception &exception)
                 {
                     cerr << "Bybit: initial balance seed failed: " << exception.what() << endl;
                 }
 
-                std::shared_ptr<WebsocketStream> websocketStreamCopy;
+                shared_ptr<WebsocketStream> websocketStreamCopy;
                 {
-                    std::lock_guard<std::mutex> lock(userWebsocketMutex);
+                    lock_guard<mutex> lock(userWebsocketMutex);
                     websocketStreamCopy = userWebsocketStream;
                 }
 
                 while (userStream)
                 {
-                    boost::beast::flat_buffer readBuffer;
-                    boost::system::error_code errorCode;
+                    beast::flat_buffer readBuffer;
+                    beast::error_code errorCode;
 
                     websocketStreamCopy->read(readBuffer, errorCode);
 
                     if (errorCode)
                     {
-                        if (!userStream || errorCode == boost::asio::error::operation_aborted ||
-                            errorCode == boost::asio::error::eof ||
-                            errorCode == boost::asio::ssl::error::stream_truncated ||
-                            errorCode == boost::beast::websocket::error::closed)
+                        if (!userStream || errorCode == net::error::operation_aborted || errorCode == net::error::eof ||
+                            errorCode == ssl::error::stream_truncated || errorCode == ws::error::closed)
                         {
                             break;
                         }
@@ -454,7 +467,7 @@ void BybitDealService::startUserStream()
                         continue;
                     }
 
-                    const std::string message = boost::beast::buffers_to_string(readBuffer.data());
+                    const string message = beast::buffers_to_string(readBuffer.data());
                     handleUserStreamMessage(message);
                 }
             }
@@ -487,7 +500,7 @@ string BybitDealService::createBody(const string &baseAsset,
                                     double quantity,
                                     double stepSize)
 {
-    const std::string qtyStr = DealUtils::formatByStep(quantity, stepSize);
+    const string qtyStr = DealUtils::formatByStep(quantity, stepSize);
     DealUtils::verifyNoScientificNotation(qtyStr);
 
     ostringstream body;
@@ -577,20 +590,20 @@ void BybitDealService::stopUserStream()
 {
     userStream = false;
 
-    std::shared_ptr<WebsocketStream> websocketStreamCopy;
+    shared_ptr<WebsocketStream> websocketStreamCopy;
     {
-        std::lock_guard<std::mutex> lock(userWebsocketMutex);
+        lock_guard<mutex> lock(userWebsocketMutex);
         websocketStreamCopy = userWebsocketStream;
     }
 
     if (websocketStreamCopy)
     {
-        boost::system::error_code errorCode;
+        beast::error_code errorCode;
         auto &lowestLayer = beast::get_lowest_layer(*websocketStreamCopy);
 
         lowestLayer.cancel();
 
-        lowestLayer.socket().shutdown(boost::asio::ip::tcp::socket::shutdown_both, errorCode);
+        lowestLayer.socket().shutdown(tcp::socket::shutdown_both, errorCode);
         lowestLayer.socket().close(errorCode);
     }
 
@@ -602,14 +615,14 @@ void BybitDealService::stopUserStream()
     setStreamStatus(StreamStatus::STOPPED);
 
     {
-        std::lock_guard<std::mutex> lock(userWebsocketMutex);
+        lock_guard<mutex> lock(userWebsocketMutex);
         userWebsocketStream.reset();
     }
 }
 
 bool BybitDealService::bybitResponseOk(const string &response, string *errOut)
 {
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (ec)
     {
@@ -686,7 +699,7 @@ double BybitDealService::getTickerPrice(const string &symbol)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
+    beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (!ec && val.is_object())
     {
@@ -738,15 +751,15 @@ bool BybitDealService::buyCrypto(const string &baseAsset, const string &quoteAss
         minimumQuantityForNotional = (minOrderAmount * 1.10) / lastPrice;
     }
 
-    double safeQuantity = std::max(quantity, minimumQuantityForNotional);
+    double safeQuantity = max(quantity, minimumQuantityForNotional);
     if (stepSize > 0.0)
     {
-        safeQuantity = std::ceil(safeQuantity / stepSize) * stepSize;
+        safeQuantity = ceil(safeQuantity / stepSize) * stepSize;
     }
 
     if (symbolInfo.stepSize > 0.0 && symbolInfo.minQty > 0.0)
     {
-        std::string reason;
+        string reason;
         double cappedQuantity = safeQuantity;
 
         if (!capMarketQtyByBalance(true, baseAsset, quoteAsset, symbolInfo, lastPrice, cappedQuantity, reason))
@@ -803,15 +816,15 @@ bool BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAs
         minimumQuantityForNotional = (minOrderAmount * 1.10) / lastPrice;
     }
 
-    double safeQuantity = std::max(quantity, minimumQuantityForNotional);
+    double safeQuantity = max(quantity, minimumQuantityForNotional);
     if (stepSize > 0.0)
     {
-        safeQuantity = std::ceil(safeQuantity / stepSize) * stepSize;
+        safeQuantity = ceil(safeQuantity / stepSize) * stepSize;
     }
 
     if (symbolInfo.stepSize > 0.0 && symbolInfo.minQty > 0.0)
     {
-        std::string reason;
+        string reason;
         double cappedQuantity = safeQuantity;
 
         if (!capMarketQtyByBalance(false, baseAsset, quoteAsset, symbolInfo, lastPrice, cappedQuantity, reason))
@@ -884,8 +897,8 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
     try
     {
         const bool isBuyOrder = (request.side == "BUY");
-        const std::string &baseAsset = info.baseAsset;
-        const std::string &quoteAsset = info.quoteAsset;
+        const string &baseAsset = info.baseAsset;
+        const string &quoteAsset = info.quoteAsset;
 
         if (isBuyOrder)
         {
@@ -921,15 +934,15 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
                 requiredQuoteAmount *= 1.01;
                 if (quoteFree < requiredQuoteAmount)
                 {
-                    std::ostringstream messageStream;
+                    ostringstream messageStream;
                     messageStream << "Insufficient balance: need ~" << requiredQuoteAmount << " " << quoteAsset
                                   << ", have " << quoteFree;
-                    throw std::runtime_error(messageStream.str());
+                    throw runtime_error(messageStream.str());
                 }
             }
             else if (quoteFree <= 0.0)
             {
-                throw std::runtime_error("Insufficient balance: no free " + quoteAsset);
+                throw runtime_error("Insufficient balance: no free " + quoteAsset);
             }
         }
         else
@@ -941,16 +954,16 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
             if (baseFree < request.quantity)
             {
-                std::ostringstream messageStream;
+                ostringstream messageStream;
                 messageStream << "Insufficient balance: need " << request.quantity << " " << baseAsset << ", have "
                               << baseFree;
-                throw std::runtime_error(messageStream.str());
+                throw runtime_error(messageStream.str());
             }
         }
     }
-    catch (const std::exception &exception)
+    catch (const exception &exception)
     {
-        throw std::runtime_error(std::string("Bybit placeOrder: ") + exception.what());
+        throw runtime_error(string("Bybit placeOrder: ") + exception.what());
     }
 
     json::object body;
@@ -1323,7 +1336,7 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
     string effectiveCategory = category.empty() ? "spot" : category;
 
     {
-        std::lock_guard<std::mutex> lock(symbolInfoMutex);
+        lock_guard<mutex> lock(symbolInfoMutex);
         auto it = symbolInfoCache.find(symbol);
         if (it != symbolInfoCache.end())
         {
@@ -1391,7 +1404,7 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
 
     SymbolInfo info = createSymbolInfo(list[0].as_object(), symbol);
     {
-        std::lock_guard<std::mutex> lock(symbolInfoMutex);
+        lock_guard<mutex> lock(symbolInfoMutex);
         symbolInfoCache[symbol] = info;
     }
     return info;
@@ -2069,9 +2082,9 @@ void BybitDealService::processOcoUpdate(const string &orderLinkId)
     }
 }
 
-bool BybitDealService::cancelAllOpenOrders(const std::string &symbol, const std::string &category)
+bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &category)
 {
-    const std::string effectiveCategory = category.empty() ? "spot" : category;
+    const string effectiveCategory = category.empty() ? "spot" : category;
 
     json::object body;
     body["category"] = effectiveCategory;
@@ -2081,29 +2094,29 @@ bool BybitDealService::cancelAllOpenOrders(const std::string &symbol, const std:
         body["symbol"] = symbol;
     }
 
-    const std::string bodyStr = json::serialize(body);
+    const string bodyStr = json::serialize(body);
 
     const msec timestamp = getTimestamp();
-    const std::string signature = getSignature(bodyStr, timestamp);
+    const string signature = getSignature(bodyStr, timestamp);
     const auto headers = createHeaders(apiKey, signature, timestamp);
 
-    const std::string target = "/v5/order/cancel-all";
+    const string target = "/v5/order/cancel-all";
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
     context.setRequestBody(bodyStr);
 
-    const std::string response = httpsPost(context);
+    const string response = httpsPost(context);
 
     boost::system::error_code ec;
     json::value jsonValue = json::parse(response, ec);
     if (ec)
     {
-        throw std::runtime_error("Bybit cancelAllOpenOrders: JSON parse error: " + ec.message());
+        throw runtime_error("Bybit cancelAllOpenOrders: JSON parse error: " + ec.message());
     }
     if (!jsonValue.is_object())
     {
-        throw std::runtime_error("Bybit cancelAllOpenOrders: Response is not a JSON object");
+        throw runtime_error("Bybit cancelAllOpenOrders: Response is not a JSON object");
     }
 
     json::object &obj = jsonValue.as_object();
@@ -2116,13 +2129,19 @@ bool BybitDealService::cancelAllOpenOrders(const std::string &symbol, const std:
 
     if (retCode != 0)
     {
-        std::string msg = "Unknown Error";
+        string msg = "Unknown Error";
         if (obj.contains("retMsg") && obj.at("retMsg").is_string())
         {
             msg = obj.at("retMsg").as_string().c_str();
         }
-        throw std::runtime_error("Bybit Error " + std::to_string(retCode) + ": " + msg);
+        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + msg);
     }
 
     return true;
+}
+
+flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
+{
+    ensureBalancesSeeded(nullopt);
+    return getBalances();
 }

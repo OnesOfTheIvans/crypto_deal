@@ -158,7 +158,7 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
         "code": -1102,
         "msg": "Mandatory parameter 'timeInForce' was not sent, was empty/null, or malformed."
     })";
-    
+
     MockNetwork::instance().setResponse("/api/v3/order", errorJson);
 
     PlaceOrderRequest req;
@@ -175,8 +175,8 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
 TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
 {
     auto service = createService();
-    std::string emptyResponse = "{}"; 
+    std::string emptyResponse = "{}";
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", emptyResponse);
-    
+
     EXPECT_THROW(service.getSymbolInfo("UNKNOWN"), std::runtime_error);
 }
