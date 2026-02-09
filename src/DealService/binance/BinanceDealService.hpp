@@ -14,11 +14,15 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/ssl.hpp>
+#include <boost/beast/websocket.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
 
 #include "common/OrderQuery.hpp"
 
+#include <map>
 #include <mutex>
 #include <string>
 
@@ -31,15 +35,28 @@ class BinanceDealService : public DealService
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
 
+    std::map<std::string, SymbolInfo> symbolInfoCache;
+    std::mutex symbolInfoMutex;
+
     std::string createQuery(const std::string &baseAsset,
                             const std::string &quoteAsset,
                             const binance::OrderOperation &operation,
                             const binance::OrderType &type,
-                            double quantity);
+                            double quantity,
+                            double stepSize = 0.0);
+
+    double getTickerPrice(const std::string &symbol);
+
+    // Calculates safe quantity based on minNotional and live price
+    // Returns 0.0 if something goes wrong, otherwise the calculated safe qty
+    double
+    calculateSafeQty(const std::string &symbol, double quantity, double price, double stepSize, double minNotional);
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
     bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
+
+    bool binanceResponseOk(const std::string &response, std::string *errOut);
 
     double parseAmount(const json::object &o, const char *key);
 
@@ -58,6 +75,24 @@ class BinanceDealService : public DealService
     std::string buildOcoCancelQuery(const OrderListQuery &request, long long timestamp);
 
     OcoInfo createOcoInfo(const json::object &object);
+
+    using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
+    std::mutex userWebsocketMutex;
+    std::shared_ptr<WebsocketStream> userWebsocketStream;
+
+    StreamStatus streamStatus = StreamStatus::STOPPED;
+    std::string streamLastError;
+    mutable std::mutex streamStatusMutex;
+
+    void setStreamStatus(StreamStatus status);
+    void setStreamError(const std::string &error);
+
+    long long serverTimeOffset = 0;
+    std::atomic<long long> lastSyncMonoMs{0};
+    std::mutex timeSyncMutex;
+    long long getServerTime();
+    void syncTime();
+    long long getTimestamp();
 
   public:
     BinanceDealService(const std::string &host,
@@ -91,6 +126,9 @@ class BinanceDealService : public DealService
     OcoInfo cancelOco(const OrderListQuery &request) override;
 
     void stopUserStream() override;
+
+    StreamStatus getUserStreamStatus() const override;
+    std::string getUserStreamLastError() const override;
 };
 
 #endif

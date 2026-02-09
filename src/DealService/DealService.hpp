@@ -62,6 +62,10 @@ class DealService
     virtual void startUserStream() = 0;
 
     virtual void stopUserStream() = 0;
+    
+    enum class StreamStatus { STOPPED, CONNECTING, CONNECTED, ERROR };
+    virtual StreamStatus getUserStreamStatus() const = 0;
+    virtual std::string getUserStreamLastError() const = 0;
 
     virtual OrderInfo placeOrder(const PlaceOrderRequest &request) = 0;
 

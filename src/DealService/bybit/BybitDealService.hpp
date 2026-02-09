@@ -16,10 +16,15 @@
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/ssl.hpp>
+#include <boost/beast/websocket.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
 
 #include <chrono>
+#include <map>
+#include <optional>
 #include <string>
 
 using msec = std::chrono::milliseconds::rep;
@@ -31,6 +36,9 @@ class BybitDealService : public DealService
   private:
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
+
+    std::map<std::string, SymbolInfo> symbolInfoCache;
+    std::mutex symbolInfoMutex;
 
     struct BybitOcoGroup
     {
@@ -53,14 +61,13 @@ class BybitDealService : public DealService
 
     void updateBalanceCache(const std::string &asset, double free, double locked);
 
-    msec getTimestamp();
-
     std::string createBody(const std::string &baseAsset,
                            const std::string &quoteAsset,
                            const bybit::OrderCategory &category,
                            const bybit::OrderOperation &operation,
                            const bybit::OrderType &type,
-                           double quantity);
+                           double quantity,
+                           double stepSize = 0.0);
 
     OrderInfo createOrderInfo(const json::object &result,
                               const PlaceOrderRequest &request,
@@ -84,11 +91,44 @@ class BybitDealService : public DealService
 
     bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
+    bool bybitResponseOk(const std::string &response, std::string *errOut);
+
     void handleUserStreamMessage(const std::string &msg);
 
     void handleWalletUpdate(const boost::json::object &root);
     void handleOrderUpdate(const boost::json::object &root);
     void processOcoUpdate(const std::string &orderLinkId);
+
+    using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
+    std::mutex userWebsocketMutex;
+    std::shared_ptr<WebsocketStream> userWebsocketStream;
+
+    StreamStatus streamStatus = StreamStatus::STOPPED;
+    std::string streamLastError;
+    mutable std::mutex streamStatusMutex;
+
+    void setStreamStatus(StreamStatus status);
+    void setStreamError(const std::string &error);
+
+    long long serverTimeOffset = 0;
+    bool timeSynced = false;
+    long long getServerTime();
+    void syncTime();
+    long long getTimestamp();
+
+    void refreshBalancesFromRest(const std::string &accountType,
+                                 const std::optional<std::string> &coinFilter = std::nullopt);
+
+    void ensureBalancesSeeded(const std::optional<std::string> &coinFilter = std::nullopt);
+    void ensureBalancesSeeded(const std::string &coinFilter);
+
+    bool capMarketQtyByBalance(bool isBuy,
+                               const std::string &baseAsset,
+                               const std::string &quoteAsset,
+                               const SymbolInfo &symbolInfo,
+                               double lastPrice,
+                               double &qtyInBase,
+                               std::string &reason);
 
   public:
     BybitDealService(const std::string &host,
@@ -102,6 +142,8 @@ class BybitDealService : public DealService
     bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
     bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+
+    double getTickerPrice(const std::string &symbol);
 
     OrderInfo placeOrder(const PlaceOrderRequest &request) override;
 
@@ -122,6 +164,9 @@ class BybitDealService : public DealService
     void startUserStream() override;
 
     void stopUserStream() override;
+
+    StreamStatus getUserStreamStatus() const override;
+    std::string getUserStreamLastError() const override;
 };
 
 #endif

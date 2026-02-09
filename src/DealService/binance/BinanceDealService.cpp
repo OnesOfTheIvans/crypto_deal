@@ -8,6 +8,7 @@
 // DEBUG
 #include <iostream>
 
+#include "../common/DealUtils.hpp"
 #include "../common/type_aliasing.hpp"
 
 using namespace std;
@@ -17,15 +18,19 @@ string BinanceDealService::createQuery(const string &baseAsset,
                                        const string &quoteAsset,
                                        const OrderOperation &operation,
                                        const OrderType &type,
-                                       double quantity)
+                                       double quantity,
+                                       double stepSize)
 {
+    const std::string qtyStr = DealUtils::formatByStep(quantity, stepSize);
+    DealUtils::verifyNoScientificNotation(qtyStr);
+
     auto timestamp = chrono::system_clock::now();
     ostringstream qs;
     // clang-format off
     qs << "symbol=" << baseAsset << quoteAsset
        << "&side=" << EnumStringConverter<OrderOperation>::toString(operation)
        << "&type=" << EnumStringConverter<OrderType>::toString(type)
-       << "&quantity=" << quantity
+       << "&quantity=" << qtyStr
        << "&recvWindow=" << recvWindow
        << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
     // clang-format on
@@ -40,33 +45,78 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
     return {{"X-MBX-APIKEY", apiKey}};
 }
 
+bool BinanceDealService::binanceResponseOk(const string &response, string *errOut)
+{
+    boost::system::error_code ec;
+    json::value val = json::parse(response, ec);
+    if (ec)
+    {
+        if (errOut)
+        {
+            *errOut = "JSON parse error: " + ec.message();
+        }
+        return false;
+    }
+    if (!val.is_object())
+    {
+        if (errOut)
+        {
+            *errOut = "Response is not a JSON object";
+        }
+        return false;
+    }
+
+    const auto &obj = val.as_object();
+
+    if (obj.contains("code") && obj.contains("msg"))
+    {
+        if (errOut)
+        {
+            long long code = 0;
+            if (obj.at("code").is_number())
+            {
+                code = obj.at("code").as_int64();
+            }
+            string msg;
+            if (obj.at("msg").is_string())
+            {
+                msg = obj.at("msg").as_string().c_str();
+            }
+            *errOut = "Binance Error " + to_string(code) + ": " + msg;
+        }
+        return false;
+    }
+
+    if (obj.contains("orderId") && obj.contains("status"))
+    {
+        return true;
+    }
+
+    if (errOut)
+    {
+        *errOut = "Unexpected response structure (missing orderId/status)";
+    }
+    return false;
+}
+
 bool BinanceDealService::sendOrder(const string &query, const flat_map<string, string> &headers)
 {
-    string test_target = "/api/v3/order/test?" + query;
-    HttpRequestContext context(ioc, ctx, host, test_target);
+    string target = "/api/v3/order?" + query;
+    HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
 
-    cout << "Sending test order..." << endl;
+    cout << "Sending order..." << endl;
     string response = httpsPost(context);
-    cout << "Test order response: " << response << endl;
+    cout << "Order response: " << response << endl;
 
-    if (response == "{}")
+    string err;
+    if (!binanceResponseOk(response, &err))
     {
-        cout << "Test passed, sending real order..." << endl;
-        string real_target = "/api/v3/order?" + query;
-        HttpRequestContext context(ioc, ctx, host, real_target);
-        context.prepareRequest(http::verb::post);
-        context.setRequestHeaders(headers);
-        string real_response = httpsPost(context);
-        cout << "Real order response: " << real_response << endl;
-        return true;
-    }
-    else
-    {
-        cout << "Test order failed or unexpected response, not placing real order." << endl;
+        cout << "Order failed: " << err << endl;
         return false;
     }
+    return true;
 }
 
 double BinanceDealService::parseAmount(const json::object &jsonObject, const char *key)
@@ -87,7 +137,8 @@ double BinanceDealService::parseAmount(const json::object &jsonObject, const cha
 
 string BinanceDealService::buildUserStreamSubscribeRequestJson()
 {
-    auto ts = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
+
+    auto ts = getTimestamp();
 
     string payload = "apiKey=" + apiKey + "&timestamp=" + to_string(ts);
 
@@ -126,27 +177,35 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
 {
     boost::system::error_code ec;
     json::value jsonValue = json::parse(msg, ec);
-    if (ec || !jsonValue.is_object())
+    if (ec)
     {
-        throw runtime_error("User stream message parse error: " + ec.message());
+        cerr << "User stream message parse error: " << ec.message() << endl;
+        return;
     }
-
-    json::object &rootObject = jsonValue.as_object();
-
-    auto *eventTypeValue = rootObject.if_contains("event");
-    if (!eventTypeValue)
+    if (!jsonValue.is_object())
     {
         return;
     }
 
-    if (!eventTypeValue->is_object())
+    json::object &rootObject = jsonValue.as_object();
+    json::object *eventObject = nullptr;
+
+    if (rootObject.contains("e") && rootObject.at("e").is_string())
     {
-        throw runtime_error("User stream message has invalid 'event' field (not an object)");
+        eventObject = &rootObject;
     }
 
-    json::object &eventObject = eventTypeValue->as_object();
+    else if (rootObject.contains("event") && rootObject.at("event").is_object())
+    {
+        eventObject = &rootObject.at("event").as_object();
+    }
 
-    auto *eventTypeNameValue = eventObject.if_contains("e");
+    if (!eventObject)
+    {
+        return;
+    }
+
+    auto *eventTypeNameValue = eventObject->if_contains("e");
     if (!eventTypeNameValue || !eventTypeNameValue->is_string())
     {
         throw runtime_error("User stream message missing or invalid 'e' (event type) field");
@@ -158,10 +217,10 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
         return;
     }
 
-    auto *balancesArrayValue = eventObject.if_contains("B");
+    auto *balancesArrayValue = eventObject->if_contains("B");
     if (!balancesArrayValue || !balancesArrayValue->is_array())
     {
-        throw runtime_error("User stream message missing or invalid 'B' (balances) field");
+        return;
     }
 
     json::array &balancesArray = balancesArrayValue->as_array();
@@ -187,6 +246,87 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
     }
 }
 
+DealService::StreamStatus BinanceDealService::getUserStreamStatus() const
+{
+    lock_guard<mutex> lock(streamStatusMutex);
+    return streamStatus;
+}
+
+string BinanceDealService::getUserStreamLastError() const
+{
+    lock_guard<mutex> lock(streamStatusMutex);
+    return streamLastError;
+}
+
+void BinanceDealService::setStreamStatus(StreamStatus status)
+{
+    lock_guard<mutex> lock(streamStatusMutex);
+    streamStatus = status;
+}
+
+void BinanceDealService::setStreamError(const string &error)
+{
+    lock_guard<mutex> lock(streamStatusMutex);
+    streamStatus = StreamStatus::ERROR;
+    streamLastError = error;
+}
+
+long long BinanceDealService::getServerTime()
+{
+    string target = "/api/v3/time";
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+    string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value val = json::parse(response, ec);
+    if (!ec && val.is_object())
+    {
+        const auto &obj = val.as_object();
+        if (obj.contains("serverTime") && obj.at("serverTime").is_number())
+        {
+            return obj.at("serverTime").as_int64();
+        }
+    }
+    return 0;
+}
+
+void BinanceDealService::syncTime()
+{
+    long long currentMono = chrono::steady_clock::now().time_since_epoch().count() / 1000000; // ms
+    long long lastMono = lastSyncMonoMs.load();
+    if (currentMono - lastMono < 10000)
+    {
+        return;
+    }
+
+    lock_guard<mutex> lock(timeSyncMutex);
+
+    currentMono = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
+    lastMono = lastSyncMonoMs.load();
+    if (currentMono - lastMono < 10000)
+    {
+        return;
+    }
+
+    long long serverTime = getServerTime();
+    if (serverTime > 0)
+    {
+        long long localTime =
+            chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
+        serverTimeOffset = serverTime - localTime;
+        lastSyncMonoMs.store(currentMono);
+        cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
+    }
+}
+
+long long BinanceDealService::getTimestamp()
+{
+    syncTime();
+    auto now = chrono::system_clock::now();
+    return chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count() + serverTimeOffset;
+}
+
 void BinanceDealService::startUserStream()
 {
     if (userStream)
@@ -194,8 +334,9 @@ void BinanceDealService::startUserStream()
         return;
     }
     userStream = true;
+    setStreamStatus(StreamStatus::CONNECTING);
 
-    runner = std::thread(
+    runner = thread(
         [this]()
         {
             try
@@ -211,49 +352,235 @@ void BinanceDealService::startUserStream()
 
                 tls.handshake(ssl::stream_base::client);
 
-                ws::stream<beast::ssl_stream<beast::tcp_stream>> socket(move(tls));
-                socket.set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
-                socket.handshake(websocketHost, ws_target);
+                auto sharedWebsocketStream = make_shared<WebsocketStream>(move(tls));
+                sharedWebsocketStream->set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
+                sharedWebsocketStream->handshake(websocketHost, ws_target);
+
+                {
+                    lock_guard<mutex> lock(userWebsocketMutex);
+                    userWebsocketStream = sharedWebsocketStream;
+                }
+
+                setStreamStatus(StreamStatus::CONNECTING);
 
                 const string sub = buildUserStreamSubscribeRequestJson();
-                socket.write(net::buffer(sub));
+                sharedWebsocketStream->write(net::buffer(sub));
+
+                {
+                    beast::flat_buffer buffer;
+                    sharedWebsocketStream->read(buffer);
+                    string msg = beast::buffers_to_string(buffer.data());
+
+                    boost::system::error_code ec;
+                    json::value val = json::parse(msg, ec);
+                    bool ok = false;
+                    if (!ec && val.is_object())
+                    {
+                        json::object &root = val.as_object();
+                        if (root.contains("status") && root.at("status").as_int64() == 200)
+                        {
+                            ok = true;
+                        }
+                    }
+
+                    if (!ok)
+                    {
+                        cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
+                    }
+                    else
+                    {
+                        cout << "Binance stream subscribed successfully." << endl;
+                    }
+                }
+
+                setStreamStatus(StreamStatus::CONNECTED);
 
                 while (userStream)
                 {
-                    beast::flat_buffer buffer;
-                    socket.read(buffer);
+                    try
+                    {
+                        beast::flat_buffer buffer;
+                        boost::system::error_code errorCode;
 
-                    const string msg = beast::buffers_to_string(buffer.data());
-                    handleUserStreamMessage(msg);
+                        sharedWebsocketStream->read(buffer, errorCode);
+
+                        if (errorCode)
+                        {
+                            if (!userStream)
+                            {
+                                cout << "User stream stopped gracefully." << endl;
+                                break;
+                            }
+                            if (errorCode == boost::asio::error::operation_aborted)
+                            {
+                                break;
+                            }
+
+                            cerr << "Websocket read error: " << errorCode.message() << endl;
+                            setStreamError("Read error: " + errorCode.message());
+                            break;
+                        }
+
+                        const string msg = beast::buffers_to_string(buffer.data());
+                        handleUserStreamMessage(msg);
+                    }
+                    catch (const exception &e)
+                    {
+                        cerr << "Binance stream read loop error: " << e.what() << endl;
+                        break;
+                    }
                 }
             }
-            catch (const std::exception &e)
+            catch (const exception &e)
             {
-                std::cerr << "User stream error: " << e.what() << std::endl;
+                cerr << "Binance stream error: " << e.what() << endl;
+                setStreamError(e.what());
                 userStream = false;
+            }
+
+            {
+                lock_guard<mutex> lock(userWebsocketMutex);
+                userWebsocketStream.reset();
+            }
+            if (getUserStreamStatus() != StreamStatus::ERROR)
+            {
+                setStreamStatus(StreamStatus::STOPPED);
             }
         });
 }
 
 void BinanceDealService::stopUserStream()
 {
+    cout << "Requesting user stream stop..." << endl;
     userStream = false;
+
+    shared_ptr<WebsocketStream> sharedWebsocketStream;
+    {
+        lock_guard<mutex> lock(userWebsocketMutex);
+        sharedWebsocketStream = userWebsocketStream;
+    }
+
+    if (sharedWebsocketStream)
+    {
+        cout << "Forcing socket closure to unblock read..." << endl;
+        boost::system::error_code ec;
+        // Close the lowest layer (TCP socket) to force read to return error
+        beast::get_lowest_layer(*sharedWebsocketStream).socket().close(ec);
+        if (ec)
+        {
+            cerr << "Socket close error (ignored): " << ec.message() << endl;
+        }
+    }
+
     if (runner.joinable())
     {
+        cout << "Joining stream thread..." << endl;
         runner.join();
+        cout << "Stream thread joined." << endl;
     }
+
+    setStreamStatus(StreamStatus::STOPPED);
+
+    {
+        lock_guard<mutex> lock(userWebsocketMutex);
+        userWebsocketStream.reset();
+    }
+}
+
+double BinanceDealService::getTickerPrice(const string &symbol)
+{
+    string target = "/api/v3/ticker/price?symbol=" + symbol;
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+
+    string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value val = json::parse(response, ec);
+    if (!ec && val.is_object())
+    {
+        const auto &obj = val.as_object();
+        if (obj.contains("price") && obj.at("price").is_string())
+        {
+            return strtod(obj.at("price").as_string().c_str(), nullptr);
+        }
+    }
+    return 0.0;
+}
+
+double BinanceDealService::calculateSafeQty(const string &symbol,
+                                            double quantity,
+                                            double price,
+                                            double stepSize,
+                                            double minNotional)
+{
+    if (price <= 0 || stepSize <= 0)
+    {
+        return quantity;
+    }
+
+    double requiredQty = 0.0;
+    if (minNotional > 0)
+    {
+        requiredQty = (minNotional * 1.10) / price;
+    }
+
+    double safeQty = max(quantity, requiredQty);
+
+    safeQty = ceil(safeQty / stepSize) * stepSize;
+
+    cout << "Binance Safe Qty: " << DealUtils::formatByStep(safeQty, stepSize) << " (Req: " << quantity
+         << ", Price: " << price << ", MinNotional: " << minNotional << ", Step: " << stepSize << ")" << endl;
+
+    return safeQty;
 }
 
 bool BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity);
+    string symbol = baseAsset + quoteAsset;
+    double stepSize = 0.0;
+    double minNotional = 0.0;
+
+    try
+    {
+        SymbolInfo info = getSymbolInfo(symbol);
+        stepSize = info.stepSize;
+        minNotional = info.minNotional;
+    }
+    catch (...)
+    {
+        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
+    }
+
+    double price = getTickerPrice(symbol);
+    double safeQty = calculateSafeQty(symbol, quantity, price, stepSize, minNotional);
+
+    string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, safeQty, stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
     return sendOrder(query, headers);
 }
 
 bool BinanceDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity);
+    string symbol = baseAsset + quoteAsset;
+    double stepSize = 0.0;
+    double minNotional = 0.0;
+
+    try
+    {
+        SymbolInfo info = getSymbolInfo(symbol);
+        stepSize = info.stepSize;
+        minNotional = info.minNotional;
+    }
+    catch (...)
+    {
+        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
+    }
+
+    double price = getTickerPrice(symbol);
+    double safeQty = calculateSafeQty(symbol, quantity, price, stepSize, minNotional);
+
+    string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, safeQty, stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
     return sendOrder(query, headers);
 }
@@ -288,14 +615,17 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
         }
     }
 
+    SymbolInfo info = getSymbolInfo(request.symbol);
+
     auto timestamp = chrono::system_clock::now();
     ostringstream qs;
     qs << "symbol=" << request.symbol << "&side=" << request.side << "&type=" << request.type
-       << "&quantity=" << request.quantity;
+       << "&quantity=" << DealUtils::formatByStep(request.quantity, info.stepSize);
 
     if (request.type == "LIMIT")
     {
-        qs << "&price=" << *request.price << "&timeInForce=" << *request.timeInForce;
+        qs << "&price=" << DealUtils::formatByStep(*request.price, info.tickSize)
+           << "&timeInForce=" << *request.timeInForce;
     }
 
     if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
@@ -459,11 +789,20 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
     return createOrderInfo(obj);
 }
 
-SymbolInfo BinanceDealService::getSymbolInfo(const std::string &symbol, const std::string &category)
+SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string &category)
 {
     if (symbol.empty())
     {
         throw runtime_error("Symbol cannot be empty");
+    }
+
+    {
+        lock_guard<mutex> lock(symbolInfoMutex);
+        auto it = symbolInfoCache.find(symbol);
+        if (it != symbolInfoCache.end())
+        {
+            return it->second;
+        }
     }
 
     string target = "/api/v3/exchangeInfo?symbol=" + symbol;
@@ -501,7 +840,12 @@ SymbolInfo BinanceDealService::getSymbolInfo(const std::string &symbol, const st
         throw runtime_error("Invalid symbol object");
     }
 
-    return createSymbolInfo(symbols[0].as_object());
+    SymbolInfo info = createSymbolInfo(symbols[0].as_object());
+    {
+        lock_guard<mutex> lock(symbolInfoMutex);
+        symbolInfoCache[symbol] = info;
+    }
+    return info;
 }
 
 OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
@@ -612,7 +956,7 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
     return createOcoInfo(jsonObject);
 }
 
-std::string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
+string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
 {
     ostringstream queryStringStream;
     queryStringStream << "symbol=" << request.symbol << "&side=" << request.side << "&quantity=" << request.quantity
@@ -648,7 +992,7 @@ std::string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, lo
     return queryStringStream.str();
 }
 
-std::string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, long long timestamp)
+string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, long long timestamp)
 {
     ostringstream queryStringStream;
     queryStringStream << "symbol=" << request.symbol;
@@ -705,77 +1049,76 @@ OcoInfo BinanceDealService::createOcoInfo(const json::object &jsonObject)
 
     for (const auto &reportItem : jsonObject.at("orderReports").as_array())
     {
-        if (!reportItem.is_object())
+        if (reportItem.is_object())
         {
-            continue;
-        }
-        const auto &reportObject = reportItem.as_object();
-        OrderInfo orderInfo;
+            const auto &reportObject = reportItem.as_object();
+            OrderInfo orderInfo;
 
-        if (reportObject.contains("symbol"))
-        {
-            orderInfo.symbol = reportObject.at("symbol").as_string().c_str();
-        }
-
-        if (reportObject.contains("orderId"))
-        {
-            if (reportObject.at("orderId").is_string())
+            if (reportObject.contains("symbol"))
             {
-                orderInfo.orderId = reportObject.at("orderId").as_string().c_str();
+                orderInfo.symbol = reportObject.at("symbol").as_string().c_str();
             }
-            else
+
+            if (reportObject.contains("orderId"))
             {
-                orderInfo.orderId = to_string(reportObject.at("orderId").as_int64());
+                if (reportObject.at("orderId").is_string())
+                {
+                    orderInfo.orderId = reportObject.at("orderId").as_string().c_str();
+                }
+                else
+                {
+                    orderInfo.orderId = to_string(reportObject.at("orderId").as_int64());
+                }
             }
-        }
 
-        if (reportObject.contains("clientOrderId"))
-        {
-            orderInfo.clientOrderId = reportObject.at("clientOrderId").as_string().c_str();
-        }
-        if (reportObject.contains("side"))
-        {
-            orderInfo.side = reportObject.at("side").as_string().c_str();
-        }
-        if (reportObject.contains("type"))
-        {
-            orderInfo.type = reportObject.at("type").as_string().c_str();
-        }
-        if (reportObject.contains("status"))
-        {
-            orderInfo.status = reportObject.at("status").as_string().c_str();
-        }
-        if (reportObject.contains("timeInForce"))
-        {
-            orderInfo.timeInForce = reportObject.at("timeInForce").as_string().c_str();
-        }
+            if (reportObject.contains("clientOrderId"))
+            {
+                orderInfo.clientOrderId = reportObject.at("clientOrderId").as_string().c_str();
+            }
+            if (reportObject.contains("side"))
+            {
+                orderInfo.side = reportObject.at("side").as_string().c_str();
+            }
+            if (reportObject.contains("type"))
+            {
+                orderInfo.type = reportObject.at("type").as_string().c_str();
+            }
+            if (reportObject.contains("status"))
+            {
+                orderInfo.status = reportObject.at("status").as_string().c_str();
+            }
+            if (reportObject.contains("timeInForce"))
+            {
+                orderInfo.timeInForce = reportObject.at("timeInForce").as_string().c_str();
+            }
 
-        orderInfo.price = parseAmount(reportObject, "price");
-        orderInfo.origQty = parseAmount(reportObject, "origQty");
-        orderInfo.executedQty = parseAmount(reportObject, "executedQty");
+            orderInfo.price = parseAmount(reportObject, "price");
+            orderInfo.origQty = parseAmount(reportObject, "origQty");
+            orderInfo.executedQty = parseAmount(reportObject, "executedQty");
 
-        if (reportObject.contains("cummulativeQuoteQty"))
-        {
-            orderInfo.cumQuoteQty = parseAmount(reportObject, "cummulativeQuoteQty");
-        }
-        else if (reportObject.contains("cumulativeQuoteQty"))
-        {
-            orderInfo.cumQuoteQty = parseAmount(reportObject, "cumulativeQuoteQty");
-        }
+            if (reportObject.contains("cummulativeQuoteQty"))
+            {
+                orderInfo.cumQuoteQty = parseAmount(reportObject, "cummulativeQuoteQty");
+            }
+            else if (reportObject.contains("cumulativeQuoteQty"))
+            {
+                orderInfo.cumQuoteQty = parseAmount(reportObject, "cumulativeQuoteQty");
+            }
 
-        if (reportObject.contains("transactTime"))
-        {
-            orderInfo.createdTimeMs = reportObject.at("transactTime").as_int64();
-        }
-        orderInfo.updatedTimeMs = orderInfo.createdTimeMs;
+            if (reportObject.contains("transactTime"))
+            {
+                orderInfo.createdTimeMs = reportObject.at("transactTime").as_int64();
+            }
+            orderInfo.updatedTimeMs = orderInfo.createdTimeMs;
 
-        orderInfo.leavesQty = orderInfo.origQty - orderInfo.executedQty;
-        if (orderInfo.executedQty > 0)
-        {
-            orderInfo.avgPrice = orderInfo.cumQuoteQty / orderInfo.executedQty;
-        }
+            orderInfo.leavesQty = orderInfo.origQty - orderInfo.executedQty;
+            if (orderInfo.executedQty > 0)
+            {
+                orderInfo.avgPrice = orderInfo.cumQuoteQty / orderInfo.executedQty;
+            }
 
-        info.orders.push_back(orderInfo);
+            info.orders.push_back(orderInfo);
+        }
     }
 
     return info;
@@ -805,40 +1148,38 @@ SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject
 
     for (const auto &filterValue : symbolObject.at("filters").as_array())
     {
-        if (!filterValue.is_object())
+        if (filterValue.is_object())
         {
-            continue;
-        }
-        const auto &filter = filterValue.as_object();
-        if (!filter.contains("filterType"))
-        {
-            continue;
-        }
-
-        string type = filter.at("filterType").as_string().c_str();
-
-        if (type == "PRICE_FILTER")
-        {
-            info.minPrice = parseAmount(filter, "minPrice");
-            info.maxPrice = parseAmount(filter, "maxPrice");
-            info.tickSize = parseAmount(filter, "tickSize");
-        }
-        else if (type == "LOT_SIZE")
-        {
-            info.minQty = parseAmount(filter, "minQty");
-            info.maxQty = parseAmount(filter, "maxQty");
-            info.stepSize = parseAmount(filter, "stepSize");
-        }
-        else if (type == "MIN_NOTIONAL")
-        {
-            info.minNotional = parseAmount(filter, "minNotional");
-        }
-        else if (type == "NOTIONAL")
-        {
-            info.minNotional = parseAmount(filter, "minNotional");
-            if (filter.contains("maxNotional"))
+            const auto &filter = filterValue.as_object();
+            if (filter.contains("filterType"))
             {
-                info.maxNotional = parseAmount(filter, "maxNotional");
+
+                string type = filter.at("filterType").as_string().c_str();
+
+                if (type == "PRICE_FILTER")
+                {
+                    info.minPrice = parseAmount(filter, "minPrice");
+                    info.maxPrice = parseAmount(filter, "maxPrice");
+                    info.tickSize = parseAmount(filter, "tickSize");
+                }
+                else if (type == "LOT_SIZE")
+                {
+                    info.minQty = parseAmount(filter, "minQty");
+                    info.maxQty = parseAmount(filter, "maxQty");
+                    info.stepSize = parseAmount(filter, "stepSize");
+                }
+                else if (type == "MIN_NOTIONAL")
+                {
+                    info.minNotional = parseAmount(filter, "minNotional");
+                }
+                else if (type == "NOTIONAL")
+                {
+                    info.minNotional = parseAmount(filter, "minNotional");
+                    if (filter.contains("maxNotional"))
+                    {
+                        info.maxNotional = parseAmount(filter, "maxNotional");
+                    }
+                }
             }
         }
     }
