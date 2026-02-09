@@ -6,6 +6,7 @@
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -63,6 +64,42 @@ static void printBalances(DealService &dealService, const string &assetToPrint)
     }
 }
 
+static string normalizeOrderStatus(const string &status)
+{
+    string normalized;
+    normalized.reserve(status.size());
+
+    for (unsigned char character : status)
+    {
+        if (std::isalnum(character))
+        {
+            normalized.push_back(static_cast<char>(std::tolower(character)));
+        }
+    }
+
+    return normalized;
+}
+
+static double getRemainingQuantity(const OrderInfo &orderInfo)
+{
+    if (orderInfo.leavesQty > 0.0)
+    {
+        return orderInfo.leavesQty;
+    }
+
+    const double remainingQuantity = orderInfo.origQty - orderInfo.executedQty;
+    return (remainingQuantity > 0.0) ? remainingQuantity : 0.0;
+}
+
+static bool isOrderOpenForCancel(const OrderInfo &orderInfo)
+{
+    const string normalizedStatus = normalizeOrderStatus(orderInfo.status);
+    const bool statusAllowsCancel =
+        (normalizedStatus == "new") || (normalizedStatus == "partiallyfilled") || (normalizedStatus == "untriggered");
+
+    return statusAllowsCancel && (getRemainingQuantity(orderInfo) > 0.0);
+}
+
 static void testSymbolInfo(DealService &dealService, const string &symbol)
 {
     printTitle("SYMBOL INFO");
@@ -81,47 +118,69 @@ static void testSymbolInfo(DealService &dealService, const string &symbol)
 static void testPlaceGetCancelOrder(DealService &dealService, const string &symbol)
 {
     printTitle("PLACE / GET / CANCEL ORDER");
-    PlaceOrderRequest req;
-    req.symbol = symbol;
-    req.side = "BUY";
-    req.type = "LIMIT";
-    req.quantity = 0.0002; // Increased for Bybit safety
 
-    req.price = 65000.0; // Adjusted price
-    req.timeInForce = string("GTC");
-    req.clientOrderId = string("TEST_ORDER_1_") + to_string(time(nullptr));
-    req.category = "spot";
+    PlaceOrderRequest placeOrderRequest;
+    placeOrderRequest.symbol = symbol;
+    placeOrderRequest.side = "BUY";
+    placeOrderRequest.type = "LIMIT";
+    placeOrderRequest.quantity = 0.0002;
+    placeOrderRequest.price = 65000.0;
+    placeOrderRequest.timeInForce = string("GTC");
+    placeOrderRequest.clientOrderId = string("TEST_ORDER_1_") + to_string(time(nullptr));
+    placeOrderRequest.category = "spot";
 
     try
     {
-        // Executing only PLACE and GET. Cancel is skipped to avoid issues with already filled orders or latency.
-        OrderInfo placed = dealService.placeOrder(req);
-        cout << "placeOrder ok: orderId=" << placed.orderId << " clientOrderId=" << placed.clientOrderId
-             << " status=" << placed.status << "\n";
+        OrderInfo placedOrder = dealService.placeOrder(placeOrderRequest);
+        cout << "placeOrder ok: orderId=" << placedOrder.orderId << " clientOrderId=" << placedOrder.clientOrderId
+             << " status=" << placedOrder.status << "\n";
 
         OrderQuery orderQuery;
         orderQuery.symbol = symbol;
         orderQuery.category = "spot";
-        if (!placed.orderId.empty())
+
+        if (!placedOrder.orderId.empty())
         {
-            orderQuery.orderId = placed.orderId;
+            orderQuery.orderId = placedOrder.orderId;
         }
-        else if (!placed.clientOrderId.empty())
+        else if (!placedOrder.clientOrderId.empty())
         {
-            orderQuery.clientOrderId = placed.clientOrderId;
+            orderQuery.clientOrderId = placedOrder.clientOrderId;
         }
+
+        bool shouldCancelOrder = true;
 
         try
         {
-            OrderInfo got = dealService.getOrder(orderQuery);
-            cout << "getOrder ok: status=" << got.status << " executedQty=" << got.executedQty
-                 << " leavesQty=" << got.leavesQty << "\n";
+            OrderInfo retrievedOrder = dealService.getOrder(orderQuery);
+            cout << "getOrder ok: status=" << retrievedOrder.status << " executedQty=" << retrievedOrder.executedQty
+                 << " leavesQty=" << retrievedOrder.leavesQty << "\n";
+
+            shouldCancelOrder = isOrderOpenForCancel(retrievedOrder);
+            if (!shouldCancelOrder)
+            {
+                cout << "cancelOrder skipped: status=" << retrievedOrder.status << "\n";
+            }
         }
         catch (const exception &e)
         {
             cout << "getOrder failed: " << e.what() << "\n";
         }
-        // Cancel removed as per plan.
+
+        if (shouldCancelOrder)
+        {
+            try
+            {
+                OrderInfo cancelledOrder = dealService.cancelOrder(orderQuery);
+                cout << "cancelOrder ok: status=" << cancelledOrder.status
+                     << " executedQty=" << cancelledOrder.executedQty << " leavesQty=" << cancelledOrder.leavesQty
+                     << "\n";
+            }
+            catch (const exception &e)
+            {
+                cout << "cancelOrder failed: " << e.what() << "\n";
+            }
+        }
     }
     catch (const exception &e)
     {
