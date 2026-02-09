@@ -1276,3 +1276,53 @@ flat_map<string, AssetBalance> BinanceDealService::getBalances() const
 
     return balances;
 }
+
+bool BinanceDealService::cancelAllOpenOrders(const std::string &symbol, const std::string &category)
+{
+    (void)category;
+
+    if (symbol.empty())
+    {
+        throw std::runtime_error("Binance cancelAllOpenOrders: symbol cannot be empty");
+    }
+
+    std::ostringstream qs;
+    qs << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
+
+    const std::string queryString = qs.str();
+    const std::string signature = hmac_sha256(secretKey, queryString);
+    const std::string target = "/api/v3/openOrders?" + queryString + "&signature=" + signature;
+
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::delete_);
+    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+
+    const std::string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value jsonValue = json::parse(response, ec);
+    if (ec)
+    {
+        throw std::runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + ec.message());
+    }
+
+    if (jsonValue.is_object())
+    {
+        const json::object &obj = jsonValue.as_object();
+        if (obj.contains("code") && obj.contains("msg"))
+        {
+            long long code = obj.at("code").is_number() ? obj.at("code").as_int64() : 0;
+            std::string msg = obj.at("msg").is_string() ? std::string(obj.at("msg").as_string().c_str()) : "";
+            throw std::runtime_error("Binance Error " + std::to_string(code) + ": " + msg);
+        }
+
+        return true;
+    }
+
+    if (jsonValue.is_array())
+    {
+        return true;
+    }
+
+    throw std::runtime_error("Binance cancelAllOpenOrders: Unexpected response type");
+}

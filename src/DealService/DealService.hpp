@@ -79,6 +79,8 @@ class DealService
 
     virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
 
+    virtual bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) = 0;
+
     ExchangerType getExchangerType() const;
 
     virtual ~DealService() = default;

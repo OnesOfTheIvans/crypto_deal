@@ -167,6 +167,8 @@ class BybitDealService : public DealService
 
     StreamStatus getUserStreamStatus() const override;
     std::string getUserStreamLastError() const override;
+
+    bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
 };
 
 #endif

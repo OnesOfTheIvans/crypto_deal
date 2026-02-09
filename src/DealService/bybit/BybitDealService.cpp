@@ -2068,3 +2068,61 @@ void BybitDealService::processOcoUpdate(const string &orderLinkId)
         }
     }
 }
+
+bool BybitDealService::cancelAllOpenOrders(const std::string &symbol, const std::string &category)
+{
+    const std::string effectiveCategory = category.empty() ? "spot" : category;
+
+    json::object body;
+    body["category"] = effectiveCategory;
+
+    if (!symbol.empty())
+    {
+        body["symbol"] = symbol;
+    }
+
+    const std::string bodyStr = json::serialize(body);
+
+    const msec timestamp = getTimestamp();
+    const std::string signature = getSignature(bodyStr, timestamp);
+    const auto headers = createHeaders(apiKey, signature, timestamp);
+
+    const std::string target = "/v5/order/cancel-all";
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::post);
+    context.setRequestHeaders(headers);
+    context.setRequestBody(bodyStr);
+
+    const std::string response = httpsPost(context);
+
+    boost::system::error_code ec;
+    json::value jsonValue = json::parse(response, ec);
+    if (ec)
+    {
+        throw std::runtime_error("Bybit cancelAllOpenOrders: JSON parse error: " + ec.message());
+    }
+    if (!jsonValue.is_object())
+    {
+        throw std::runtime_error("Bybit cancelAllOpenOrders: Response is not a JSON object");
+    }
+
+    json::object &obj = jsonValue.as_object();
+
+    int retCode = -1;
+    if (obj.contains("retCode") && obj.at("retCode").is_number())
+    {
+        retCode = static_cast<int>(obj.at("retCode").as_int64());
+    }
+
+    if (retCode != 0)
+    {
+        std::string msg = "Unknown Error";
+        if (obj.contains("retMsg") && obj.at("retMsg").is_string())
+        {
+            msg = obj.at("retMsg").as_string().c_str();
+        }
+        throw std::runtime_error("Bybit Error " + std::to_string(retCode) + ": " + msg);
+    }
+
+    return true;
+}

@@ -100,6 +100,20 @@ static bool isOrderOpenForCancel(const OrderInfo &orderInfo)
     return statusAllowsCancel && (getRemainingQuantity(orderInfo) > 0.0);
 }
 
+static void cancelAllBeforeTests(DealService &dealService, const std::string &symbol, const std::string &category)
+{
+    printTitle("CANCEL ALL OPEN ORDERS (PRE-TEST)");
+    try
+    {
+        dealService.cancelAllOpenOrders(symbol, category);
+        std::cout << "cancelAllOpenOrders ok\n";
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << "cancelAllOpenOrders failed (continuing): " << e.what() << "\n";
+    }
+}
+
 static void testSymbolInfo(DealService &dealService, const string &symbol)
 {
     printTitle("SYMBOL INFO");
@@ -369,6 +383,19 @@ static void testAllOperations(DealService &dealService, const string &title)
     cout << "<------------------------------------------------------\n"
          << title << "\n------------------------------------------------------>\n";
 
+    const string symbol = "BTCUSDT";
+    const string category = "spot";
+
+    try
+    {
+        cancelAllBeforeTests(dealService, symbol, category);
+        cout << "cancelAllOpenOrders ok\n";
+    }
+    catch (const std::exception &e)
+    {
+        cout << "cancelAllOpenOrders failed: " << e.what() << "\n";
+    }
+
     cout << "Starting user stream...\n";
     dealService.startUserStream();
     waitForStreamConnection(dealService);
@@ -384,7 +411,6 @@ static void testAllOperations(DealService &dealService, const string &title)
     dealService.stopUserStream();
     cout << "User stream stopped.\n";
 
-    const string symbol = "BTCUSDT";
     testSymbolInfo(dealService, symbol);
     testPlaceGetCancelOrder(dealService, symbol);
     // testPlaceCancelOco removed as per plan.

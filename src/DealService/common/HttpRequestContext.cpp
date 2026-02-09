@@ -9,10 +9,8 @@ using namespace std;
 
 void HttpRequestContext::prepareRequest(const http::verb &type)
 {
-    cout << "[*] Resolving host: " << host << endl;
     auto const results = resolver.resolve(host, "https");
 
-    cout << "[*] Connecting..." << endl;
     beast::get_lowest_layer(stream).connect(results);
 
     if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
@@ -21,9 +19,7 @@ void HttpRequestContext::prepareRequest(const http::verb &type)
             beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category())};
     }
 
-    cout << "[*] Performing SSL handshake..." << endl;
     stream.handshake(ssl::stream_base::client);
-    cout << "[*] SSL handshake done" << endl;
 
     request = {type, target, HTTP_PROTOCOL_VERSION};
     request.set(http::field::host, host);
