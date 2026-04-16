@@ -3,12 +3,15 @@
 
 using namespace std;
 
-void ExchangerPull::addExchanger(Exchanger &exchanger)
+ExchangerPull::ExchangerPull(const vector<Exchanger> &exchangers)
 {
-    exchangers.insert(make_pair(exchanger->getExchangerType(), Exchanger(exchanger)));
+    for (const auto &exchanger : exchangers)
+    {
+        this->exchangers.insert(make_pair(exchanger->getExchangerType(), Exchanger(exchanger)));
+    }
 }
 
-Exchanger &ExchangerPull::getExchanger(ExchangerType type)
+const Exchanger &ExchangerPull::getExchanger(ExchangerType type) const
 {
     return exchangers.at(type);
 }

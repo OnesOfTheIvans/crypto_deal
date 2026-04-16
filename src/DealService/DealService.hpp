@@ -51,9 +51,11 @@ class DealService
           secretKey(secretKey), websocketHost(websocketHost), exchangerType(exchangerType), userStream(false)
     {}
 
-    virtual bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+    virtual OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
 
-    virtual bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+    virtual OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+
+    virtual void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 
@@ -71,6 +73,7 @@ class DealService
         ERROR
     };
     virtual StreamStatus getUserStreamStatus() const = 0;
+
     virtual std::string getUserStreamLastError() const = 0;
 
     virtual OrderInfo placeOrder(const PlaceOrderRequest &request) = 0;

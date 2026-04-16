@@ -7,6 +7,7 @@
 #include <boost/container/flat_map.hpp>
 
 #include <memory>
+#include <vector>
 
 using Exchanger = std::shared_ptr<DealService>;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
@@ -17,9 +18,9 @@ class ExchangerPull
     flat_map<ExchangerType, Exchanger> exchangers;
 
   public:
-    void addExchanger(Exchanger &exchanger);
+    ExchangerPull(const std::vector<Exchanger> &exchangers);
 
-    Exchanger &getExchanger(ExchangerType type);
+    const Exchanger &getExchanger(ExchangerType type) const;
 };
 
 #endif

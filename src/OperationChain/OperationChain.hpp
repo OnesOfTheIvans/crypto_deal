@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-using operation = std::function<OperationContext(OperationContext)>;
+using operation = std::function<OperationContext &(OperationContext &)>;
 
 class OperationChain
 {
@@ -20,7 +20,9 @@ class OperationChain
     std::vector<operation> operations;
 
   public:
-    OperationChain(std::vector<operation> operations) : operations(operations) {}
+    OperationChain(const std::vector<operation> &operations, const std::vector<Exchanger> &exchangers)
+        : operations(operations), context(exchangers)
+    {}
 };
 
 #endif

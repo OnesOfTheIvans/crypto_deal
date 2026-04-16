@@ -4,12 +4,20 @@
 #include "ExchangerPull.hpp"
 #include "ExchangerType.hpp"
 
+#include <optional>
+#include <string>
+
 struct OperationContext
 {
-    ExchangerType target;
-    ExchangerType destination;
-    ExchangerPull exchangersPull;
+    ExchangerType exchangerType;
+    const ExchangerPull exchangersPull;
+    std::string inAsset;
+    std::string previousInAsset;
+    std::string side;
+    std::optional<std::string> orderId;
     double quantity;
+
+    OperationContext(const std::vector<Exchanger> &exchangers) : exchangersPull(exchangers) {}
 };
 
 #endif

@@ -25,9 +25,9 @@ string BinanceDealService::createQuery(const string &baseAsset,
     DealUtils::verifyNoScientificNotation(qtyStr);
 
     auto timestamp = chrono::system_clock::now();
-    ostringstream qs;
+    ostringstream queryStream;
     // clang-format off
-    qs << "symbol=" << baseAsset << quoteAsset
+    queryStream << "symbol=" << baseAsset << quoteAsset
        << "&side=" << EnumStringConverter<OrderOperation>::toString(operation)
        << "&type=" << EnumStringConverter<OrderType>::toString(type)
        << "&quantity=" << qtyStr
@@ -35,7 +35,7 @@ string BinanceDealService::createQuery(const string &baseAsset,
        << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
     // clang-format on
 
-    string query_string = qs.str();
+    string query_string = queryStream.str();
     string signature = hmac_sha256(secretKey, query_string);
     return query_string + "&signature=" + signature;
 }
@@ -47,17 +47,17 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
 
 bool BinanceDealService::binanceResponseOk(const string &response, string *errOut)
 {
-    beast::error_code ec;
-    json::value val = json::parse(response, ec);
-    if (ec)
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
         if (errOut)
         {
-            *errOut = "JSON parse error: " + ec.message();
+            *errOut = "JSON parse error: " + errorCode.message();
         }
         return false;
     }
-    if (!val.is_object())
+    if (!jsonValue.is_object())
     {
         if (errOut)
         {
@@ -66,28 +66,28 @@ bool BinanceDealService::binanceResponseOk(const string &response, string *errOu
         return false;
     }
 
-    const auto &obj = val.as_object();
+    const auto &jsonObject = jsonValue.as_object();
 
-    if (obj.contains("code") && obj.contains("msg"))
+    if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
         if (errOut)
         {
             long long code = 0;
-            if (obj.at("code").is_number())
+            if (jsonObject.at("code").is_number())
             {
-                code = obj.at("code").as_int64();
+                code = jsonObject.at("code").as_int64();
             }
             string msg;
-            if (obj.at("msg").is_string())
+            if (jsonObject.at("msg").is_string())
             {
-                msg = obj.at("msg").as_string().c_str();
+                msg = jsonObject.at("msg").as_string().c_str();
             }
             *errOut = "Binance Error " + to_string(code) + ": " + msg;
         }
         return false;
     }
 
-    if (obj.contains("orderId") && obj.contains("status"))
+    if (jsonObject.contains("orderId") && jsonObject.contains("status"))
     {
         return true;
     }
@@ -99,7 +99,7 @@ bool BinanceDealService::binanceResponseOk(const string &response, string *errOu
     return false;
 }
 
-bool BinanceDealService::sendOrder(const string &query, const flat_map<string, string> &headers)
+std::string BinanceDealService::sendOrder(const string &query, const flat_map<string, string> &headers)
 {
     string target = "/api/v3/order?" + query;
     HttpRequestContext context(ioc, ctx, host, target);
@@ -113,10 +113,9 @@ bool BinanceDealService::sendOrder(const string &query, const flat_map<string, s
     string err;
     if (!binanceResponseOk(response, &err))
     {
-        cout << "Order failed: " << err << endl;
-        return false;
+        throw runtime_error("Order failed: " + err);
     }
-    return true;
+    return response;
 }
 
 double BinanceDealService::parseAmount(const json::object &jsonObject, const char *key)
@@ -505,14 +504,14 @@ double BinanceDealService::getTickerPrice(const string &symbol)
 
     string response = httpsPost(context);
 
-    beast::error_code ec;
-    json::value val = json::parse(response, ec);
-    if (!ec && val.is_object())
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (!errorCode && jsonValue.is_object())
     {
-        const auto &obj = val.as_object();
-        if (obj.contains("price") && obj.at("price").is_string())
+        const auto &jsonObject = jsonValue.as_object();
+        if (jsonObject.contains("price") && jsonObject.at("price").is_string())
         {
-            return strtod(obj.at("price").as_string().c_str(), nullptr);
+            return strtod(jsonObject.at("price").as_string().c_str(), nullptr);
         }
     }
     return 0.0;
@@ -545,7 +544,7 @@ double BinanceDealService::calculateSafeQty(const string &symbol,
     return safeQty;
 }
 
-bool BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
+OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
     string symbol = baseAsset + quoteAsset;
     double stepSize = 0.0;
@@ -567,10 +566,19 @@ bool BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteA
 
     string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, safeQty, stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
-    return sendOrder(query, headers);
+
+    string response = sendOrder(query, headers);
+
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode || !jsonValue.is_object())
+    {
+        throw runtime_error("Failed to parse buyCrypto response");
+    }
+    return createOrderInfo(jsonValue.as_object());
 }
 
-bool BinanceDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
+OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, double quantity)
 {
     string symbol = baseAsset + quoteAsset;
     double stepSize = 0.0;
@@ -592,7 +600,16 @@ bool BinanceDealService::sellCrypto(const string &baseAsset, const string &quote
 
     string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, safeQty, stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
-    return sendOrder(query, headers);
+
+    string response = sendOrder(query, headers);
+
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode || !jsonValue.is_object())
+    {
+        throw runtime_error("Failed to parse sellCrypto response");
+    }
+    return createOrderInfo(jsonValue.as_object());
 }
 
 OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
@@ -628,25 +645,25 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     SymbolInfo info = getSymbolInfo(request.symbol);
 
     auto timestamp = chrono::system_clock::now();
-    ostringstream qs;
-    qs << "symbol=" << request.symbol << "&side=" << request.side << "&type=" << request.type
-       << "&quantity=" << DealUtils::formatByStep(request.quantity, info.stepSize);
+    ostringstream queryStream;
+    queryStream << "symbol=" << request.symbol << "&side=" << request.side << "&type=" << request.type
+                << "&quantity=" << DealUtils::formatByStep(request.quantity, info.stepSize);
 
     if (request.type == "LIMIT")
     {
-        qs << "&price=" << DealUtils::formatByStep(*request.price, info.tickSize)
-           << "&timeInForce=" << *request.timeInForce;
+        queryStream << "&price=" << DealUtils::formatByStep(*request.price, info.tickSize)
+                    << "&timeInForce=" << *request.timeInForce;
     }
 
     if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
     {
-        qs << "&newClientOrderId=" << *request.clientOrderId;
+        queryStream << "&newClientOrderId=" << *request.clientOrderId;
     }
 
-    qs << "&newOrderRespType=RESULT" << "&recvWindow=" << recvWindow
-       << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    queryStream << "&newOrderRespType=RESULT" << "&recvWindow=" << recvWindow
+                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
 
-    string queryString = qs.str();
+    string queryString = queryStream.str();
     string signature = hmac_sha256(secretKey, queryString);
     string fullQuery = queryString + "&signature=" + signature;
 
@@ -657,26 +674,26 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 
     string response = httpsPost(context);
 
-    beast::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("JSON parse error: " + ec.message());
+        throw runtime_error("JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
         throw runtime_error("Response is not a JSON object");
     }
 
-    json::object &obj = jsonValue.as_object();
+    json::object &jsonObject = jsonValue.as_object();
 
-    if (obj.contains("code") && obj.contains("msg"))
+    if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
-        throw runtime_error("Binance Error " + to_string(obj["code"].as_int64()) + ": " +
-                            string(obj["msg"].as_string()));
+        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
+                            string(jsonObject["msg"].as_string()));
     }
 
-    return createOrderInfo(obj);
+    return createOrderInfo(jsonObject);
 }
 
 OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
@@ -691,22 +708,22 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
     }
 
     auto timestamp = chrono::system_clock::now();
-    ostringstream qs;
-    qs << "symbol=" << request.symbol;
+    ostringstream queryStream;
+    queryStream << "symbol=" << request.symbol;
 
     if (request.orderId.has_value())
     {
-        qs << "&orderId=" << *request.orderId;
+        queryStream << "&orderId=" << *request.orderId;
     }
     if (request.clientOrderId.has_value())
     {
-        qs << "&origClientOrderId=" << *request.clientOrderId;
+        queryStream << "&origClientOrderId=" << *request.clientOrderId;
     }
 
-    qs << "&recvWindow=" << recvWindow
-       << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    queryStream << "&recvWindow=" << recvWindow
+                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
 
-    string queryString = qs.str();
+    string queryString = queryStream.str();
     string signature = hmac_sha256(secretKey, queryString);
     string fullQuery = queryString + "&signature=" + signature;
 
@@ -717,26 +734,26 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    beast::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance cancelOrder: JSON parse error: " + ec.message());
+        throw runtime_error("Binance cancelOrder: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
         throw runtime_error("Response is not a JSON object");
     }
 
-    json::object &obj = jsonValue.as_object();
+    json::object &jsonObject = jsonValue.as_object();
 
-    if (obj.contains("code") && obj.contains("msg"))
+    if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
-        throw runtime_error("Binance Error " + to_string(obj["code"].as_int64()) + ": " +
-                            string(obj["msg"].as_string()));
+        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
+                            string(jsonObject["msg"].as_string()));
     }
 
-    return createOrderInfo(obj);
+    return createOrderInfo(jsonObject);
 }
 
 OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
@@ -751,22 +768,22 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
     }
 
     auto timestamp = chrono::system_clock::now();
-    ostringstream qs;
-    qs << "symbol=" << request.symbol;
+    ostringstream queryStream;
+    queryStream << "symbol=" << request.symbol;
 
     if (request.orderId.has_value())
     {
-        qs << "&orderId=" << *request.orderId;
+        queryStream << "&orderId=" << *request.orderId;
     }
     if (request.clientOrderId.has_value())
     {
-        qs << "&origClientOrderId=" << *request.clientOrderId;
+        queryStream << "&origClientOrderId=" << *request.clientOrderId;
     }
 
-    qs << "&recvWindow=" << recvWindow
-       << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    queryStream << "&recvWindow=" << recvWindow
+                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
 
-    string queryString = qs.str();
+    string queryString = queryStream.str();
     string signature = hmac_sha256(secretKey, queryString);
     string fullQuery = queryString + "&signature=" + signature;
 
@@ -777,26 +794,26 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    beast::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance getOrder: JSON parse error: " + ec.message());
+        throw runtime_error("Binance getOrder: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
         throw runtime_error("Response is not a JSON object");
     }
 
-    json::object &obj = jsonValue.as_object();
+    json::object &jsonObject = jsonValue.as_object();
 
-    if (obj.contains("code") && obj.contains("msg"))
+    if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
-        throw runtime_error("Binance Error " + to_string(obj["code"].as_int64()) + ": " +
-                            string(obj["msg"].as_string()));
+        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
+                            string(jsonObject["msg"].as_string()));
     }
 
-    return createOrderInfo(obj);
+    return createOrderInfo(jsonObject);
 }
 
 SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string &category)
@@ -821,25 +838,25 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance getSymbolInfo: JSON parse error: " + ec.message());
+        throw runtime_error("Binance getSymbolInfo: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
         throw runtime_error("Response is not a JSON object");
     }
 
-    json::object &root = jsonValue.as_object();
+    json::object &rootObject = jsonValue.as_object();
 
-    if (!root.contains("symbols") || !root.at("symbols").is_array())
+    if (!rootObject.contains("symbols") || !rootObject.at("symbols").is_array())
     {
         throw runtime_error("Binance response missing 'symbols' array");
     }
 
-    json::array &symbols = root.at("symbols").as_array();
+    json::array &symbols = rootObject.at("symbols").as_array();
     if (symbols.empty())
     {
         throw runtime_error("Binance symbol not found: " + symbol);
@@ -899,11 +916,11 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance placeOco: JSON parse error: " + ec.message());
+        throw runtime_error("Binance placeOco: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
@@ -945,11 +962,11 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance cancelOco: JSON parse error: " + ec.message());
+        throw runtime_error("Binance cancelOco: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
@@ -992,32 +1009,32 @@ string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long lo
     const double belowPrice = request.stopLimitPrice.has_value() ? *request.stopLimitPrice : request.stopPrice;
     const string belowTif = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : string("GTC");
 
-    ostringstream qs;
-    qs << "symbol=" << request.symbol << "&side=" << request.side << "&quantity=" << request.quantity
+    ostringstream queryStream;
+    queryStream << "symbol=" << request.symbol << "&side=" << request.side << "&quantity=" << request.quantity
 
-       << "&aboveType=LIMIT_MAKER" << "&abovePrice=" << request.price
+                << "&aboveType=LIMIT_MAKER" << "&abovePrice=" << request.price
 
-       << "&belowType=STOP_LOSS_LIMIT" << "&belowStopPrice=" << request.stopPrice << "&belowPrice=" << belowPrice
-       << "&belowTimeInForce=" << belowTif;
+                << "&belowType=STOP_LOSS_LIMIT" << "&belowStopPrice=" << request.stopPrice
+                << "&belowPrice=" << belowPrice << "&belowTimeInForce=" << belowTif;
 
     if (request.listClientOrderId.has_value())
     {
-        qs << "&listClientOrderId=" << *request.listClientOrderId;
+        queryStream << "&listClientOrderId=" << *request.listClientOrderId;
     }
 
     if (request.limitClientOrderId.has_value())
     {
-        qs << "&aboveClientOrderId=" << *request.limitClientOrderId;
+        queryStream << "&aboveClientOrderId=" << *request.limitClientOrderId;
     }
 
     if (request.stopClientOrderId.has_value())
     {
-        qs << "&belowClientOrderId=" << *request.stopClientOrderId;
+        queryStream << "&belowClientOrderId=" << *request.stopClientOrderId;
     }
 
-    qs << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
+    queryStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
 
-    return qs.str();
+    return queryStream.str();
 }
 
 string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, long long timestamp)
@@ -1314,10 +1331,10 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
         throw runtime_error("Binance cancelAllOpenOrders: symbol cannot be empty");
     }
 
-    ostringstream qs;
-    qs << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
+    ostringstream queryStream;
+    queryStream << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
 
-    const string queryString = qs.str();
+    const string queryString = queryStream.str();
     const string signature = hmac_sha256(secretKey, queryString);
     const string target = "/api/v3/openOrders?" + queryString + "&signature=" + signature;
 
@@ -1327,20 +1344,20 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
     const string response = httpsPost(context);
 
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + ec.message());
+        throw runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + errorCode.message());
     }
 
     if (jsonValue.is_object())
     {
-        const json::object &obj = jsonValue.as_object();
-        if (obj.contains("code") && obj.contains("msg"))
+        const json::object &jsonObject = jsonValue.as_object();
+        if (jsonObject.contains("code") && jsonObject.contains("msg"))
         {
-            long long code = obj.at("code").is_number() ? obj.at("code").as_int64() : 0;
-            string msg = obj.at("msg").is_string() ? string(obj.at("msg").as_string().c_str()) : "";
+            long long code = jsonObject.at("code").is_number() ? jsonObject.at("code").as_int64() : 0;
+            string msg = jsonObject.at("msg").is_string() ? string(jsonObject.at("msg").as_string().c_str()) : "";
 
             if (code == -2011 || code == -2013)
             {
@@ -1363,10 +1380,10 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
 flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 {
-    ostringstream qs;
-    qs << "recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
+    ostringstream queryStream;
+    queryStream << "recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
 
-    const string queryString = qs.str();
+    const string queryString = queryStream.str();
     const string signature = hmac_sha256(secretKey, queryString);
     const string target = "/api/v3/account?" + queryString + "&signature=" + signature;
 
@@ -1376,42 +1393,42 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 
     const string response = httpsPost(context);
 
-    boost::system::error_code ec;
-    json::value jsonValue = json::parse(response, ec);
-    if (ec)
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    if (errorCode)
     {
-        throw runtime_error("Binance getBalancesRest: JSON parse error: " + ec.message());
+        throw runtime_error("Binance getBalancesRest: JSON parse error: " + errorCode.message());
     }
     if (!jsonValue.is_object())
     {
         throw runtime_error("Binance getBalancesRest: Response is not a JSON object");
     }
 
-    const json::object &obj = jsonValue.as_object();
-    if (obj.contains("code") && obj.contains("msg"))
+    const json::object &jsonObject = jsonValue.as_object();
+    if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
-        long long code = obj.at("code").is_number() ? obj.at("code").as_int64() : 0;
-        string msg = obj.at("msg").is_string() ? string(obj.at("msg").as_string().c_str()) : "";
+        long long code = jsonObject.at("code").is_number() ? jsonObject.at("code").as_int64() : 0;
+        string msg = jsonObject.at("msg").is_string() ? string(jsonObject.at("msg").as_string().c_str()) : "";
         throw runtime_error("Binance Error " + to_string(code) + ": " + msg);
     }
 
-    const auto it = obj.find("balances");
-    if (it == obj.end() || !it->value().is_array())
+    const auto it = jsonObject.find("balances");
+    if (it == jsonObject.end() || !it->value().is_array())
     {
         throw runtime_error("Binance getBalancesRest: Missing 'balances' array");
     }
 
-    const json::array &arr = it->value().as_array();
-    for (const auto &v : arr)
+    const json::array &balancesArray = it->value().as_array();
+    for (const auto &balanceItem : balancesArray)
     {
-        if (v.is_object())
+        if (balanceItem.is_object())
         {
-            const json::object &bo = v.as_object();
-            if (bo.contains("asset") && bo.at("asset").is_string())
+            const json::object &balanceObject = balanceItem.as_object();
+            if (balanceObject.contains("asset") && balanceObject.at("asset").is_string())
             {
-                const string asset = string(bo.at("asset").as_string().c_str());
-                const double free = parseAmount(bo, "free");
-                const double locked = parseAmount(bo, "locked");
+                const string asset = string(balanceObject.at("asset").as_string().c_str());
+                const double free = parseAmount(balanceObject, "free");
+                const double locked = parseAmount(balanceObject, "locked");
 
                 updateBalanceCache(asset, free, locked);
             }
@@ -1419,4 +1436,38 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
     }
 
     return getBalances();
+}
+
+// add to the paper work like bad example of ai using
+void BinanceDealService::waitUntilOrderFilled(const std::string &symbol, const std::string &orderId)
+{
+    cout << "Waiting for order " << orderId << " to be filled..." << endl;
+    int retries = 0;
+    while (true)
+    {
+        if (retries > 60) // 30 seconds
+        {
+            throw runtime_error("Timeout waiting for order " + orderId + " to fill");
+        }
+        try
+        {
+            OrderQuery orderQuery;
+            orderQuery.symbol = symbol;
+            orderQuery.orderId = orderId;
+
+            OrderInfo orderInfo = getOrder(orderQuery);
+            if (orderInfo.status == "FILLED" || orderInfo.status == "CANCELED" || orderInfo.status == "EXPIRED" ||
+                orderInfo.status == "REJECTED")
+            {
+                cout << "Order " << orderId << " is " << orderInfo.status << endl;
+                return;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            cerr << "Error waiting for order: " << e.what() << endl;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        retries++;
+    }
 }

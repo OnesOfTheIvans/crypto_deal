@@ -100,7 +100,7 @@ class BybitDealService : public DealService
 
     std::string getSignature(const std::string &query, const msec &timestamp);
 
-    bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
+    std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
     bool bybitResponseOk(const std::string &response, std::string *errOut);
 
@@ -140,9 +140,11 @@ class BybitDealService : public DealService
         : DealService(host, apiKey, secretKey, websocketHost, recvWindow, ExchangerType::BYBIT)
     {}
 
-    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
-    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+
+    void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
     double getTickerPrice(const std::string &symbol);
 

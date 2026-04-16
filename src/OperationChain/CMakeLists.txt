@@ -1,7 +1,7 @@
 add_library(OperationChainLib
     OperationChain.cpp
     ExchangerPull.cpp
-    operations.cpp
+    OperationFactory.cpp
 )
 
 target_include_directories(OperationChainLib

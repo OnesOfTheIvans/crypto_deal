@@ -64,7 +64,7 @@ class BinanceDealService : public DealService
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
-    bool sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
+    std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
     bool binanceResponseOk(const std::string &response, std::string *errOut);
 
@@ -102,9 +102,11 @@ class BinanceDealService : public DealService
         : DealService(host, apiKey, secretKey, websocketHost, recvWindow, ExchangerType::BINANCE)
     {}
 
-    bool buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
 
-    bool sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+
+    void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 
