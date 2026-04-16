@@ -24,6 +24,7 @@
 
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace json = boost::json;
@@ -66,7 +67,7 @@ class BinanceDealService : public DealService
 
     std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
-    bool binanceResponseOk(const std::string &response, std::string *errOut);
+    std::optional<std::string> binanceResponseOk(const std::string &response);
 
     double parseAmount(const json::object &o, const char *key);
 

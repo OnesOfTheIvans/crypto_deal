@@ -45,58 +45,42 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
     return {{"X-MBX-APIKEY", apiKey}};
 }
 
-bool BinanceDealService::binanceResponseOk(const string &response, string *errOut)
+optional<string> BinanceDealService::binanceResponseOk(const string &response)
 {
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
     if (errorCode)
     {
-        if (errOut)
-        {
-            *errOut = "JSON parse error: " + errorCode.message();
-        }
-        return false;
+        return "JSON parse error: " + errorCode.message();
     }
     if (!jsonValue.is_object())
     {
-        if (errOut)
-        {
-            *errOut = "Response is not a JSON object";
-        }
-        return false;
+        return "Response is not a JSON object";
     }
 
     const auto &jsonObject = jsonValue.as_object();
 
     if (jsonObject.contains("code") && jsonObject.contains("msg"))
     {
-        if (errOut)
+        long long code = 0;
+        if (jsonObject.at("code").is_number())
         {
-            long long code = 0;
-            if (jsonObject.at("code").is_number())
-            {
-                code = jsonObject.at("code").as_int64();
-            }
-            string msg;
-            if (jsonObject.at("msg").is_string())
-            {
-                msg = jsonObject.at("msg").as_string().c_str();
-            }
-            *errOut = "Binance Error " + to_string(code) + ": " + msg;
+            code = jsonObject.at("code").as_int64();
         }
-        return false;
+        string msg;
+        if (jsonObject.at("msg").is_string())
+        {
+            msg = jsonObject.at("msg").as_string().c_str();
+        }
+        return "Binance Error " + to_string(code) + ": " + msg;
     }
 
     if (jsonObject.contains("orderId") && jsonObject.contains("status"))
     {
-        return true;
+        return nullopt;
     }
 
-    if (errOut)
-    {
-        *errOut = "Unexpected response structure (missing orderId/status)";
-    }
-    return false;
+    return "Unexpected response structure (missing orderId/status)";
 }
 
 std::string BinanceDealService::sendOrder(const string &query, const flat_map<string, string> &headers)
@@ -110,10 +94,10 @@ std::string BinanceDealService::sendOrder(const string &query, const flat_map<st
     string response = httpsPost(context);
     cout << "Order response: " << response << endl;
 
-    string err;
-    if (!binanceResponseOk(response, &err))
+    optional<string> errorOutput = binanceResponseOk(response);
+    if (errorOutput.has_value())
     {
-        throw runtime_error("Order failed: " + err);
+        throw runtime_error("Order failed: " + errorOutput.value());
     }
     return response;
 }
