@@ -9,3 +9,11 @@ add_library(DealLib
 target_include_directories(DealLib
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+target_link_libraries(DealLib
+    PUBLIC
+        Boost::json
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        Threads::Threads
+)

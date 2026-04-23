@@ -18,10 +18,10 @@ target_include_directories(DealServiceTests PRIVATE
 target_link_libraries(DealServiceTests PRIVATE
     GTest::GTest
     GTest::Main
-    Boost::system
     Boost::json
     OpenSSL::SSL
     OpenSSL::Crypto
+    Threads::Threads
 )
 
 add_test(NAME DealServiceTests COMMAND DealServiceTests)
