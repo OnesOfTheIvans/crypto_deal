@@ -1,4 +1,5 @@
 #include "../src/DealService/binance/BinanceDealService.hpp"
+#include "../src/DealService/common/DecimalConverter.hpp"
 #include "../src/DealService/common/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
 #include <gtest/gtest.h>
@@ -16,6 +17,40 @@ class BinanceDealServiceTest : public ::testing::Test
         return BinanceDealService("test.binance.com", "api_key", "secret_key", "ws.binance.com");
     }
 };
+
+namespace {
+    std::string binanceSymbolInfoResponse()
+    {
+        return R"({
+        "symbols": [{
+            "symbol": "BTCUSDT",
+            "status": "TRADING",
+            "baseAsset": "BTC",
+            "baseAssetPrecision": 8,
+            "quoteAsset": "USDT",
+            "quotePrecision": 8,
+            "filters": [
+                {
+                    "filterType": "PRICE_FILTER",
+                    "minPrice": "0.01000000",
+                    "maxPrice": "1000000.00000000",
+                    "tickSize": "0.01000000"
+                },
+                {
+                    "filterType": "LOT_SIZE",
+                    "minQty": "0.00010000",
+                    "maxQty": "9000.00000000",
+                    "stepSize": "0.00010000"
+                },
+                {
+                    "filterType": "MIN_NOTIONAL",
+                    "minNotional": "10.00000000"
+                }
+            ]
+        }]
+    })";
+    }
+} // namespace
 
 TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
 {
@@ -40,14 +75,15 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
     })";
 
     MockNetwork::instance().setResponse("/api/v3/order/test", "{}");
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
     req.side = "BUY";
     req.type = "LIMIT";
-    req.quantity = 1.0;
-    req.price = 50000.0;
+    req.quantity = DecimalConverter::parseDecimal("1.0");
+    req.price = DecimalConverter::parseDecimal("50000.0");
     req.timeInForce = "GTC";
 
     OrderInfo info = service.placeOrder(req);
@@ -57,8 +93,8 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.status, "NEW");
     EXPECT_EQ(info.side, "BUY");
     EXPECT_EQ(info.type, "LIMIT");
-    EXPECT_DOUBLE_EQ(info.price, 50000.0);
-    EXPECT_DOUBLE_EQ(info.origQty, 1.0);
+    EXPECT_EQ(info.price, DecimalConverter::parseDecimal("50000.0"));
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("1.0"));
 }
 
 TEST_F(BinanceDealServiceTest, CancelOrder_Success)
@@ -134,10 +170,10 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.symbol, "ETHUSDT");
     EXPECT_EQ(info.baseAsset, "ETH");
     EXPECT_EQ(info.quoteAsset, "USDT");
-    EXPECT_DOUBLE_EQ(info.minPrice, 0.01);
-    EXPECT_DOUBLE_EQ(info.minQty, 0.0001);
-    EXPECT_DOUBLE_EQ(info.minQty, 0.0001);
-    EXPECT_DOUBLE_EQ(info.minNotional, 10.0);
+    EXPECT_EQ(info.minPrice, DecimalConverter::parseDecimal("0.01"));
+    EXPECT_EQ(info.minQty, DecimalConverter::parseDecimal("0.0001"));
+    EXPECT_EQ(info.minQty, DecimalConverter::parseDecimal("0.0001"));
+    EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("10.0"));
 }
 
 TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
@@ -165,8 +201,8 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
     req.symbol = "ETHUSDT";
     req.side = "BUY";
     req.type = "LIMIT";
-    req.quantity = 1.0;
-    req.price = 2000;
+    req.quantity = DecimalConverter::parseDecimal("1.0");
+    req.price = DecimalConverter::parseDecimal("2000");
     req.timeInForce = "GTC";
 
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);

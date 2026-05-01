@@ -1,6 +1,8 @@
 #ifndef ORDER_INFO_H
 #define ORDER_INFO_H
 
+#include "type_aliasing.hpp"
+
 #include <string>
 
 struct OrderInfo
@@ -34,21 +36,21 @@ struct OrderInfo
                         // Binance: "NEW","PARTIALLY_FILLED","FILLED",... (ALL CAPS)
                         // Bybit: "New","PartiallyFilled","Filled",... (+ Untriggered, etc.)
 
-    double price = 0.0; // Common meaning: order price
-                        // Market orders: often 0 or empty
-                        // For LIMIT: must be set
+    Decimal price{}; // Common meaning: order price
+                     // Market orders: often 0 or empty
+                     // For LIMIT: must be set
 
-    double origQty = 0.0; // Common meaning: requested quantity
-                          // Binance: "origQty"
-                          // Bybit: "qty"
+    Decimal origQty{}; // Common meaning: requested quantity
+                       // Binance: "origQty"
+                       // Bybit: "qty"
 
-    double executedQty = 0.0; // Common meaning: filled quantity
-                              // Binance: "executedQty"
-                              // Bybit: "cumExecQty"
+    Decimal executedQty{}; // Common meaning: filled quantity
+                           // Binance: "executedQty"
+                           // Bybit: "cumExecQty"
 
-    double cumQuoteQty = 0.0; // Common meaning: filled quote amount (value)
-                              // Binance: "cummulativeQuoteQty" (or "cumulativeQuoteQty" in some contexts)
-                              // Bybit: "cumExecValue"
+    Decimal cumQuoteQty{}; // Common meaning: filled quote amount (value)
+                           // Binance: "cummulativeQuoteQty" (or "cumulativeQuoteQty" in some contexts)
+                           // Bybit: "cumExecValue"
 
     long long createdTimeMs = 0; // Common meaning: order creation time in ms
                                  // Binance: often "transactTime" in place order response; in queries you may have
@@ -64,11 +66,11 @@ struct OrderInfo
     std::string category; // Bybit V5 required concept: "spot"/"linear"/...
                           // Binance Spot: not used (leave empty)
 
-    double leavesQty = 0.0; // Bybit: remaining qty "leavesQty"
-                            // Binance: can be derived as origQty - executedQty (not always exact with rounding)
+    Decimal leavesQty{}; // Bybit: remaining qty "leavesQty"
+                         // Binance: can be derived as origQty - executedQty (not always exact with rounding)
 
-    double avgPrice = 0.0; // Bybit: "avgPrice"
-                           // Binance: can be derived: cumQuoteQty / executedQty (if executedQty>0), not a native field
+    Decimal avgPrice{}; // Bybit: "avgPrice"
+                        // Binance: can be derived: cumQuoteQty / executedQty (if executedQty>0), not a native field
 };
 
 #endif

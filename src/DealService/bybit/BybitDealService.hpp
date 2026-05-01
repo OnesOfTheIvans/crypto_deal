@@ -66,19 +66,19 @@ class BybitDealService : public DealService
     flat_map<std::string, BybitOcoGroup> ocoGroups;
     flat_map<std::string, std::string> ocoLegToGroup;
 
-    double parseAmount(const boost::json::object &jsonObject, const char *key);
+    Decimal parseAmount(const boost::json::object &jsonObject, const char *key);
 
     AssetBalance parseBalance(const boost::json::object &coinObject);
 
-    void updateBalanceCache(const std::string &asset, double free, double locked);
+    void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
     std::string createBody(const std::string &baseAsset,
                            const std::string &quoteAsset,
                            const bybit::OrderCategory &category,
                            const bybit::OrderOperation &operation,
                            const bybit::OrderType &type,
-                           double quantity,
-                           double stepSize = 0.0);
+                           Decimal quantity,
+                           Decimal stepSize = Decimal{});
 
     OrderInfo createOrderInfo(const json::object &result,
                               const PlaceOrderRequest &request,
@@ -127,8 +127,8 @@ class BybitDealService : public DealService
                                const std::string &baseAsset,
                                const std::string &quoteAsset,
                                const SymbolInfo &symbolInfo,
-                               double lastPrice,
-                               double &qtyInBase,
+                               Decimal lastPrice,
+                               Decimal &qtyInBase,
                                std::string &reason);
 
   public:
@@ -140,13 +140,13 @@ class BybitDealService : public DealService
         : DealService(host, apiKey, secretKey, websocketHost, recvWindow, ExchangerType::BYBIT)
     {}
 
-    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
-    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
     void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
-    double getTickerPrice(const std::string &symbol);
+    Decimal getTickerPrice(const std::string &symbol);
 
     OrderInfo placeOrder(const PlaceOrderRequest &request) override;
 

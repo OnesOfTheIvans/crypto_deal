@@ -3,6 +3,7 @@
 
 #include "ExchangerPull.hpp"
 #include "ExchangerType.hpp"
+#include "common/type_aliasing.hpp"
 
 #include <optional>
 #include <string>
@@ -15,7 +16,7 @@ struct OperationContext
     std::string previousInAsset;
     std::string side;
     std::optional<std::string> orderId;
-    double quantity;
+    Decimal quantity{};
 
     OperationContext(const std::vector<Exchanger> &exchangers) : exchangersPull(exchangers) {}
 };

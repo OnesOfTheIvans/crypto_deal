@@ -1,4 +1,5 @@
 #include "../src/DealService/bybit/BybitDealService.hpp"
+#include "../src/DealService/common/DecimalConverter.hpp"
 #include "../src/DealService/common/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
 #include <gtest/gtest.h>
@@ -17,6 +18,60 @@ class BybitDealServiceTest : public ::testing::Test
     }
 };
 
+namespace {
+    std::string bybitSymbolInfoResponse()
+    {
+        return R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "status": "Trading",
+                "baseCoin": "BTC",
+                "quoteCoin": "USDT",
+                "priceFilter": {
+                    "tickSize": "0.01",
+                    "minPrice": "0.1",
+                    "maxPrice": "1000000"
+                },
+                "lotSizeFilter": {
+                    "qtyStep": "0.0001",
+                    "minOrderQty": "0.0001",
+                    "maxOrderQty": "1000"
+                }
+            }]
+        }
+    })";
+    }
+
+    std::string bybitWalletBalanceResponse()
+    {
+        return R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [
+                    {
+                        "coin": "USDT",
+                        "walletBalance": "100000",
+                        "availableToWithdraw": "100000",
+                        "locked": "0"
+                    },
+                    {
+                        "coin": "BTC",
+                        "walletBalance": "1",
+                        "availableToWithdraw": "1",
+                        "locked": "0"
+                    }
+                ]
+            }]
+        }
+    })";
+    }
+} // namespace
+
 TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
 {
     auto service = createService();
@@ -31,13 +86,15 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     })";
 
     MockNetwork::instance().setResponse("/v5/order/create", responseJson);
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", bybitWalletBalanceResponse());
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
     req.side = "BUY";
     req.type = "LIMIT";
-    req.quantity = 0.5;
-    req.price = 45000.0;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("45000.0");
     req.timeInForce = "GTC";
 
     OrderInfo info = service.placeOrder(req);
@@ -46,8 +103,8 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.orderId, "132141");
     EXPECT_EQ(info.status, "New");
     EXPECT_EQ(info.side, "Buy");
-    EXPECT_DOUBLE_EQ(info.origQty, 0.5);
-    EXPECT_DOUBLE_EQ(info.price, 45000.0);
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.5"));
+    EXPECT_EQ(info.price, DecimalConverter::parseDecimal("45000.0"));
 }
 
 TEST_F(BybitDealServiceTest, CancelOrder_Success)
@@ -110,8 +167,45 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.symbol, "BTCUSDT");
     EXPECT_EQ(info.baseAsset, "BTC");
     EXPECT_EQ(info.quoteAsset, "USDT");
-    EXPECT_DOUBLE_EQ(info.tickSize, 0.01);
-    EXPECT_DOUBLE_EQ(info.stepSize, 0.0001);
+    EXPECT_EQ(info.tickSize, DecimalConverter::parseDecimal("0.01"));
+    EXPECT_EQ(info.stepSize, DecimalConverter::parseDecimal("0.0001"));
+}
+
+TEST_F(BybitDealServiceTest, GetBalancesRest_BlankOptionalFields)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/time", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "timeSecond": "1776977716"
+        }
+    })");
+
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [{
+                    "coin": "USDT",
+                    "walletBalance": "10.5",
+                    "availableToWithdraw": "",
+                    "availableToTrade": "",
+                    "locked": "0.5"
+                }]
+            }]
+        }
+    })");
+
+    const auto balances = service.getBalancesRest();
+
+    ASSERT_FALSE(balances.empty());
+    const auto balance = service.getBalance("USDT");
+    ASSERT_TRUE(balance.has_value());
+    EXPECT_EQ(balance->free, DecimalConverter::parseDecimal("10.0"));
+    EXPECT_EQ(balance->locked, DecimalConverter::parseDecimal("0.5"));
 }
 
 TEST_F(BybitDealServiceTest, PlaceOco_Success)
@@ -128,14 +222,16 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
     })";
 
     MockNetwork::instance().setResponse("/v5/order/create", responseJson);
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", bybitWalletBalanceResponse());
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
     req.side = "BUY";
-    req.quantity = 0.5;
-    req.price = 45000.0;
-    req.stopPrice = 40000.0;
-    req.stopLimitPrice = 39900.0;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("45000.0");
+    req.stopPrice = DecimalConverter::parseDecimal("40000.0");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("39900.0");
 
     OcoInfo info = service.placeOco(req);
 
@@ -149,7 +245,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 
     req.symbol = "BTCUSDT";
-    req.quantity = -1.0;
+    req.quantity = DecimalConverter::parseDecimal("-1.0");
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
@@ -166,8 +262,8 @@ TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
     req.symbol = "BTCUSDT";
     req.side = "BUY";
     req.type = "LIMIT";
-    req.quantity = 0.1;
-    req.price = 50000;
+    req.quantity = DecimalConverter::parseDecimal("0.1");
+    req.price = DecimalConverter::parseDecimal("50000");
 
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
@@ -193,14 +289,14 @@ TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
     req.side = "HOLD"; // Invalid
-    req.quantity = 1;
-    req.price = 100;
-    req.stopPrice = 90;
+    req.quantity = DecimalConverter::parseDecimal("1");
+    req.price = DecimalConverter::parseDecimal("100");
+    req.stopPrice = DecimalConverter::parseDecimal("90");
 
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 
     req.side = "BUY";
-    req.stopLimitPrice = -50.0;
+    req.stopLimitPrice = DecimalConverter::parseDecimal("-50.0");
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
@@ -226,13 +322,15 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
     MockNetwork::instance().setResponse("/v5/order/create", tpSuccess);       // TP
     MockNetwork::instance().setResponse("/v5/order/create", slFailure);       // SL
     MockNetwork::instance().setResponse("/v5/order/cancel", rollbackSuccess); // Rollback
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", bybitWalletBalanceResponse());
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
     req.side = "SELL";
-    req.quantity = 0.5;
-    req.price = 60000;
-    req.stopPrice = 55000;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("60000");
+    req.stopPrice = DecimalConverter::parseDecimal("55000");
 
     try
     {

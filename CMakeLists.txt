@@ -8,6 +8,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Boost.Decimal decimal128_t triggers a GCC psABI compatibility note about 32-byte-aligned parameters.
+    add_compile_options(-Wno-psabi)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()

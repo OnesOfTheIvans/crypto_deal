@@ -8,6 +8,7 @@ add_executable(DealServiceTests
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
+    ../src/DealService/common/DecimalConverter.cpp
 )
 
 target_include_directories(DealServiceTests PRIVATE

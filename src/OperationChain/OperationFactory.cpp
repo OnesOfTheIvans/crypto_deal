@@ -7,10 +7,10 @@
 #include "type_aliasing.hpp"
 
 // DEBUG
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
-#include <chrono>
 
 using namespace std;
 
@@ -23,7 +23,8 @@ OperationFactory::OperationFactory()
                           return [preset](OperationContext &context) -> OperationContext &
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderInfo orderInfo = service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
+                              OrderInfo orderInfo =
+                                  service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
 
                               service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
@@ -33,7 +34,8 @@ OperationFactory::OperationFactory()
                               OrderInfo completeOrderInfo = service->getOrder(orderQuery);
 
                               context.orderId = completeOrderInfo.orderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty : completeOrderInfo.origQty;
+                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
+                                                                                   : completeOrderInfo.origQty;
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
@@ -50,7 +52,8 @@ OperationFactory::OperationFactory()
                           return [preset](OperationContext &context) -> OperationContext &
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderInfo orderInfo = service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
+                              OrderInfo orderInfo =
+                                  service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
 
                               service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
@@ -60,7 +63,8 @@ OperationFactory::OperationFactory()
                               OrderInfo completeOrderInfo = service->getOrder(orderQuery);
 
                               context.orderId = completeOrderInfo.orderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty : completeOrderInfo.origQty;
+                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
+                                                                                   : completeOrderInfo.origQty;
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
@@ -107,8 +111,11 @@ OperationFactory::OperationFactory()
                               orderQuery.orderId = orderInfo.orderId;
                               OrderInfo completeOrderInfo = service->getOrder(orderQuery);
 
-                              context.orderId = completeOrderInfo.clientOrderId.empty() ? completeOrderInfo.orderId : completeOrderInfo.clientOrderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty : completeOrderInfo.origQty;
+                              context.orderId = completeOrderInfo.clientOrderId.empty()
+                                                    ? completeOrderInfo.orderId
+                                                    : completeOrderInfo.clientOrderId;
+                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
+                                                                                   : completeOrderInfo.origQty;
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
@@ -149,92 +156,97 @@ OperationFactory::OperationFactory()
                           };
                       });
 
-    factories.emplace(OperationType::PLACE_OCO,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<PlaceOcoConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              PlaceOcoRequest request;
+    factories.emplace(
+        OperationType::PLACE_OCO,
+        [](const Config &config) -> operation
+        {
+            const auto preset = get<PlaceOcoConfig>(config);
+            return [preset](OperationContext &context) -> OperationContext &
+            {
+                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                PlaceOcoRequest request;
 
-                              if (preset.side == "BUY")
-                              {
-                                  request.symbol = preset.outAsset + context.inAsset;
-                              }
-                              else // SELL
-                              {
-                                  request.symbol = context.inAsset + preset.outAsset;
-                              }
+                if (preset.side == "BUY")
+                {
+                    request.symbol = preset.outAsset + context.inAsset;
+                }
+                else // SELL
+                {
+                    request.symbol = context.inAsset + preset.outAsset;
+                }
 
-                              request.side = preset.side;
-                              request.quantity = context.quantity;
-                              request.price = preset.price;
-                              request.stopPrice = preset.stopPrice;
-                              request.stopLimitPrice = preset.stopLimitPrice;
-                              request.stopLimitTimeInForce = preset.stopLimitTimeInForce;
-                              request.listClientOrderId = preset.listClientOrderId;
-                              request.limitClientOrderId = preset.limitClientOrderId;
-                              request.stopClientOrderId = preset.stopClientOrderId;
-                              OcoInfo ocoInfo = service->placeOco(request);
+                request.side = preset.side;
+                request.quantity = context.quantity;
+                request.price = preset.price;
+                request.stopPrice = preset.stopPrice;
+                request.stopLimitPrice = preset.stopLimitPrice;
+                request.stopLimitTimeInForce = preset.stopLimitTimeInForce;
+                request.listClientOrderId = preset.listClientOrderId;
+                request.limitClientOrderId = preset.limitClientOrderId;
+                request.stopClientOrderId = preset.stopClientOrderId;
+                OcoInfo ocoInfo = service->placeOco(request);
 
-                              context.orderId =
-                                  ocoInfo.listClientOrderId.empty() ? ocoInfo.orderListId : ocoInfo.listClientOrderId;
-                              context.previousInAsset = context.inAsset;
-                              context.inAsset = preset.outAsset;
-                              context.side = preset.side;
+                context.orderId = ocoInfo.listClientOrderId.empty() ? ocoInfo.orderListId : ocoInfo.listClientOrderId;
+                context.previousInAsset = context.inAsset;
+                context.inAsset = preset.outAsset;
+                context.side = preset.side;
 
-                              // Polling loop to wait for execution
-                              cout << "Waiting for OCO execution (" << context.orderId.value_or("unknown") << ")..." << endl;
-                              int retries = 0;
-                              bool filled = false;
-                              while (true)
-                              {
-                                   if (retries > 60) // 30 seconds
-                                   {
-                                       throw runtime_error("Timeout waiting for OCO " + context.orderId.value_or("unknown") + " to fill");
-                                   }
+                // Polling loop to wait for execution
+                cout << "Waiting for OCO execution (" << context.orderId.value_or("unknown") << ")..." << endl;
+                int retries = 0;
+                bool filled = false;
+                while (true)
+                {
+                    if (retries > 60) // 30 seconds
+                    {
+                        throw runtime_error("Timeout waiting for OCO " + context.orderId.value_or("unknown") +
+                                            " to fill");
+                    }
 
-                                   for (const auto& order : ocoInfo.orders)
-                                   {
-                                       try
-                                       {
-                                           OrderQuery query;
-                                           query.symbol = request.symbol;
-                                           query.orderId = order.orderId;
-                                           OrderInfo currentInfo = service->getOrder(query);
+                    for (const auto &order : ocoInfo.orders)
+                    {
+                        try
+                        {
+                            OrderQuery query;
+                            query.symbol = request.symbol;
+                            query.orderId = order.orderId;
+                            OrderInfo currentInfo = service->getOrder(query);
 
-                                           if (currentInfo.status == "Filled")
-                                           {
-                                               cout << "OCO Order " << currentInfo.orderId << " filled!" << endl;
-                                               context.orderId = currentInfo.orderId;
-                                               context.quantity = currentInfo.executedQty > 0 ? currentInfo.executedQty : currentInfo.origQty;
-                                               filled = true;
-                                               break;
-                                           }
-                                           else if (currentInfo.status == "Cancelled" || currentInfo.status == "Rejected" ||
-                                                    currentInfo.status == "Deactivated" || currentInfo.status == "Expired")
-                                           {
-                                                // If one leg is cancelled/rejected, we might want to keep waiting for the other or fail?
-                                                // Usually OCO means if one cancels, other cancels. But if triggered?
-                                                // For now, let's focus on "Filled".
-                                           }
-                                       }
-                                       catch (const std::exception& e)
-                                       {
-                                           cerr << "Error checking OCO order status: " << e.what() << endl;
-                                       }
-                                   }
+                            if (currentInfo.status == "Filled")
+                            {
+                                cout << "OCO Order " << currentInfo.orderId << " filled!" << endl;
+                                context.orderId = currentInfo.orderId;
+                                context.quantity =
+                                    currentInfo.executedQty > 0 ? currentInfo.executedQty : currentInfo.origQty;
+                                filled = true;
+                                break;
+                            }
+                            else if (currentInfo.status == "Cancelled" || currentInfo.status == "Rejected" ||
+                                     currentInfo.status == "Deactivated" || currentInfo.status == "Expired")
+                            {
+                                // If one leg is cancelled/rejected, we might want to keep waiting for the other or
+                                // fail? Usually OCO means if one cancels, other cancels. But if triggered? For now,
+                                // let's focus on "Filled".
+                            }
+                        }
+                        catch (const std::exception &e)
+                        {
+                            cerr << "Error checking OCO order status: " << e.what() << endl;
+                        }
+                    }
 
-                                   if (filled) break;
+                    if (filled)
+                    {
+                        break;
+                    }
 
-                                   std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                                   retries++;
-                              }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    retries++;
+                }
 
-                              return context;
-                          };
-                      });
+                return context;
+            };
+        });
 
     factories.emplace(OperationType::CANCEL_OCO,
                       [](const Config &config) -> operation

@@ -55,13 +55,13 @@ class BinanceDealService : public DealService
                             const std::string &quoteAsset,
                             const binance::OrderOperation &operation,
                             const binance::OrderType &type,
-                            double quantity,
-                            double stepSize = 0.0);
+                            Decimal quantity,
+                            Decimal stepSize = Decimal{});
 
-    double getTickerPrice(const std::string &symbol);
+    Decimal getTickerPrice(const std::string &symbol);
 
-    double
-    calculateSafeQty(const std::string &symbol, double quantity, double price, double stepSize, double minNotional);
+    Decimal
+    calculateSafeQty(const std::string &symbol, Decimal quantity, Decimal price, Decimal stepSize, Decimal minNotional);
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
@@ -69,9 +69,9 @@ class BinanceDealService : public DealService
 
     std::optional<std::string> binanceResponseOk(const std::string &response);
 
-    double parseAmount(const json::object &o, const char *key);
+    Decimal parseAmount(const json::object &o, const char *key);
 
-    void updateBalanceCache(const std::string &asset, double free, double locked);
+    void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
     void handleUserStreamMessage(const std::string &msg);
 
@@ -103,9 +103,9 @@ class BinanceDealService : public DealService
         : DealService(host, apiKey, secretKey, websocketHost, recvWindow, ExchangerType::BINANCE)
     {}
 
-    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
-    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) override;
+    OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
     void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 

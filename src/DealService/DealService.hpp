@@ -51,9 +51,9 @@ class DealService
           secretKey(secretKey), websocketHost(websocketHost), exchangerType(exchangerType), userStream(false)
     {}
 
-    virtual OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+    virtual OrderInfo buyCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) = 0;
 
-    virtual OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, double quantity) = 0;
+    virtual OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) = 0;
 
     virtual void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
 

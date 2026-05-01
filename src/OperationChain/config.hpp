@@ -2,6 +2,8 @@
 #define CONFIG_H
 
 #include "ExchangerType.hpp"
+#include "common/type_aliasing.hpp"
+
 #include <optional>
 #include <string>
 #include <variant>
@@ -23,7 +25,7 @@ struct PlaceOrderConfig
     std::string outAsset;
     std::string side;
     std::string type;
-    double price;
+    Decimal price{};
     std::optional<std::string> timeInForce;
     std::optional<std::string> triggerPrice;
     std::optional<std::string> orderFilter;
@@ -34,9 +36,9 @@ struct PlaceOcoConfig
 {
     std::string outAsset;
     std::string side;
-    double price;
-    double stopPrice;
-    std::optional<double> stopLimitPrice;
+    Decimal price{};
+    Decimal stopPrice{};
+    std::optional<Decimal> stopLimitPrice;
     std::optional<std::string> stopLimitTimeInForce;
     std::optional<std::string> listClientOrderId;
     std::optional<std::string> limitClientOrderId;

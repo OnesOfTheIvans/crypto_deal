@@ -3,6 +3,7 @@
 #include "DealService.hpp"
 #include "binance/BinanceDealService.hpp"
 #include "bybit/BybitDealService.hpp"
+#include "common/DecimalConverter.hpp"
 
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -24,7 +25,6 @@
 using namespace std;
 
 namespace {
-
     struct Config
     {
         string binanceHost;
@@ -104,21 +104,21 @@ namespace {
         return out;
     }
 
-    static double remainingQty(const OrderInfo &o)
+    static Decimal remainingQty(const OrderInfo &o)
     {
-        if (o.leavesQty > 0.0)
+        if (o.leavesQty > 0)
         {
             return o.leavesQty;
         }
-        const double r = o.origQty - o.executedQty;
-        return (r > 0.0) ? r : 0.0;
+        const Decimal r = o.origQty - o.executedQty;
+        return (r > 0) ? r : Decimal{0};
     }
 
     static bool isOpenForCancel(const OrderInfo &o)
     {
         const string s = normalizeOrderStatus(o.status);
         const bool statusOk = (s == "new") || (s == "partiallyfilled") || (s == "untriggered");
-        return statusOk && (remainingQty(o) > 0.0);
+        return statusOk && (remainingQty(o) > 0);
     }
 
     static bool waitForStreamConnected(DealService &svc, int tries = 50, int sleepMs = 100)
@@ -281,9 +281,9 @@ namespace {
             SymbolInfo info;
             ASSERT_NO_THROW(info = svc->getSymbolInfo(symbol, category));
             EXPECT_EQ(info.symbol, symbol);
-            EXPECT_GT(info.tickSize, 0.0);
-            EXPECT_GT(info.stepSize, 0.0);
-            EXPECT_GT(info.minQty, 0.0);
+            EXPECT_GT(info.tickSize, Decimal{0});
+            EXPECT_GT(info.stepSize, Decimal{0});
+            EXPECT_GT(info.minQty, Decimal{0});
             EXPECT_FALSE(info.baseAsset.empty());
             EXPECT_FALSE(info.quoteAsset.empty());
         }
@@ -310,15 +310,15 @@ namespace {
             SCOPED_TRACE("Step: buyCrypto + sellCrypto");
             const string base = "BTC";
             const string quote = "USDT";
-            const double qty = 0.00009;
+            const Decimal qty = DecimalConverter::parseDecimal("0.00009");
 
-            bool buyOk = false;
-            ASSERT_NO_THROW(buyOk = svc->buyCrypto(base, quote, qty));
-            ASSERT_TRUE(buyOk) << "buyCrypto returned false";
+            OrderInfo buyOrder;
+            ASSERT_NO_THROW(buyOrder = svc->buyCrypto(base, quote, qty));
+            EXPECT_FALSE(buyOrder.orderId.empty());
 
-            bool sellOk = false;
-            ASSERT_NO_THROW(sellOk = svc->sellCrypto(base, quote, qty));
-            ASSERT_TRUE(sellOk) << "sellCrypto returned false";
+            OrderInfo sellOrder;
+            ASSERT_NO_THROW(sellOrder = svc->sellCrypto(base, quote, qty));
+            EXPECT_FALSE(sellOrder.orderId.empty());
         }
 
         {
@@ -328,8 +328,8 @@ namespace {
             req.category = category;
             req.side = "BUY";
             req.type = "LIMIT";
-            req.quantity = 0.0002;
-            req.price = 65000.0;
+            req.quantity = DecimalConverter::parseDecimal("0.0002");
+            req.price = DecimalConverter::parseDecimal("65000.0");
             req.timeInForce = string("GTC");
             req.clientOrderId = string("IT_ORDER_") + to_string(time(nullptr));
 
@@ -378,22 +378,22 @@ namespace {
             SCOPED_TRACE("Step: buy BTC to fund OCO SELL");
             const string base = "BTC";
             const string quote = "USDT";
-            const double qty = 0.00010;
+            const Decimal qty = DecimalConverter::parseDecimal("0.00010");
 
-            bool buyOk = false;
-            ASSERT_NO_THROW(buyOk = svc->buyCrypto(base, quote, qty));
-            ASSERT_TRUE(buyOk) << "buyCrypto returned false (needed to fund OCO SELL)";
+            OrderInfo buyOrder;
+            ASSERT_NO_THROW(buyOrder = svc->buyCrypto(base, quote, qty));
+            EXPECT_FALSE(buyOrder.orderId.empty()) << "buyCrypto did not create an order (needed to fund OCO SELL)";
         }
 
         PlaceOcoRequest oco;
         oco.symbol = symbol;
         oco.side = "SELL";
-        oco.quantity = 0.00010;
+        oco.quantity = DecimalConverter::parseDecimal("0.00010");
 
-        oco.price = 90000.0;
-        oco.stopPrice = 60000.0;
+        oco.price = DecimalConverter::parseDecimal("90000.0");
+        oco.stopPrice = DecimalConverter::parseDecimal("60000.0");
 
-        oco.stopLimitPrice = 59000.0;
+        oco.stopLimitPrice = DecimalConverter::parseDecimal("59000.0");
         oco.stopLimitTimeInForce = string("GTC");
 
         oco.listClientOrderId = string("IT_OCO_") + to_string(time(nullptr));
@@ -435,11 +435,11 @@ namespace {
             SCOPED_TRACE("Step: cleanup sell BTC");
             const string base = "BTC";
             const string quote = "USDT";
-            const double qty = 0.00010;
+            const Decimal qty = DecimalConverter::parseDecimal("0.00010");
 
-            bool sellOk = false;
-            ASSERT_NO_THROW(sellOk = svc->sellCrypto(base, quote, qty));
-            ASSERT_TRUE(sellOk) << "cleanup sellCrypto returned false";
+            OrderInfo sellOrder;
+            ASSERT_NO_THROW(sellOrder = svc->sellCrypto(base, quote, qty));
+            EXPECT_FALSE(sellOrder.orderId.empty()) << "cleanup sellCrypto did not create an order";
         }
     }
 
