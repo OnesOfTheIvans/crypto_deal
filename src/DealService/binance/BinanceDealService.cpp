@@ -284,20 +284,23 @@ long long BinanceDealService::getServerTime()
     throw runtime_error("Failed to gain Binance server time");
 }
 
+bool BinanceDealService::isTimeSyncRecent() const
+{
+    long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
+    long long lastMonoMs = lastSyncMonoMs.load();
+    return currentMonoMs - lastMonoMs < 10000;
+}
+
 void BinanceDealService::syncTime()
 {
-    long long currentMono = chrono::steady_clock::now().time_since_epoch().count() / 1000000; // ms
-    long long lastMono = lastSyncMonoMs.load();
-    if (currentMono - lastMono < 10000)
+    if (isTimeSyncRecent())
     {
         return;
     }
 
     lock_guard<mutex> lock(timeSyncMutex);
 
-    currentMono = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
-    lastMono = lastSyncMonoMs.load();
-    if (currentMono - lastMono < 10000)
+    if (isTimeSyncRecent())
     {
         return;
     }
@@ -306,7 +309,8 @@ void BinanceDealService::syncTime()
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
     serverTimeOffset = serverTime - localTime;
-    lastSyncMonoMs.store(currentMono);
+    long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
+    lastSyncMonoMs.store(currentMonoMs);
     cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
 }
 
@@ -315,6 +319,27 @@ long long BinanceDealService::getTimestamp()
     syncTime();
     auto now = chrono::system_clock::now();
     return chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count() + serverTimeOffset;
+}
+
+void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream)
+{
+    beast::flat_buffer buffer;
+    websocketStream.read(buffer);
+    string msg = beast::buffers_to_string(buffer.data());
+
+    beast::error_code ec;
+    json::value val = json::parse(msg, ec);
+    if (!ec && val.is_object())
+    {
+        json::object &root = val.as_object();
+        if (root.contains("status") && root.at("status").as_int64() == 200)
+        {
+            cout << "Binance stream subscribed successfully." << endl;
+            return;
+        }
+    }
+
+    cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
 }
 
 void BinanceDealService::startUserStream()
@@ -366,32 +391,7 @@ void BinanceDealService::startUserStream()
                 const string sub = buildUserStreamSubscribeRequestJson();
                 sharedWebsocketStream->write(net::buffer(sub));
 
-                {
-                    beast::flat_buffer buffer;
-                    sharedWebsocketStream->read(buffer);
-                    string msg = beast::buffers_to_string(buffer.data());
-
-                    beast::error_code ec;
-                    json::value val = json::parse(msg, ec);
-                    bool ok = false;
-                    if (!ec && val.is_object())
-                    {
-                        json::object &root = val.as_object();
-                        if (root.contains("status") && root.at("status").as_int64() == 200)
-                        {
-                            ok = true;
-                        }
-                    }
-
-                    if (!ok)
-                    {
-                        cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
-                    }
-                    else
-                    {
-                        cout << "Binance stream subscribed successfully." << endl;
-                    }
-                }
+                handleUserStreamSubscriptionResponse(*sharedWebsocketStream);
 
                 setStreamStatus(StreamStatus::CONNECTED);
 
@@ -656,7 +656,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     return createOrderInfo(jsonObject);
 }
 
-OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
+string BinanceDealService::buildQueryForOrder(const OrderQuery &request)
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
     throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
@@ -680,8 +680,12 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 
     string queryString = queryStream.str();
     string signature = hmac_sha256(secretKey, queryString);
-    string fullQuery = queryString + "&signature=" + signature;
+    return queryString + "&signature=" + signature;
+}
 
+OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
+{
+    string fullQuery = buildQueryForOrder(request);
     string target = "/api/v3/order?" + fullQuery;
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
@@ -703,32 +707,9 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 
 OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 {
-    throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
-            "Either orderId or clientOrderId must be provided");
-
-    auto timestamp = chrono::system_clock::now();
-    ostringstream queryStream;
-    queryStream << "symbol=" << request.symbol;
-
-    if (request.orderId.has_value())
-    {
-        queryStream << "&orderId=" << *request.orderId;
-    }
-    if (request.clientOrderId.has_value())
-    {
-        queryStream << "&origClientOrderId=" << *request.clientOrderId;
-    }
-
-    queryStream << "&recvWindow=" << recvWindow
-                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
-
-    string queryString = queryStream.str();
-    string signature = hmac_sha256(secretKey, queryString);
-    string fullQuery = queryString + "&signature=" + signature;
-
+    string fullQuery = buildQueryForOrder(request);
     string target = "/api/v3/order?" + fullQuery;
-    HttpRequestContext context(ioc, ctx, host, target); // GET request
+    HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 

@@ -83,6 +83,8 @@ class BinanceDealService : public DealService
 
     SymbolInfo createSymbolInfo(const json::object &symbolObject);
 
+    std::string buildQueryForOrder(const OrderQuery &request);
+
     std::string buildOcoQuery(const PlaceOcoRequest &request, long long timestamp);
 
     std::string buildOcoCancelQuery(const OrderListQuery &request, long long timestamp);
@@ -93,8 +95,10 @@ class BinanceDealService : public DealService
     void setStreamError(const std::string &error);
 
     long long getServerTime();
+    bool isTimeSyncRecent() const;
     void syncTime();
     long long getTimestamp();
+    void handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream);
 
   public:
     BinanceDealService(const std::string &host,
