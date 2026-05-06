@@ -280,7 +280,8 @@ long long BinanceDealService::getServerTime()
             return obj.at("serverTime").as_int64();
         }
     }
-    return 0;
+
+    throw runtime_error("Failed to gain Binance server time");
 }
 
 void BinanceDealService::syncTime()
@@ -302,14 +303,11 @@ void BinanceDealService::syncTime()
     }
 
     long long serverTime = getServerTime();
-    if (serverTime > 0)
-    {
-        long long localTime =
-            chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-        serverTimeOffset = serverTime - localTime;
-        lastSyncMonoMs.store(currentMono);
-        cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
-    }
+    long long localTime =
+        chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
+    serverTimeOffset = serverTime - localTime;
+    lastSyncMonoMs.store(currentMono);
+    cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
 }
 
 long long BinanceDealService::getTimestamp()
