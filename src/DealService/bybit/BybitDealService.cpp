@@ -1,5 +1,6 @@
 #include "BybitDealService.hpp"
 #include "common/EnumStringConverter.hpp"
+#include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 #include <cstdlib>
 
@@ -13,6 +14,7 @@
 
 using namespace std;
 using namespace bybit;
+using namespace exception_handling;
 
 DealService::StreamStatus BybitDealService::getUserStreamStatus() const
 {
@@ -100,17 +102,11 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
     const string response = httpsPost(requestContext);
 
     string errorMessage;
-    if (!bybitResponseOk(response, &errorMessage))
-    {
-        throw runtime_error("Bybit wallet-balance failed: " + errorMessage);
-    }
+    throwIf(!bybitResponseOk(response, &errorMessage), "Bybit wallet-balance failed: " + errorMessage);
 
     beast::error_code jsonError;
     json::value parsedValue = json::parse(response, jsonError);
-    if (jsonError || !parsedValue.is_object())
-    {
-        throw runtime_error("Bybit wallet-balance JSON parse error");
-    }
+    throwIf(jsonError || !parsedValue.is_object(), "Bybit wallet-balance JSON parse error");
 
     const json::object &rootObject = parsedValue.as_object();
     const auto *resultValue = rootObject.if_contains("result");
@@ -412,10 +408,8 @@ void BybitDealService::startUserStream()
                         json::object &root = val.as_object();
                         if (root.contains("op") && root.at("op").as_string() == "auth")
                         {
-                            if (!root.contains("success") || !root.at("success").as_bool())
-                            {
-                                throw runtime_error("Bybit stream: auth failed: " + msg);
-                            }
+                            throwIf(!root.contains("success") || !root.at("success").as_bool(),
+                                    "Bybit stream: auth failed: " + msg);
                             cout << "Bybit stream authenticated successfully." << endl;
                         }
                     }
@@ -576,10 +570,7 @@ void BybitDealService::updateBalanceCache(const string &asset, Decimal free, Dec
 AssetBalance BybitDealService::parseBalance(const json::object &coinObject)
 {
     auto *nameValue = coinObject.if_contains("coin");
-    if (!nameValue || !nameValue->is_string())
-    {
-        throw runtime_error("Bybit balance stream: missing or invalid 'coin' field");
-    }
+    throwIf(!nameValue || !nameValue->is_string(), "Bybit balance stream: missing or invalid 'coin' field");
 
     const json::string &assetNameString = nameValue->as_string();
     string asset(assetNameString.c_str(), assetNameString.size());
@@ -688,10 +679,7 @@ string BybitDealService::sendOrder(const string &body, const flat_map<string, st
     cout << "Order response: " << response << endl;
 
     string err;
-    if (!bybitResponseOk(response, &err))
-    {
-        throw runtime_error("Order failed: " + err);
-    }
+    throwIf(!bybitResponseOk(response, &err), "Order failed: " + err);
     return response;
 }
 
@@ -798,16 +786,11 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode || !jsonValue.is_object())
-    {
-        throw runtime_error("Failed to parse buyCrypto response");
-    }
+    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse buyCrypto response");
 
     const json::object &jsonObject = jsonValue.as_object();
-    if (!jsonObject.contains("result") || !jsonObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result in buyCrypto response");
-    }
+    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
+            "Missing result in buyCrypto response");
     const json::object &resultObject = jsonObject.at("result").as_object();
 
     OrderInfo info;
@@ -904,16 +887,11 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode || !jsonValue.is_object())
-    {
-        throw runtime_error("Failed to parse sellCrypto response");
-    }
+    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse sellCrypto response");
 
     const json::object &jsonObject = jsonValue.as_object();
-    if (!jsonObject.contains("result") || !jsonObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result in sellCrypto response");
-    }
+    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
+            "Missing result in sellCrypto response");
     const json::object &resultObject = jsonObject.at("result").as_object();
 
     OrderInfo info;
@@ -942,32 +920,15 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
 
 OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (request.quantity <= 0)
-    {
-        throw runtime_error("Quantity must be greater than 0");
-    }
-    if (request.side != "BUY" && request.side != "SELL")
-    {
-        throw runtime_error("Invalid side: " + request.side);
-    }
-    if (request.type != "MARKET" && request.type != "LIMIT")
-    {
-        throw runtime_error("Invalid type: " + request.type);
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be greater than 0");
+    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
+    throwIf(request.type != "MARKET" && request.type != "LIMIT", "Invalid type: " + request.type);
     if (request.type == "LIMIT")
     {
-        if (!request.price.has_value() || *request.price <= 0)
-        {
-            throw runtime_error("Price must be > 0 for LIMIT orders");
-        }
-        if (!request.timeInForce.has_value() || request.timeInForce->empty())
-        {
-            throw runtime_error("TimeInForce required for LIMIT orders");
-        }
+        throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
+        throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
+                "TimeInForce required for LIMIT orders");
     }
 
     string side = (request.side == "BUY") ? "Buy" : "Sell";        // TODO solve compare issue
@@ -1026,9 +987,9 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
                     throw runtime_error(messageStream.str());
                 }
             }
-            else if (quoteFree <= 0)
+            else
             {
-                throw runtime_error("Insufficient balance: no free " + quoteAsset);
+                throwIf(quoteFree <= 0, "Insufficient balance: no free " + quoteAsset);
             }
         }
         else
@@ -1100,14 +1061,8 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
@@ -1127,10 +1082,8 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
         throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
     }
 
-    if (!jsonObject.contains("result") || !jsonObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result object in response");
-    }
+    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
+            "Missing result object in response");
 
     json::object &result = jsonObject.at("result").as_object();
 
@@ -1139,14 +1092,9 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
 OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (!request.orderId.has_value() && !request.clientOrderId.has_value())
-    {
-        throw runtime_error("Either orderId or clientOrderId must be provided");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
 
     string category = request.category;
     if (category.empty())
@@ -1183,14 +1131,8 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Bybit cancelOrder: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Bybit cancelOrder: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
@@ -1210,10 +1152,8 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
         throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
     }
 
-    if (!jsonObject.contains("result") || !jsonObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result object in response");
-    }
+    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
+            "Missing result object in response");
 
     json::object &result = jsonObject.at("result").as_object();
 
@@ -1222,14 +1162,9 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 
 OrderInfo BybitDealService::getOrder(const OrderQuery &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (!request.orderId.has_value() && !request.clientOrderId.has_value())
-    {
-        throw runtime_error("Either orderId or clientOrderId must be provided");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
 
     string category = request.category;
     if (category.empty())
@@ -1265,14 +1200,8 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Bybit getOrder: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Bybit getOrder: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
@@ -1292,26 +1221,15 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
         throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
     }
 
-    if (!jsonObject.contains("result") || !jsonObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result object in response");
-    }
+    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
+            "Missing result object in response");
     json::object &result = jsonObject.at("result").as_object();
 
-    if (!result.contains("list") || !result.at("list").is_array())
-    {
-        throw runtime_error("Missing or invalid list in response");
-    }
+    throwIf(!result.contains("list") || !result.at("list").is_array(), "Missing or invalid list in response");
     json::array &orderList = result.at("list").as_array();
 
-    if (orderList.empty())
-    {
-        throw runtime_error("Order not found (empty list)");
-    }
-    if (!orderList[0].is_object())
-    {
-        throw runtime_error("Invalid order object in list");
-    }
+    throwIf(orderList.empty(), "Order not found (empty list)");
+    throwIf(!orderList[0].is_object(), "Invalid order object in list");
     const json::object &orderObject = orderList[0].as_object();
 
     return createDetailedOrderInfo(orderObject, request, category, timestamp);
@@ -1414,10 +1332,7 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result,
 
 SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &category)
 {
-    if (symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
+    throwIf(symbol.empty(), "Symbol cannot be empty");
 
     string effectiveCategory = category.empty() ? "spot" : category;
 
@@ -1438,14 +1353,8 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Bybit getSymbolInfo: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Bybit getSymbolInfo: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &rootObject = jsonValue.as_object();
 
@@ -1465,28 +1374,16 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
         throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
     }
 
-    if (!rootObject.contains("result") || !rootObject.at("result").is_object())
-    {
-        throw runtime_error("Missing result object");
-    }
+    throwIf(!rootObject.contains("result") || !rootObject.at("result").is_object(), "Missing result object");
 
     json::object &resultObject = rootObject.at("result").as_object();
 
-    if (!resultObject.contains("list") || !resultObject.at("list").is_array())
-    {
-        throw runtime_error("Missing list in result");
-    }
+    throwIf(!resultObject.contains("list") || !resultObject.at("list").is_array(), "Missing list in result");
 
     json::array &instrumentList = resultObject.at("list").as_array();
-    if (instrumentList.empty())
-    {
-        throw runtime_error("Symbol not found: " + symbol);
-    }
+    throwIf(instrumentList.empty(), "Symbol not found: " + symbol);
 
-    if (!instrumentList[0].is_object())
-    {
-        throw runtime_error("Invalid instrument object");
-    }
+    throwIf(!instrumentList[0].is_object(), "Invalid instrument object");
 
     SymbolInfo info = createSymbolInfo(instrumentList[0].as_object(), symbol);
     {
@@ -1647,18 +1544,9 @@ SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, co
         info.maxNotional = parseAmount(lotSizeFilter, "maxOrderAmt");
     }
 
-    if (info.tickSize <= 0)
-    {
-        throw runtime_error("Invalid tickSize");
-    }
-    if (info.stepSize <= 0)
-    {
-        throw runtime_error("Invalid stepSize");
-    }
-    if (info.minQty <= 0)
-    {
-        throw runtime_error("Invalid minQty");
-    }
+    throwIf(info.tickSize <= 0, "Invalid tickSize");
+    throwIf(info.stepSize <= 0, "Invalid stepSize");
+    throwIf(info.minQty <= 0, "Invalid minQty");
 
     return info;
 }
@@ -1673,30 +1561,13 @@ namespace {
 
 OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (request.quantity <= 0)
-    {
-        throw runtime_error("Quantity must be greater than 0");
-    }
-    if (request.price <= 0)
-    {
-        throw runtime_error("Price must be greater than 0");
-    }
-    if (request.stopPrice <= 0)
-    {
-        throw runtime_error("StopPrice must be greater than 0");
-    }
-    if (request.side != "BUY" && request.side != "SELL")
-    {
-        throw runtime_error("Invalid side: " + request.side);
-    }
-    if (request.stopLimitPrice.has_value() && *request.stopLimitPrice <= 0)
-    {
-        throw runtime_error("StopLimitPrice must be greater than 0 if set");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be greater than 0");
+    throwIf(request.price <= 0, "Price must be greater than 0");
+    throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
+    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
+    throwIf(request.stopLimitPrice.has_value() && *request.stopLimitPrice <= 0,
+            "StopLimitPrice must be greater than 0 if set");
 
     string groupId;
     if (request.listClientOrderId.has_value() && !request.listClientOrderId->empty())
@@ -1848,10 +1719,7 @@ OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
         }
     }
 
-    if (!found)
-    {
-        throw runtime_error("Bybit cancelOco: unknown group params");
-    }
+    throwIf(!found, "Bybit cancelOco: unknown group params");
 
     OrderInfo takeProfitCancelInfo, stopLossCancelInfo;
     bool tpTerminal = false;
@@ -2196,14 +2064,8 @@ bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Bybit cancelAllOpenOrders: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Bybit cancelAllOpenOrders: Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Bybit cancelAllOpenOrders: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Bybit cancelAllOpenOrders: Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 

@@ -1,10 +1,13 @@
 #include "DecimalConverter.hpp"
+#include "exception_handling.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <system_error>
+
+using namespace exception_handling;
 
 namespace
 {
@@ -34,10 +37,7 @@ Decimal DecimalConverter::parseDecimal(std::string_view text)
     Decimal value;
     const auto result = boost::decimal::from_chars(text.data(), text.data() + text.size(), value);
 
-    if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
-    {
-        throw std::runtime_error("Invalid decimal value");
-    }
+    throwIf(result.ec != std::errc{} || result.ptr != text.data() + text.size(), "Invalid decimal value");
 
     return value;
 }
@@ -74,10 +74,7 @@ std::string DecimalConverter::formatDecimal(Decimal value, int decimals)
                                                  value,
                                                  boost::decimal::chars_format::fixed,
                                                  decimals);
-    if (result.ec != std::errc{})
-    {
-        throw std::runtime_error("formatDecimal: failed to format decimal value");
-    }
+    throwIf(result.ec != std::errc{}, "formatDecimal: failed to format decimal value");
 
     return trimTrailingZeros(std::string(buffer.data(), result.ptr));
 }

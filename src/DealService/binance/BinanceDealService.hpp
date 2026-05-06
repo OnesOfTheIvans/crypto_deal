@@ -73,6 +73,8 @@ class BinanceDealService : public DealService
 
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
+    void updateCache(const json::array &balancesArray);
+
     void handleUserStreamMessage(const std::string &msg);
 
     std::string buildUserStreamSubscribeRequestJson();

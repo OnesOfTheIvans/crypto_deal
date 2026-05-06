@@ -1,6 +1,7 @@
 #include "BinanceDealService.hpp"
 #include "common/EnumStringConverter.hpp"
 #include "common/HttpRequestContext.hpp"
+#include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 
 #include <chrono>
@@ -13,6 +14,26 @@
 
 using namespace std;
 using namespace binance;
+using namespace exception_handling;
+
+namespace {
+    string binanceErrorMessage(const json::object &jsonObject)
+    {
+        long long code = 0;
+        if (auto *codeValue = jsonObject.if_contains("code"); codeValue && codeValue->is_int64())
+        {
+            code = codeValue->as_int64();
+        }
+
+        string msg;
+        if (auto *msgValue = jsonObject.if_contains("msg"); msgValue && msgValue->is_string())
+        {
+            msg = string(msgValue->as_string());
+        }
+
+        return "Binance Error " + to_string(code) + ": " + msg;
+    }
+} // namespace
 
 string BinanceDealService::createQuery(const string &baseAsset,
                                        const string &quoteAsset,
@@ -94,10 +115,7 @@ std::string BinanceDealService::sendOrder(const string &query, const flat_map<st
     cout << "Order response: " << response << endl;
 
     optional<string> errorOutput = binanceResponseOk(response);
-    if (errorOutput.has_value())
-    {
-        throw runtime_error("Order failed: " + errorOutput.value());
-    }
+    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value());
     return response;
 }
 
@@ -155,63 +173,13 @@ void BinanceDealService::updateBalanceCache(const string &asset, Decimal free, D
     }
 }
 
-void BinanceDealService::handleUserStreamMessage(const string &msg)
+void BinanceDealService::updateCache(const json::array &balancesArray)
 {
-    beast::error_code ec;
-    json::value jsonValue = json::parse(msg, ec);
-    if (ec)
-    {
-        cerr << "User stream message parse error: " << ec.message() << endl;
-        return;
-    }
-    if (!jsonValue.is_object())
-    {
-        return;
-    }
-
-    json::object &rootObject = jsonValue.as_object();
-    json::object *eventObject = nullptr;
-
-    if (rootObject.contains("e") && rootObject.at("e").is_string())
-    {
-        eventObject = &rootObject;
-    }
-
-    else if (rootObject.contains("event") && rootObject.at("event").is_object())
-    {
-        eventObject = &rootObject.at("event").as_object();
-    }
-
-    if (!eventObject)
-    {
-        return;
-    }
-
-    auto *eventTypeNameValue = eventObject->if_contains("e");
-    if (!eventTypeNameValue || !eventTypeNameValue->is_string())
-    {
-        throw runtime_error("User stream message missing or invalid 'e' (event type) field");
-    }
-
-    const json::string &eventType = eventTypeNameValue->as_string();
-    if (eventType != "outboundAccountPosition")
-    {
-        return;
-    }
-
-    auto *balancesArrayValue = eventObject->if_contains("B");
-    if (!balancesArrayValue || !balancesArrayValue->is_array())
-    {
-        return;
-    }
-
-    json::array &balancesArray = balancesArrayValue->as_array();
-
-    for (json::value &item : balancesArray)
+    for (const json::value &item : balancesArray)
     {
         if (item.is_object())
         {
-            json::object &balanceItemObject = item.as_object();
+            const json::object &balanceItemObject = item.as_object();
 
             auto *assetValue = balanceItemObject.if_contains("a");
             if (assetValue && assetValue->is_string())
@@ -226,6 +194,48 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
             }
         }
     }
+}
+
+void BinanceDealService::handleUserStreamMessage(const string &msg)
+{
+    beast::error_code ec;
+    json::value jsonValue = json::parse(msg, ec);
+    if (ec)
+    {
+        cerr << "User stream message parse error: " << ec.message() << endl;
+        return;
+    }
+    if (!jsonValue.is_object())
+    {
+        return;
+    }
+
+    const json::object &rootObject = jsonValue.as_object();
+    auto *eventValue = rootObject.if_contains("event");
+    if (!eventValue || !eventValue->is_object())
+    {
+        return;
+    }
+
+    const json::object &eventObject = eventValue->as_object();
+
+    auto *eventTypeNameValue = eventObject.if_contains("e");
+    throwIf(!eventTypeNameValue || !eventTypeNameValue->is_string(),
+            "User stream message missing or invalid 'e' (event type) field");
+
+    const json::string &eventType = eventTypeNameValue->as_string();
+    if (eventType != "outboundAccountPosition")
+    {
+        return;
+    }
+
+    auto *balancesArrayValue = eventObject.if_contains("B");
+    if (!balancesArrayValue || !balancesArrayValue->is_array())
+    {
+        return;
+    }
+
+    updateCache(balancesArrayValue->as_array());
 }
 
 DealService::StreamStatus BinanceDealService::getUserStreamStatus() const
@@ -555,10 +565,7 @@ OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &q
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode || !jsonValue.is_object())
-    {
-        throw runtime_error("Failed to parse buyCrypto response");
-    }
+    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse buyCrypto response");
     return createOrderInfo(jsonValue.as_object());
 }
 
@@ -589,41 +596,21 @@ OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode || !jsonValue.is_object())
-    {
-        throw runtime_error("Failed to parse sellCrypto response");
-    }
+    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse sellCrypto response");
     return createOrderInfo(jsonValue.as_object());
 }
 
 OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (request.quantity <= 0)
-    {
-        throw runtime_error("Quantity must be greater than 0");
-    }
-    if (request.side != "BUY" && request.side != "SELL")
-    {
-        throw runtime_error("Invalid side: " + request.side);
-    }
-    if (request.type != "MARKET" && request.type != "LIMIT")
-    {
-        throw runtime_error("Invalid type: " + request.type);
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be greater than 0");
+    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
+    throwIf(request.type != "MARKET" && request.type != "LIMIT", "Invalid type: " + request.type);
     if (request.type == "LIMIT")
     {
-        if (!request.price.has_value() || *request.price <= 0)
-        {
-            throw runtime_error("Price must be > 0 for LIMIT orders");
-        }
-        if (!request.timeInForce.has_value() || request.timeInForce->empty())
-        {
-            throw runtime_error("TimeInForce required for LIMIT orders");
-        }
+        throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
+        throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
+                "TimeInForce required for LIMIT orders");
     }
 
     SymbolInfo info = getSymbolInfo(request.symbol);
@@ -660,36 +647,21 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
-    if (jsonObject.contains("code") && jsonObject.contains("msg"))
-    {
-        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
-                            string(jsonObject["msg"].as_string()));
-    }
+    throwIf(jsonObject.contains("code") && jsonObject.contains("msg"), binanceErrorMessage(jsonObject));
 
     return createOrderInfo(jsonObject);
 }
 
 OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (!request.orderId.has_value() && !request.clientOrderId.has_value())
-    {
-        throw runtime_error("Either orderId or clientOrderId must be provided");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
 
     auto timestamp = chrono::system_clock::now();
     ostringstream queryStream;
@@ -720,36 +692,21 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance cancelOrder: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance cancelOrder: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
-    if (jsonObject.contains("code") && jsonObject.contains("msg"))
-    {
-        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
-                            string(jsonObject["msg"].as_string()));
-    }
+    throwIf(jsonObject.contains("code") && jsonObject.contains("msg"), binanceErrorMessage(jsonObject));
 
     return createOrderInfo(jsonObject);
 }
 
 OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (!request.orderId.has_value() && !request.clientOrderId.has_value())
-    {
-        throw runtime_error("Either orderId or clientOrderId must be provided");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
 
     auto timestamp = chrono::system_clock::now();
     ostringstream queryStream;
@@ -780,32 +737,19 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance getOrder: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance getOrder: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
 
-    if (jsonObject.contains("code") && jsonObject.contains("msg"))
-    {
-        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
-                            string(jsonObject["msg"].as_string()));
-    }
+    throwIf(jsonObject.contains("code") && jsonObject.contains("msg"), binanceErrorMessage(jsonObject));
 
     return createOrderInfo(jsonObject);
 }
 
 SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string &category)
 {
-    if (symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
+    throwIf(symbol.empty(), "Symbol cannot be empty");
 
     {
         lock_guard<mutex> lock(symbolInfoMutex);
@@ -824,32 +768,18 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance getSymbolInfo: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance getSymbolInfo: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &rootObject = jsonValue.as_object();
 
-    if (!rootObject.contains("symbols") || !rootObject.at("symbols").is_array())
-    {
-        throw runtime_error("Binance response missing 'symbols' array");
-    }
+    throwIf(!rootObject.contains("symbols") || !rootObject.at("symbols").is_array(),
+            "Binance response missing 'symbols' array");
 
     json::array &symbols = rootObject.at("symbols").as_array();
-    if (symbols.empty())
-    {
-        throw runtime_error("Binance symbol not found: " + symbol);
-    }
+    throwIf(symbols.empty(), "Binance symbol not found: " + symbol);
 
-    if (!symbols[0].is_object())
-    {
-        throw runtime_error("Invalid symbol object");
-    }
+    throwIf(!symbols[0].is_object(), "Invalid symbol object");
 
     SymbolInfo info = createSymbolInfo(symbols[0].as_object());
     {
@@ -861,29 +791,15 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
 
 OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (request.quantity <= 0)
-    {
-        throw runtime_error("Quantity must be > 0");
-    }
-    if (request.price <= 0)
-    {
-        throw runtime_error("Price must be > 0");
-    }
-    if (request.stopPrice <= 0)
-    {
-        throw runtime_error("Stop Price must be > 0");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be > 0");
+    throwIf(request.price <= 0, "Price must be > 0");
+    throwIf(request.stopPrice <= 0, "Stop Price must be > 0");
 
     if (request.stopLimitPrice.has_value() && *request.stopLimitPrice > 0)
     {
-        if (!request.stopLimitTimeInForce.has_value() || request.stopLimitTimeInForce->empty())
-        {
-            throw runtime_error("stopLimitTimeInForce required if stopLimitPrice is set");
-        }
+        throwIf(!request.stopLimitTimeInForce.has_value() || request.stopLimitTimeInForce->empty(),
+                "stopLimitTimeInForce required if stopLimitPrice is set");
     }
 
     auto timestamp = chrono::system_clock::now();
@@ -902,35 +818,20 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance placeOco: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance placeOco: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
-    if (jsonObject.contains("code") && jsonObject.contains("msg"))
-    {
-        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
-                            string(jsonObject["msg"].as_string()));
-    }
+    throwIf(jsonObject.contains("code") && jsonObject.contains("msg"), binanceErrorMessage(jsonObject));
 
     return createOcoInfo(jsonObject);
 }
 
 OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Symbol cannot be empty");
-    }
-    if (!request.orderListId.has_value() && !request.listClientOrderId.has_value())
-    {
-        throw runtime_error("Either orderListId or listClientOrderId must be provided");
-    }
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderListId.has_value() && !request.listClientOrderId.has_value(),
+            "Either orderListId or listClientOrderId must be provided");
 
     auto timestamp = chrono::system_clock::now();
     msec timestampMs = chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
@@ -948,47 +849,22 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance cancelOco: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance cancelOco: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
     json::object &jsonObject = jsonValue.as_object();
-    if (jsonObject.contains("code") && jsonObject.contains("msg"))
-    {
-        throw runtime_error("Binance Error " + to_string(jsonObject["code"].as_int64()) + ": " +
-                            string(jsonObject["msg"].as_string()));
-    }
+    throwIf(jsonObject.contains("code") && jsonObject.contains("msg"), binanceErrorMessage(jsonObject));
 
     return createOcoInfo(jsonObject);
 }
 
 string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
 {
-    if (request.symbol.empty())
-    {
-        throw runtime_error("Binance placeOco: symbol cannot be empty");
-    }
-    if (request.side.empty())
-    {
-        throw runtime_error("Binance placeOco: side cannot be empty");
-    }
-    if (request.quantity <= 0)
-    {
-        throw runtime_error("Binance placeOco: quantity must be > 0");
-    }
-    if (request.price <= 0)
-    {
-        throw runtime_error("Binance placeOco: price must be > 0");
-    }
-    if (request.stopPrice <= 0)
-    {
-        throw runtime_error("Binance placeOco: stopPrice must be > 0");
-    }
+    throwIf(request.symbol.empty(), "Binance placeOco: symbol cannot be empty");
+    throwIf(request.side.empty(), "Binance placeOco: side cannot be empty");
+    throwIf(request.quantity <= 0, "Binance placeOco: quantity must be > 0");
+    throwIf(request.price <= 0, "Binance placeOco: price must be > 0");
+    throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
 
     const SymbolInfo info = getSymbolInfo(request.symbol);
     const Decimal belowPrice = request.stopLimitPrice.has_value() ? *request.stopLimitPrice : request.stopPrice;
@@ -1077,10 +953,7 @@ OcoInfo BinanceDealService::createOcoInfo(const json::object &jsonObject)
         info.transactTimeMs = jsonObject.at("transactionTime").as_int64();
     }
 
-    if (!jsonObject.contains("orderReports") || !jsonObject.at("orderReports").is_array())
-    {
-        throw runtime_error("Missing orderReports");
-    }
+    throwIf(!jsonObject.contains("orderReports") || !jsonObject.at("orderReports").is_array(), "Missing orderReports");
 
     for (const auto &reportItem : jsonObject.at("orderReports").as_array())
     {
@@ -1176,10 +1049,7 @@ SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject
         info.pricePrecision = symbolObject.at("quotePrecision").as_int64();
     }
 
-    if (!symbolObject.contains("filters") || !symbolObject.at("filters").is_array())
-    {
-        throw runtime_error("Missing filters for symbol");
-    }
+    throwIf(!symbolObject.contains("filters") || !symbolObject.at("filters").is_array(), "Missing filters for symbol");
 
     for (const auto &filterValue : symbolObject.at("filters").as_array())
     {
@@ -1219,18 +1089,9 @@ SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject
         }
     }
 
-    if (info.tickSize <= 0)
-    {
-        throw runtime_error("Invalid tickSize");
-    }
-    if (info.stepSize <= 0)
-    {
-        throw runtime_error("Invalid stepSize");
-    }
-    if (info.minQty <= 0)
-    {
-        throw runtime_error("Invalid minQty");
-    }
+    throwIf(info.tickSize <= 0, "Invalid tickSize");
+    throwIf(info.stepSize <= 0, "Invalid stepSize");
+    throwIf(info.minQty <= 0, "Invalid minQty");
 
     return info;
 }
@@ -1316,10 +1177,7 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 {
     (void)category;
 
-    if (symbol.empty())
-    {
-        throw runtime_error("Binance cancelAllOpenOrders: symbol cannot be empty");
-    }
+    throwIf(symbol.empty(), "Binance cancelAllOpenOrders: symbol cannot be empty");
 
     ostringstream queryStream;
     queryStream << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
@@ -1336,10 +1194,7 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance cancelAllOpenOrders: JSON parse error: " + errorCode.message());
-    }
+    throwIf(errorCode.failed(), "Binance cancelAllOpenOrders: JSON parse error: " + errorCode.message());
 
     if (jsonValue.is_object())
     {
@@ -1385,14 +1240,8 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 
     boost::system::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        throw runtime_error("Binance getBalancesRest: JSON parse error: " + errorCode.message());
-    }
-    if (!jsonValue.is_object())
-    {
-        throw runtime_error("Binance getBalancesRest: Response is not a JSON object");
-    }
+    throwIf(errorCode.failed(), "Binance getBalancesRest: JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Binance getBalancesRest: Response is not a JSON object");
 
     const json::object &jsonObject = jsonValue.as_object();
     if (jsonObject.contains("code") && jsonObject.contains("msg"))
@@ -1403,10 +1252,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
     }
 
     const auto it = jsonObject.find("balances");
-    if (it == jsonObject.end() || !it->value().is_array())
-    {
-        throw runtime_error("Binance getBalancesRest: Missing 'balances' array");
-    }
+    throwIf(it == jsonObject.end() || !it->value().is_array(), "Binance getBalancesRest: Missing 'balances' array");
 
     const json::array &balancesArray = it->value().as_array();
     for (const auto &balanceItem : balancesArray)
