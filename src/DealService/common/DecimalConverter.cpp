@@ -9,27 +9,26 @@
 
 using namespace exception_handling;
 
-namespace
-{
-constexpr int MaxDecimalPlaces = 34;
-constexpr std::size_t DecimalBufferSize = 128;
+namespace {
+    constexpr int MaxDecimalPlaces = 34;
+    constexpr std::size_t DecimalBufferSize = 128;
 
-std::string trimTrailingZeros(std::string text)
-{
-    while (text.size() > 1 && text.back() == '0')
+    std::string trimTrailingZeros(std::string text)
     {
-        text.pop_back();
+        while (text.size() > 1 && text.back() == '0')
+        {
+            text.pop_back();
+        }
+        if (!text.empty() && text.back() == '.')
+        {
+            text.pop_back();
+        }
+        if (text == "-0")
+        {
+            text = "0";
+        }
+        return text;
     }
-    if (!text.empty() && text.back() == '.')
-    {
-        text.pop_back();
-    }
-    if (text == "-0")
-    {
-        text = "0";
-    }
-    return text;
-}
 } // namespace
 
 Decimal DecimalConverter::parseDecimal(std::string_view text)

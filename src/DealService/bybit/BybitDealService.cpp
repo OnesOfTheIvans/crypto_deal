@@ -766,7 +766,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
     }
 
     cout << "Bybit Safe Qty: " << DecimalConverter::formatByStep(safeQuantity, stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity) << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
+         << " (Req: " << DecimalConverter::formatDecimal(quantity)
+         << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
          << ", MinOrderAmt: " << DecimalConverter::formatDecimal(minOrderAmount)
          << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
 
@@ -867,7 +868,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     }
 
     cout << "Bybit Safe Qty: " << DecimalConverter::formatByStep(safeQuantity, stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity) << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
+         << " (Req: " << DecimalConverter::formatDecimal(quantity)
+         << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
          << ", MinOrderAmt: " << DecimalConverter::formatDecimal(minOrderAmount)
          << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
 
@@ -982,8 +984,9 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
                 if (quoteFree < requiredQuoteAmount)
                 {
                     ostringstream messageStream;
-                    messageStream << "Insufficient balance: need ~" << DecimalConverter::formatDecimal(requiredQuoteAmount)
-                                  << " " << quoteAsset << ", have " << DecimalConverter::formatDecimal(quoteFree);
+                    messageStream << "Insufficient balance: need ~"
+                                  << DecimalConverter::formatDecimal(requiredQuoteAmount) << " " << quoteAsset
+                                  << ", have " << DecimalConverter::formatDecimal(quoteFree);
                     throw runtime_error(messageStream.str());
                 }
             }
@@ -1002,8 +1005,8 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
             if (baseFree < request.quantity)
             {
                 ostringstream messageStream;
-                messageStream << "Insufficient balance: need " << DecimalConverter::formatDecimal(request.quantity) << " "
-                              << baseAsset << ", have " << DecimalConverter::formatDecimal(baseFree);
+                messageStream << "Insufficient balance: need " << DecimalConverter::formatDecimal(request.quantity)
+                              << " " << baseAsset << ", have " << DecimalConverter::formatDecimal(baseFree);
                 throw runtime_error(messageStream.str());
             }
         }

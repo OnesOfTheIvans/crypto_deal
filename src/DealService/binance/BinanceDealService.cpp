@@ -531,7 +531,8 @@ Decimal BinanceDealService::calculateSafeQty(const string &symbol,
     safeQty = DecimalConverter::ceilToStep(safeQty, stepSize);
 
     cout << "Binance Safe Qty: " << DecimalConverter::formatByStep(safeQty, stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity) << ", Price: " << DecimalConverter::formatDecimal(price)
+         << " (Req: " << DecimalConverter::formatDecimal(quantity)
+         << ", Price: " << DecimalConverter::formatDecimal(price)
          << ", MinNotional: " << DecimalConverter::formatDecimal(minNotional)
          << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
 

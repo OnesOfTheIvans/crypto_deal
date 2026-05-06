@@ -3,8 +3,7 @@
 
 #include <string>
 
-namespace exception_handling
-{
+namespace exception_handling {
     void throwIf(bool condition, const std::string &message);
 }
 
