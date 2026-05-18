@@ -344,3 +344,326 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
         EXPECT_TRUE(msg.find("Rollback failed") == std::string::npos);
     }
 }
+
+TEST_F(BybitDealServiceTest, MarketBuyOrder_CapsQuantityByQuoteBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "50000" }] }
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [
+                    { "coin": "USDT", "walletBalance": "100", "availableToWithdraw": "100", "locked": "0" },
+                    { "coin": "BTC", "walletBalance": "1", "availableToWithdraw": "1", "locked": "0" }
+                ]
+            }]
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "BUY_ID",
+            "orderLinkId": "BUY_LINK"
+        }
+    })");
+
+    OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("2"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "BUY_ID");
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.0019"));
+
+    const auto &lastRequest = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(lastRequest.method, "POST");
+    EXPECT_NE(lastRequest.body.find(R"("marketUnit":"baseCoin")"), std::string::npos);
+    EXPECT_NE(lastRequest.body.find(R"("qty":"0.0019")"), std::string::npos);
+}
+
+TEST_F(BybitDealServiceTest, MarketSellOrder_CapsQuantityByBaseBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "50000" }] }
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [
+                    { "coin": "USDT", "walletBalance": "1000", "availableToWithdraw": "1000", "locked": "0" },
+                    { "coin": "BTC", "walletBalance": "0.00123", "availableToWithdraw": "0.00123", "locked": "0" }
+                ]
+            }]
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "SELL_ID",
+            "orderLinkId": "SELL_LINK"
+        }
+    })");
+
+    OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.01"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "SELL_ID");
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.0012"));
+    EXPECT_EQ(info.side, "Sell");
+
+    const auto &lastRequest = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(lastRequest.method, "POST");
+    EXPECT_NE(lastRequest.body.find(R"("side":"Sell")"), std::string::npos);
+    EXPECT_NE(lastRequest.body.find(R"("qty":"0.0012")"), std::string::npos);
+}
+
+TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [
+                    { "coin": "USDT", "walletBalance": "1", "availableToWithdraw": "1", "locked": "0" },
+                    { "coin": "BTC", "walletBalance": "0", "availableToWithdraw": "0", "locked": "0" }
+                ]
+            }]
+        }
+    })");
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "BUY";
+    req.type = "LIMIT";
+    req.quantity = DecimalConverter::parseDecimal("1");
+    req.price = DecimalConverter::parseDecimal("50000");
+    req.timeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, GetOrder_ParsesDetailedResponse)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/realtime", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "orderId": "ORDER_ID",
+                "orderLinkId": "CLIENT_ID",
+                "side": "Buy",
+                "orderType": "Limit",
+                "timeInForce": "GTC",
+                "orderStatus": "PartiallyFilled",
+                "price": "50000",
+                "qty": "0.3",
+                "cumExecQty": "0.1",
+                "cumExecValue": "5000",
+                "leavesQty": "0.2",
+                "avgPrice": "50000",
+                "createdTime": "1779052073334",
+                "updatedTime": "1779052073335"
+            }]
+        }
+    })");
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "ORDER_ID";
+
+    OrderInfo info = service.getOrder(query);
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "ORDER_ID");
+    EXPECT_EQ(info.clientOrderId, "CLIENT_ID");
+    EXPECT_EQ(info.status, "PartiallyFilled");
+    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.1"));
+    EXPECT_EQ(info.leavesQty, DecimalConverter::parseDecimal("0.2"));
+    EXPECT_EQ(info.updatedTimeMs, 1779052073335LL);
+}
+
+TEST_F(BybitDealServiceTest, GetOrder_EmptyListThrows)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/realtime", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [] }
+    })");
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "ORDER_ID";
+
+    EXPECT_THROW(service.getOrder(query), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=UNIFIED", R"({
+        "retCode": 10001,
+        "retMsg": "Account type invalid"
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [{
+                    "coin": "USDT",
+                    "walletBalance": "20",
+                    "availableToWithdraw": "15",
+                    "locked": "5"
+                }]
+            }]
+        }
+    })");
+
+    const auto balances = service.getBalancesRest();
+
+    ASSERT_TRUE(balances.contains("USDT"));
+    EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("15"));
+    EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("5"));
+}
+
+TEST_F(BybitDealServiceTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "ETHUSDT",
+                "status": "Trading",
+                "baseCoin": "ETH",
+                "quoteCoin": "USDT",
+                "priceFilter": {
+                    "tickSize": "0.01",
+                    "minPrice": "0.1",
+                    "maxPrice": "1000000"
+                },
+                "lotSizeFilter": {
+                    "qtyStep": "",
+                    "basePrecision": "0.000001",
+                    "minOrderQty": "0.000001",
+                    "maxOrderQty": "1000",
+                    "minOrderAmt": "5"
+                }
+            }]
+        }
+    })");
+
+    SymbolInfo info = service.getSymbolInfo("ETHUSDT");
+
+    EXPECT_EQ(info.symbol, "ETHUSDT");
+    EXPECT_EQ(info.stepSize, DecimalConverter::parseDecimal("0.000001"));
+    EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("5"));
+}
+
+TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/cancel-all", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {}
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel-all", R"({
+        "retCode": 10001,
+        "retMsg": "Params Error"
+    })");
+
+    EXPECT_TRUE(service.cancelAllOpenOrders("BTCUSDT", "spot"));
+    EXPECT_EQ(MockNetwork::instance().lastRequest().method, "POST");
+    EXPECT_NE(MockNetwork::instance().lastRequest().body.find(R"("symbol":"BTCUSDT")"), std::string::npos);
+
+    EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, CancelOco_Success)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "TP_ID", "orderLinkId": "GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "TP_ID", "orderLinkId": "GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance", bybitWalletBalanceResponse());
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "SELL";
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("60000");
+    req.stopPrice = DecimalConverter::parseDecimal("55000");
+    req.listClientOrderId = "GROUP";
+
+    OcoInfo placed = service.placeOco(req);
+
+    OrderListQuery cancelQuery;
+    cancelQuery.symbol = "BTCUSDT";
+    cancelQuery.listClientOrderId = placed.listClientOrderId;
+
+    OcoInfo cancelled = service.cancelOco(cancelQuery);
+
+    EXPECT_EQ(cancelled.listClientOrderId, "GROUP");
+    ASSERT_EQ(cancelled.orders.size(), 2u);
+    EXPECT_EQ(cancelled.orders[0].status, "Cancelled");
+    EXPECT_EQ(cancelled.orders[1].status, "Cancelled");
+}
+
+TEST_F(BybitDealServiceTest, CancelOco_UnknownGroupThrows)
+{
+    auto service = createService();
+
+    OrderListQuery query;
+    query.symbol = "BTCUSDT";
+    query.listClientOrderId = "missing";
+
+    EXPECT_THROW(service.cancelOco(query), std::runtime_error);
+}

@@ -3,6 +3,7 @@
 add_executable(DealServiceTests
     MockHttpRequest.cpp
     MockHttpRequestContext.cpp
+    TestCommonDealService.cpp
     TestBinanceDealService.cpp
     TestBybitDealService.cpp
     ../src/DealService/DealService.cpp

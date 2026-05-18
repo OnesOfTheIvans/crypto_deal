@@ -265,3 +265,238 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
 
     EXPECT_THROW(service.getSymbolInfo("UNKNOWN"), std::runtime_error);
 }
+
+TEST_F(BinanceDealServiceTest, MarketSellOrder_RoundsToStep)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", R"({
+        "symbol": "BTCUSDT",
+        "price": "78253.54000000"
+    })");
+    MockNetwork::instance().setResponse("/api/v3/order", R"({
+        "symbol": "BTCUSDT",
+        "orderId": 4458119,
+        "clientOrderId": "sell-client",
+        "transactTime": 1779052073334,
+        "price": "0.00000000",
+        "origQty": "0.00020000",
+        "executedQty": "0.00020000",
+        "cummulativeQuoteQty": "15.65070800",
+        "status": "FILLED",
+        "type": "MARKET",
+        "side": "SELL"
+    })");
+
+    OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.00019"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "4458119");
+    EXPECT_EQ(info.side, "SELL");
+    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0002"));
+
+    const auto &lastRequest = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(lastRequest.method, "POST");
+    EXPECT_NE(lastRequest.target.find("side=SELL"), std::string::npos);
+    EXPECT_NE(lastRequest.target.find("quantity=0.0002"), std::string::npos);
+    ASSERT_TRUE(lastRequest.headers.contains("X-MBX-APIKEY"));
+    EXPECT_EQ(lastRequest.headers.at("X-MBX-APIKEY"), "api_key");
+}
+
+TEST_F(BinanceDealServiceTest, GetOrder_ParsesDetailedResponse)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/order", R"({
+        "symbol": "BTCUSDT",
+        "orderId": 12345,
+        "clientOrderId": "client-123",
+        "price": "50000.00000000",
+        "origQty": "0.30000000",
+        "executedQty": "0.10000000",
+        "cumulativeQuoteQty": "5000.00000000",
+        "status": "PARTIALLY_FILLED",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "transactTime": 1779052073334
+    })");
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "12345";
+
+    OrderInfo info = service.getOrder(query);
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "12345");
+    EXPECT_EQ(info.status, "PARTIALLY_FILLED");
+    EXPECT_EQ(info.leavesQty, DecimalConverter::parseDecimal("0.2"));
+    EXPECT_EQ(info.avgPrice, DecimalConverter::parseDecimal("50000"));
+}
+
+TEST_F(BinanceDealServiceTest, GetBalancesRest_SeedsBalanceCache)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
+    MockNetwork::instance().setResponse("/api/v3/account", R"({
+        "balances": [
+            { "asset": "USDT", "free": "10.50000000", "locked": "0.25000000" },
+            { "asset": "BTC", "free": 0.125, "locked": 0 }
+        ]
+    })");
+
+    const auto balances = service.getBalancesRest();
+
+    ASSERT_TRUE(balances.contains("USDT"));
+    ASSERT_TRUE(balances.contains("BTC"));
+    EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("10.5"));
+    EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("0.25"));
+    EXPECT_EQ(service.getBalance("BTC")->free, DecimalConverter::parseDecimal("0.125"));
+}
+
+TEST_F(BinanceDealServiceTest, GetBalancesRest_ApiError)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
+    MockNetwork::instance().setResponse("/api/v3/account", R"({
+        "code": -2015,
+        "msg": "Invalid API-key"
+    })");
+
+    EXPECT_THROW(service.getBalancesRest(), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, CancelAllOpenOrders_IgnoresAlreadyGoneErrors)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
+    MockNetwork::instance().setResponse("/api/v3/openOrders", R"({
+        "code": -2011,
+        "msg": "Unknown order sent."
+    })");
+
+    EXPECT_TRUE(service.cancelAllOpenOrders("BTCUSDT", "spot"));
+    EXPECT_EQ(MockNetwork::instance().lastRequest().method, "DELETE");
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOco_Success)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/orderList/oco", R"({
+        "orderListId": 777,
+        "listClientOrderId": "oco-list-id",
+        "transactionTime": 1779052073334,
+        "orderReports": [
+            {
+                "symbol": "BTCUSDT",
+                "orderId": 1,
+                "clientOrderId": "limit-leg",
+                "price": "90000.00000000",
+                "origQty": "0.00020000",
+                "executedQty": "0.00000000",
+                "cummulativeQuoteQty": "0.00000000",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "LIMIT_MAKER",
+                "side": "SELL",
+                "transactTime": 1779052073334
+            },
+            {
+                "symbol": "BTCUSDT",
+                "orderId": 2,
+                "clientOrderId": "stop-leg",
+                "price": "59000.00000000",
+                "origQty": "0.00020000",
+                "executedQty": "0.00000000",
+                "cummulativeQuoteQty": "0.00000000",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "STOP_LOSS_LIMIT",
+                "side": "SELL",
+                "transactTime": 1779052073334
+            }
+        ]
+    })");
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "SELL";
+    req.quantity = DecimalConverter::parseDecimal("0.00019");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+    req.stopLimitTimeInForce = "GTC";
+    req.listClientOrderId = "oco-list-id";
+
+    OcoInfo info = service.placeOco(req);
+
+    EXPECT_EQ(info.orderListId, "777");
+    EXPECT_EQ(info.listClientOrderId, "oco-list-id");
+    ASSERT_EQ(info.orders.size(), 2u);
+    EXPECT_EQ(info.orders[0].orderId, "1");
+    EXPECT_EQ(info.orders[1].type, "STOP_LOSS_LIMIT");
+
+    const auto &lastRequest = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(lastRequest.method, "POST");
+    EXPECT_NE(lastRequest.target.find("quantity=0.0002"), std::string::npos);
+    EXPECT_NE(lastRequest.target.find("belowTimeInForce=GTC"), std::string::npos);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)
+{
+    auto service = createService();
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "SELL";
+    req.quantity = DecimalConverter::parseDecimal("0.0002");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, CancelOco_Success)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/orderList", R"({
+        "orderListId": 777,
+        "listClientOrderId": "oco-list-id",
+        "transactionTime": 1779052073334,
+        "orderReports": [
+            {
+                "symbol": "BTCUSDT",
+                "orderId": 1,
+                "clientOrderId": "limit-leg",
+                "price": "90000.00000000",
+                "origQty": "0.00020000",
+                "executedQty": "0.00000000",
+                "cummulativeQuoteQty": "0.00000000",
+                "status": "CANCELED",
+                "type": "LIMIT_MAKER",
+                "side": "SELL",
+                "transactTime": 1779052073334
+            }
+        ]
+    })");
+
+    OrderListQuery query;
+    query.symbol = "BTCUSDT";
+    query.listClientOrderId = "oco-list-id";
+
+    OcoInfo info = service.cancelOco(query);
+
+    EXPECT_EQ(info.orderListId, "777");
+    ASSERT_EQ(info.orders.size(), 1u);
+    EXPECT_EQ(info.orders[0].status, "CANCELED");
+    EXPECT_EQ(MockNetwork::instance().lastRequest().method, "DELETE");
+}
