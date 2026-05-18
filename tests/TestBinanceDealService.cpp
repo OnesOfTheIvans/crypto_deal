@@ -97,6 +97,55 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("1.0"));
 }
 
+TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
+{
+    auto service = createService();
+
+    std::string tickerResponse = R"({
+        "symbol": "BTCUSDT",
+        "price": "78253.54000000"
+    })";
+
+    std::string responseJson = R"({
+        "symbol": "BTCUSDT",
+        "orderId": 4458118,
+        "orderListId": -1,
+        "clientOrderId": "4VaNZmqo4CpVWQNBx9TBWT",
+        "transactTime": 1779052073333,
+        "price": "0.00000000",
+        "origQty": "0.00010000",
+        "executedQty": "0.00010000",
+        "origQuoteOrderQty": "0.00000000",
+        "cummulativeQuoteQty": "7.82535400",
+        "status": "FILLED",
+        "timeInForce": "GTC",
+        "type": "MARKET",
+        "side": "BUY",
+        "workingTime": 1779052073333,
+        "fills": [{
+            "price": "78253.54000000",
+            "qty": "0.00010000",
+            "commission": "0.00000000",
+            "commissionAsset": "BTC",
+            "tradeId": 1515535
+        }],
+        "selfTradePreventionMode": "EXPIRE_MAKER"
+    })";
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
+    MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+
+    OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.00009"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "4458118");
+    EXPECT_EQ(info.status, "FILLED");
+    EXPECT_EQ(info.side, "BUY");
+    EXPECT_EQ(info.type, "MARKET");
+    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0001"));
+}
+
 TEST_F(BinanceDealServiceTest, CancelOrder_Success)
 {
     auto service = createService();

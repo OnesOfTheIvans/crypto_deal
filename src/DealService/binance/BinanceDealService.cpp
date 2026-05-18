@@ -115,7 +115,10 @@ std::string BinanceDealService::sendOrder(const string &query, const flat_map<st
     cout << "Order response: " << response << endl;
 
     optional<string> errorOutput = binanceResponseOk(response);
-    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value());
+    if (errorOutput.has_value())
+    {
+        throw runtime_error("Order failed: " + errorOutput.value());
+    }
     return response;
 }
 
@@ -907,31 +910,9 @@ OcoInfo BinanceDealService::createOcoInfo(const json::object &jsonObject)
 {
     OcoInfo info;
 
-    if (jsonObject.contains("orderListId"))
-    {
-        if (jsonObject.at("orderListId").is_string())
-        {
-            info.orderListId = jsonObject.at("orderListId").as_string().c_str();
-        }
-        else
-        {
-            info.orderListId = to_string(jsonObject.at("orderListId").as_int64());
-        }
-    }
-    else
-    {
-        throw runtime_error("Missing orderListId");
-    }
-
-    if (jsonObject.contains("listClientOrderId"))
-    {
-        info.listClientOrderId = jsonObject.at("listClientOrderId").as_string().c_str();
-    }
-
-    if (jsonObject.contains("transactionTime"))
-    {
-        info.transactTimeMs = jsonObject.at("transactionTime").as_int64();
-    }
+    parseAndSetParameter(info.orderListId, jsonObject, "orderListId");
+    parseAndSetParameter(info.listClientOrderId, jsonObject, "listClientOrderId", true);
+    parseAndSetParameter(info.transactTimeMs, jsonObject, "transactionTime", true);
 
     throwIf(!jsonObject.contains("orderReports") || !jsonObject.at("orderReports").is_array(), "Missing orderReports");
 
@@ -942,61 +923,28 @@ OcoInfo BinanceDealService::createOcoInfo(const json::object &jsonObject)
             const auto &reportObject = reportItem.as_object();
             OrderInfo orderInfo;
 
-            if (reportObject.contains("symbol"))
-            {
-                orderInfo.symbol = reportObject.at("symbol").as_string().c_str();
-            }
+            parseAndSetParameter(orderInfo.symbol, reportObject, "symbol", true);
+            parseAndSetParameter(orderInfo.orderId, reportObject, "orderId", true);
+            parseAndSetParameter(orderInfo.clientOrderId, reportObject, "clientOrderId", true);
+            parseAndSetParameter(orderInfo.side, reportObject, "side", true);
+            parseAndSetParameter(orderInfo.type, reportObject, "type", true);
+            parseAndSetParameter(orderInfo.status, reportObject, "status", true);
+            parseAndSetParameter(orderInfo.timeInForce, reportObject, "timeInForce", true);
 
-            if (reportObject.contains("orderId"))
-            {
-                if (reportObject.at("orderId").is_string())
-                {
-                    orderInfo.orderId = reportObject.at("orderId").as_string().c_str();
-                }
-                else
-                {
-                    orderInfo.orderId = to_string(reportObject.at("orderId").as_int64());
-                }
-            }
-
-            if (reportObject.contains("clientOrderId"))
-            {
-                orderInfo.clientOrderId = reportObject.at("clientOrderId").as_string().c_str();
-            }
-            if (reportObject.contains("side"))
-            {
-                orderInfo.side = reportObject.at("side").as_string().c_str();
-            }
-            if (reportObject.contains("type"))
-            {
-                orderInfo.type = reportObject.at("type").as_string().c_str();
-            }
-            if (reportObject.contains("status"))
-            {
-                orderInfo.status = reportObject.at("status").as_string().c_str();
-            }
-            if (reportObject.contains("timeInForce"))
-            {
-                orderInfo.timeInForce = reportObject.at("timeInForce").as_string().c_str();
-            }
-
-            orderInfo.price = parseAmount(reportObject, "price");
-            orderInfo.origQty = parseAmount(reportObject, "origQty");
-            orderInfo.executedQty = parseAmount(reportObject, "executedQty");
+            parseAndSetParameter(orderInfo.price, reportObject, "price", true);
+            parseAndSetParameter(orderInfo.origQty, reportObject, "origQty", true);
+            parseAndSetParameter(orderInfo.executedQty, reportObject, "executedQty", true);
 
             if (reportObject.contains("cummulativeQuoteQty"))
             {
-                orderInfo.cumQuoteQty = parseAmount(reportObject, "cummulativeQuoteQty");
+                parseAndSetParameter(orderInfo.cumQuoteQty, reportObject, "cummulativeQuoteQty");
             }
             else if (reportObject.contains("cumulativeQuoteQty"))
             {
-                orderInfo.cumQuoteQty = parseAmount(reportObject, "cumulativeQuoteQty");
+                parseAndSetParameter(orderInfo.cumQuoteQty, reportObject, "cumulativeQuoteQty");
             }
 
-            if (reportObject.contains("transactTime"))
-            {
-                orderInfo.createdTimeMs = reportObject.at("transactTime").as_int64();
-            }
+            parseAndSetParameter(orderInfo.createdTimeMs, reportObject, "transactTime", true);
             orderInfo.updatedTimeMs = orderInfo.createdTimeMs;
 
             orderInfo.leavesQty = orderInfo.origQty - orderInfo.executedQty;
@@ -1015,19 +963,12 @@ OcoInfo BinanceDealService::createOcoInfo(const json::object &jsonObject)
 SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject)
 {
     SymbolInfo info;
-    info.symbol = symbolObject.at("symbol").as_string().c_str();
-    info.status = symbolObject.at("status").as_string().c_str();
-    info.baseAsset = symbolObject.at("baseAsset").as_string().c_str();
-    info.quoteAsset = symbolObject.at("quoteAsset").as_string().c_str();
-
-    if (symbolObject.contains("baseAssetPrecision"))
-    {
-        info.qtyPrecision = symbolObject.at("baseAssetPrecision").as_int64();
-    }
-    if (symbolObject.contains("quotePrecision"))
-    {
-        info.pricePrecision = symbolObject.at("quotePrecision").as_int64();
-    }
+    parseAndSetParameter(info.symbol, symbolObject, "symbol");
+    parseAndSetParameter(info.status, symbolObject, "status");
+    parseAndSetParameter(info.baseAsset, symbolObject, "baseAsset");
+    parseAndSetParameter(info.quoteAsset, symbolObject, "quoteAsset");
+    parseAndSetParameter(info.qtyPrecision, symbolObject, "baseAssetPrecision", true);
+    parseAndSetParameter(info.pricePrecision, symbolObject, "quotePrecision", true);
 
     throwIf(!symbolObject.contains("filters") || !symbolObject.at("filters").is_array(), "Missing filters for symbol");
 
@@ -1043,26 +984,26 @@ SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject
 
                 if (type == "PRICE_FILTER")
                 {
-                    info.minPrice = parseAmount(filter, "minPrice");
-                    info.maxPrice = parseAmount(filter, "maxPrice");
-                    info.tickSize = parseAmount(filter, "tickSize");
+                    parseAndSetParameter(info.minPrice, filter, "minPrice", true);
+                    parseAndSetParameter(info.maxPrice, filter, "maxPrice", true);
+                    parseAndSetParameter(info.tickSize, filter, "tickSize", true);
                 }
                 else if (type == "LOT_SIZE")
                 {
-                    info.minQty = parseAmount(filter, "minQty");
-                    info.maxQty = parseAmount(filter, "maxQty");
-                    info.stepSize = parseAmount(filter, "stepSize");
+                    parseAndSetParameter(info.minQty, filter, "minQty", true);
+                    parseAndSetParameter(info.maxQty, filter, "maxQty", true);
+                    parseAndSetParameter(info.stepSize, filter, "stepSize", true);
                 }
                 else if (type == "MIN_NOTIONAL")
                 {
-                    info.minNotional = parseAmount(filter, "minNotional");
+                    parseAndSetParameter(info.minNotional, filter, "minNotional", true);
                 }
                 else if (type == "NOTIONAL")
                 {
-                    info.minNotional = parseAmount(filter, "minNotional");
+                    parseAndSetParameter(info.minNotional, filter, "minNotional", true);
                     if (filter.contains("maxNotional"))
                     {
-                        info.maxNotional = parseAmount(filter, "maxNotional");
+                        parseAndSetParameter(info.maxNotional, filter, "maxNotional");
                     }
                 }
             }
@@ -1079,48 +1020,28 @@ SymbolInfo BinanceDealService::createSymbolInfo(const json::object &symbolObject
 OrderInfo BinanceDealService::createOrderInfo(const json::object &obj)
 {
     OrderInfo info;
-    info.symbol = obj.at("symbol").as_string().c_str();
+    parseAndSetParameter(info.symbol, obj, "symbol");
+    parseAndSetParameter(info.orderId, obj, "orderId");
+    parseAndSetParameter(info.clientOrderId, obj, "clientOrderId", true);
+    parseAndSetParameter(info.side, obj, "side");
+    parseAndSetParameter(info.type, obj, "type");
+    parseAndSetParameter(info.status, obj, "status");
+    parseAndSetParameter(info.timeInForce, obj, "timeInForce", true);
 
-    if (obj.at("orderId").is_number())
-    {
-        info.orderId = to_string(obj.at("orderId").as_int64());
-    }
-    else if (obj.at("orderId").is_string())
-    {
-        info.orderId = obj.at("orderId").as_string().c_str();
-    }
-
-    if (obj.contains("clientOrderId"))
-    {
-        info.clientOrderId = obj.at("clientOrderId").as_string().c_str();
-    }
-
-    info.side = obj.at("side").as_string().c_str();
-    info.type = obj.at("type").as_string().c_str();
-    info.status = obj.at("status").as_string().c_str();
-
-    if (obj.contains("timeInForce"))
-    {
-        info.timeInForce = obj.at("timeInForce").as_string().c_str();
-    }
-
-    info.price = parseAmount(obj, "price");
-    info.origQty = parseAmount(obj, "origQty");
-    info.executedQty = parseAmount(obj, "executedQty");
+    parseAndSetParameter(info.price, obj, "price", true);
+    parseAndSetParameter(info.origQty, obj, "origQty", true);
+    parseAndSetParameter(info.executedQty, obj, "executedQty", true);
 
     if (obj.contains("cummulativeQuoteQty"))
     {
-        info.cumQuoteQty = parseAmount(obj, "cummulativeQuoteQty");
+        parseAndSetParameter(info.cumQuoteQty, obj, "cummulativeQuoteQty");
     }
     else if (obj.contains("cumulativeQuoteQty"))
     {
-        info.cumQuoteQty = parseAmount(obj, "cumulativeQuoteQty");
+        parseAndSetParameter(info.cumQuoteQty, obj, "cumulativeQuoteQty");
     }
 
-    if (obj.contains("transactTime"))
-    {
-        info.createdTimeMs = obj.at("transactTime").as_int64();
-    }
+    parseAndSetParameter(info.createdTimeMs, obj, "transactTime", true);
 
     info.updatedTimeMs = info.createdTimeMs;
 

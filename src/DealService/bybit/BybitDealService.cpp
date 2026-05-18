@@ -803,14 +803,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
     info.origQty = safeQuantity;
     info.leavesQty = safeQuantity;
 
-    if (resultObject.contains("orderId"))
-    {
-        info.orderId = resultObject.at("orderId").as_string().c_str();
-    }
-    if (resultObject.contains("orderLinkId"))
-    {
-        info.clientOrderId = resultObject.at("orderLinkId").as_string().c_str();
-    }
+    parseAndSetParameter(info.orderId, resultObject, "orderId", true);
+    parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
 
     info.createdTimeMs = timestamp;
     info.updatedTimeMs = timestamp;
@@ -905,14 +899,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     info.origQty = safeQuantity;
     info.leavesQty = safeQuantity;
 
-    if (resultObject.contains("orderId"))
-    {
-        info.orderId = resultObject.at("orderId").as_string().c_str();
-    }
-    if (resultObject.contains("orderLinkId"))
-    {
-        info.clientOrderId = resultObject.at("orderLinkId").as_string().c_str();
-    }
+    parseAndSetParameter(info.orderId, resultObject, "orderId", true);
+    parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
 
     info.createdTimeMs = timestamp;
     info.updatedTimeMs = timestamp;
@@ -1250,18 +1238,18 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result, const Or
     {
         info.orderId = *request.orderId;
     }
-    else if (result.contains("orderId") && result.at("orderId").is_string())
+    else
     {
-        info.orderId = result.at("orderId").as_string().c_str();
+        parseAndSetParameter(info.orderId, result, "orderId", true);
     }
 
     if (request.clientOrderId.has_value())
     {
         info.clientOrderId = *request.clientOrderId;
     }
-    else if (result.contains("orderLinkId") && result.at("orderLinkId").is_string())
+    else
     {
-        info.clientOrderId = result.at("orderLinkId").as_string().c_str();
+        parseAndSetParameter(info.clientOrderId, result, "orderLinkId", true);
     }
 
     info.executedQty = 0;
@@ -1291,19 +1279,8 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result,
         info.category = request.category;
     }
 
-    if (result.contains("orderId") && result.at("orderId").is_string())
-    {
-        info.orderId = result.at("orderId").as_string().c_str();
-    }
-    else
-    {
-        throw runtime_error("Missing orderId in response");
-    }
-
-    if (result.contains("orderLinkId") && result.at("orderLinkId").is_string())
-    {
-        info.clientOrderId = result.at("orderLinkId").as_string().c_str();
-    }
+    parseAndSetParameter(info.orderId, result, "orderId");
+    parseAndSetParameter(info.clientOrderId, result, "orderLinkId", true);
 
     info.side = side;
     info.type = type;
@@ -1402,11 +1379,8 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
                                                     msec timestamp)
 {
     OrderInfo info;
-    if (orderObj.contains("symbol"))
-    {
-        info.symbol = orderObj.at("symbol").as_string().c_str();
-    }
-    else
+    parseAndSetParameter(info.symbol, orderObj, "symbol", true);
+    if (info.symbol.empty())
     {
         info.symbol = request.symbol;
     }
@@ -1415,7 +1389,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
 
     if (orderObj.contains("orderId"))
     {
-        info.orderId = orderObj.at("orderId").as_string().c_str();
+        parseAndSetParameter(info.orderId, orderObj, "orderId");
     }
     else if (request.orderId.has_value())
     {
@@ -1424,70 +1398,26 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
 
     if (orderObj.contains("orderLinkId"))
     {
-        info.clientOrderId = orderObj.at("orderLinkId").as_string().c_str();
+        parseAndSetParameter(info.clientOrderId, orderObj, "orderLinkId");
     }
     else if (request.clientOrderId.has_value())
     {
         info.clientOrderId = *request.clientOrderId;
     }
 
-    if (orderObj.contains("side"))
-    {
-        info.side = orderObj.at("side").as_string().c_str();
-    }
+    parseAndSetParameter(info.side, orderObj, "side", true);
+    parseAndSetParameter(info.type, orderObj, "orderType", true);
+    parseAndSetParameter(info.timeInForce, orderObj, "timeInForce", true);
+    parseAndSetParameter(info.status, orderObj, "orderStatus", true);
+    parseAndSetParameter(info.price, orderObj, "price", true);
+    parseAndSetParameter(info.origQty, orderObj, "qty", true);
+    parseAndSetParameter(info.executedQty, orderObj, "cumExecQty", true);
+    parseAndSetParameter(info.cumQuoteQty, orderObj, "cumExecValue", true);
+    parseAndSetParameter(info.leavesQty, orderObj, "leavesQty", true);
+    parseAndSetParameter(info.avgPrice, orderObj, "avgPrice", true);
+    parseAndSetParameter(info.createdTimeMs, orderObj, "createdTime", true);
+    parseAndSetParameter(info.updatedTimeMs, orderObj, "updatedTime", true);
 
-    if (orderObj.contains("orderType"))
-    {
-        info.type = orderObj.at("orderType").as_string().c_str();
-    }
-
-    if (orderObj.contains("timeInForce"))
-    {
-        info.timeInForce = orderObj.at("timeInForce").as_string().c_str();
-    }
-
-    if (orderObj.contains("orderStatus"))
-    {
-        info.status = orderObj.at("orderStatus").as_string().c_str();
-    }
-
-    info.price = parseAmount(orderObj, "price");
-
-    info.origQty = parseAmount(orderObj, "qty");
-
-    info.executedQty = parseAmount(orderObj, "cumExecQty");
-
-    info.cumQuoteQty = parseAmount(orderObj, "cumExecValue");
-
-    info.leavesQty = parseAmount(orderObj, "leavesQty");
-
-    info.avgPrice = parseAmount(orderObj, "avgPrice");
-
-    if (orderObj.contains("createdTime"))
-    {
-        const auto &ct = orderObj.at("createdTime");
-        if (ct.is_string())
-        {
-            info.createdTimeMs = strtoll(ct.as_string().c_str(), nullptr, 10);
-        }
-        else if (ct.is_number())
-        {
-            info.createdTimeMs = ct.as_int64();
-        }
-    }
-
-    if (orderObj.contains("updatedTime"))
-    {
-        const auto &ut = orderObj.at("updatedTime");
-        if (ut.is_string())
-        {
-            info.updatedTimeMs = strtoll(ut.as_string().c_str(), nullptr, 10);
-        }
-        else if (ut.is_number())
-        {
-            info.updatedTimeMs = ut.as_int64();
-        }
-    }
     if (info.updatedTimeMs == 0)
     {
         info.updatedTimeMs = timestamp;
@@ -1500,51 +1430,37 @@ SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, co
 {
     SymbolInfo info;
     info.symbol = symbol;
-    if (instrument.contains("symbol"))
-    {
-        info.symbol = instrument.at("symbol").as_string().c_str();
-    }
-
-    if (instrument.contains("status"))
-    {
-        info.status = instrument.at("status").as_string().c_str();
-    }
-
-    if (instrument.contains("baseCoin"))
-    {
-        info.baseAsset = instrument.at("baseCoin").as_string().c_str();
-    }
-    if (instrument.contains("quoteCoin"))
-    {
-        info.quoteAsset = instrument.at("quoteCoin").as_string().c_str();
-    }
+    parseAndSetParameter(info.symbol, instrument, "symbol", true);
+    parseAndSetParameter(info.status, instrument, "status", true);
+    parseAndSetParameter(info.baseAsset, instrument, "baseCoin", true);
+    parseAndSetParameter(info.quoteAsset, instrument, "quoteCoin", true);
 
     if (instrument.contains("priceFilter") && instrument.at("priceFilter").is_object())
     {
         const json::object &priceFilter = instrument.at("priceFilter").as_object();
-        info.tickSize = parseAmount(priceFilter, "tickSize");
-        info.minPrice = parseAmount(priceFilter, "minPrice");
-        info.maxPrice = parseAmount(priceFilter, "maxPrice");
+        parseAndSetParameter(info.tickSize, priceFilter, "tickSize", true);
+        parseAndSetParameter(info.minPrice, priceFilter, "minPrice", true);
+        parseAndSetParameter(info.maxPrice, priceFilter, "maxPrice", true);
     }
 
     if (instrument.contains("lotSizeFilter") && instrument.at("lotSizeFilter").is_object())
     {
         const json::object &lotSizeFilter = instrument.at("lotSizeFilter").as_object();
-        info.stepSize = parseAmount(lotSizeFilter, "qtyStep");
+        parseAndSetParameter(info.stepSize, lotSizeFilter, "qtyStep", true);
 
         if (info.stepSize <= 0)
         {
             if (lotSizeFilter.contains("basePrecision"))
             {
-                info.stepSize = parseAmount(lotSizeFilter, "basePrecision");
+                parseAndSetParameter(info.stepSize, lotSizeFilter, "basePrecision");
             }
         }
 
-        info.minQty = parseAmount(lotSizeFilter, "minOrderQty");
-        info.maxQty = parseAmount(lotSizeFilter, "maxOrderQty");
+        parseAndSetParameter(info.minQty, lotSizeFilter, "minOrderQty", true);
+        parseAndSetParameter(info.maxQty, lotSizeFilter, "maxOrderQty", true);
 
-        info.minNotional = parseAmount(lotSizeFilter, "minOrderAmt");
-        info.maxNotional = parseAmount(lotSizeFilter, "maxOrderAmt");
+        parseAndSetParameter(info.minNotional, lotSizeFilter, "minOrderAmt", true);
+        parseAndSetParameter(info.maxNotional, lotSizeFilter, "maxOrderAmt", true);
     }
 
     throwIf(info.tickSize <= 0, "Invalid tickSize");
