@@ -5,8 +5,8 @@
 #include <functional>
 #include <map>
 #include <queue>
-#include <vector>
 #include <string>
+#include <vector>
 
 class MockNetwork
 {

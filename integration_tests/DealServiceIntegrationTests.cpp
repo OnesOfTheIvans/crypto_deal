@@ -375,6 +375,11 @@ namespace {
         ASSERT_TRUE(svc != nullptr);
 
         {
+            SCOPED_TRACE("Step: refresh balances before funding buy");
+            callGetBalancesRestOrFail(*svc, GetParam());
+        }
+
+        {
             SCOPED_TRACE("Step: buy BTC to fund OCO SELL");
             const string base = "BTC";
             const string quote = "USDT";
@@ -383,6 +388,11 @@ namespace {
             OrderInfo buyOrder;
             ASSERT_NO_THROW(buyOrder = svc->buyCrypto(base, quote, qty));
             EXPECT_FALSE(buyOrder.orderId.empty()) << "buyCrypto did not create an order (needed to fund OCO SELL)";
+        }
+
+        {
+            SCOPED_TRACE("Step: refresh balances after funding buy");
+            callGetBalancesRestOrFail(*svc, GetParam());
         }
 
         PlaceOcoRequest oco;

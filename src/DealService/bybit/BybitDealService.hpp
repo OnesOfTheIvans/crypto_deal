@@ -107,29 +107,30 @@ class BybitDealService : public DealService
     void handleUserStreamMessage(const std::string &msg);
 
     void handleWalletUpdate(const boost::json::object &root);
+
     void handleOrderUpdate(const boost::json::object &root);
+
     void processOcoUpdate(const std::string &orderLinkId);
 
     void setStreamStatus(StreamStatus status);
+
     void setStreamError(const std::string &error);
 
     long long getServerTime();
+
     void syncTime();
+
     long long getTimestamp();
 
     void refreshBalancesFromRest(const std::string &accountType,
                                  const std::optional<std::string> &coinFilter = std::nullopt);
 
-    void ensureBalancesSeeded(const std::optional<std::string> &coinFilter = std::nullopt);
-    void ensureBalancesSeeded(const std::string &coinFilter);
+    bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
 
-    bool capMarketQtyByBalance(bool isBuy,
-                               const std::string &baseAsset,
-                               const std::string &quoteAsset,
-                               const SymbolInfo &symbolInfo,
-                               Decimal lastPrice,
-                               Decimal &qtyInBase,
-                               std::string &reason);
+    std::optional<std::string>
+    validateBaseQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const;
+
+    std::optional<std::string> validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const;
 
   public:
     BybitDealService(const std::string &host,
@@ -156,6 +157,9 @@ class BybitDealService : public DealService
 
     SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") override;
 
+    Decimal
+    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") override;
+
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
     OcoInfo cancelOco(const OrderListQuery &request) override;
@@ -169,6 +173,7 @@ class BybitDealService : public DealService
     void stopUserStream() override;
 
     StreamStatus getUserStreamStatus() const override;
+
     std::string getUserStreamLastError() const override;
 
     bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;

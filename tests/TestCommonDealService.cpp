@@ -17,7 +17,8 @@ namespace {
             return hmac_sha256(key, data);
         }
 
-        void parseString(std::string &out, const json::object &obj, json::string_view field, bool optional = false) const
+        void
+        parseString(std::string &out, const json::object &obj, json::string_view field, bool optional = false) const
         {
             parseAndSetParameter(out, obj, field, optional);
         }
@@ -27,7 +28,8 @@ namespace {
             parseAndSetParameter(out, obj, field, optional);
         }
 
-        void parseLongLong(long long &out, const json::object &obj, json::string_view field, bool optional = false) const
+        void
+        parseLongLong(long long &out, const json::object &obj, json::string_view field, bool optional = false) const
         {
             parseAndSetParameter(out, obj, field, optional);
         }
@@ -37,23 +39,69 @@ namespace {
             parseAndSetParameter(out, obj, field, optional);
         }
 
-        OrderInfo buyCrypto(const std::string &, const std::string &, Decimal) override { return {}; }
-        OrderInfo sellCrypto(const std::string &, const std::string &, Decimal) override { return {}; }
+        OrderInfo buyCrypto(const std::string &, const std::string &, Decimal) override
+        {
+            return {};
+        }
+        OrderInfo sellCrypto(const std::string &, const std::string &, Decimal) override
+        {
+            return {};
+        }
         void waitUntilOrderFilled(const std::string &, const std::string &) override {}
-        flat_map<std::string, AssetBalance> getBalances() const override { return {}; }
-        std::optional<AssetBalance> getBalance(const std::string &) const override { return std::nullopt; }
+        flat_map<std::string, AssetBalance> getBalances() const override
+        {
+            return {};
+        }
+        std::optional<AssetBalance> getBalance(const std::string &) const override
+        {
+            return std::nullopt;
+        }
         void startUserStream() override {}
         void stopUserStream() override {}
-        StreamStatus getUserStreamStatus() const override { return StreamStatus::STOPPED; }
-        std::string getUserStreamLastError() const override { return {}; }
-        OrderInfo placeOrder(const PlaceOrderRequest &) override { return {}; }
-        OrderInfo cancelOrder(const OrderQuery &) override { return {}; }
-        OrderInfo getOrder(const OrderQuery &) override { return {}; }
-        SymbolInfo getSymbolInfo(const std::string &, const std::string & = "spot") override { return {}; }
-        OcoInfo placeOco(const PlaceOcoRequest &) override { return {}; }
-        OcoInfo cancelOco(const OrderListQuery &) override { return {}; }
-        bool cancelAllOpenOrders(const std::string &, const std::string &) override { return true; }
-        flat_map<std::string, AssetBalance> getBalancesRest() override { return {}; }
+        StreamStatus getUserStreamStatus() const override
+        {
+            return StreamStatus::STOPPED;
+        }
+        std::string getUserStreamLastError() const override
+        {
+            return {};
+        }
+        OrderInfo placeOrder(const PlaceOrderRequest &) override
+        {
+            return {};
+        }
+        OrderInfo cancelOrder(const OrderQuery &) override
+        {
+            return {};
+        }
+        OrderInfo getOrder(const OrderQuery &) override
+        {
+            return {};
+        }
+        SymbolInfo getSymbolInfo(const std::string &, const std::string & = "spot") override
+        {
+            return {};
+        }
+        Decimal ceilQuantityToStep(const std::string &, Decimal quantity, const std::string & = "spot") override
+        {
+            return quantity;
+        }
+        OcoInfo placeOco(const PlaceOcoRequest &) override
+        {
+            return {};
+        }
+        OcoInfo cancelOco(const OrderListQuery &) override
+        {
+            return {};
+        }
+        bool cancelAllOpenOrders(const std::string &, const std::string &) override
+        {
+            return true;
+        }
+        flat_map<std::string, AssetBalance> getBalancesRest() override
+        {
+            return {};
+        }
     };
 
     json::object parseObject(const std::string &text)

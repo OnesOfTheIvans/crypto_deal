@@ -60,8 +60,9 @@ class BinanceDealService : public DealService
 
     Decimal getTickerPrice(const std::string &symbol);
 
-    Decimal
-    calculateSafeQty(const std::string &symbol, Decimal quantity, Decimal price, Decimal stepSize, Decimal minNotional);
+    bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
+
+    std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const;
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
@@ -92,12 +93,17 @@ class BinanceDealService : public DealService
     OcoInfo createOcoInfo(const json::object &object);
 
     void setStreamStatus(StreamStatus status);
+
     void setStreamError(const std::string &error);
 
     long long getServerTime();
+
     bool isTimeSyncRecent() const;
+
     void syncTime();
+
     long long getTimestamp();
+
     void handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream);
 
   public:
@@ -129,6 +135,9 @@ class BinanceDealService : public DealService
 
     SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") override;
 
+    Decimal
+    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") override;
+
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
     OcoInfo cancelOco(const OrderListQuery &request) override;
@@ -136,9 +145,10 @@ class BinanceDealService : public DealService
     void stopUserStream() override;
 
     StreamStatus getUserStreamStatus() const override;
+
     std::string getUserStreamLastError() const override;
 
-    bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
+    bool cancelAllOpenOrders(const std::string &symbol, const std::string &) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
 };

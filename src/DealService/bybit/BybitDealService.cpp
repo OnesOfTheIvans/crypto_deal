@@ -178,160 +178,73 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
     }
 }
 
-void BybitDealService::ensureBalancesSeeded(const optional<string> &coinFilter)
+bool BybitDealService::isQuantityStepValid(Decimal quantity, Decimal stepSize) const
 {
+    if (stepSize <= 0)
     {
-        lock_guard<mutex> lock(balanceMutex);
-
-        if (coinFilter.has_value() && !coinFilter->empty())
-        {
-            if (balances.find(*coinFilter) != balances.end())
-            {
-                return;
-            }
-        }
-        else
-        {
-            if (!balances.empty())
-            {
-                return;
-            }
-        }
+        return true;
     }
 
-    try
-    {
-        refreshBalancesFromRest("UNIFIED", coinFilter);
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit balance REST seed (UNIFIED) failed: " << e.what() << endl;
-    }
-
-    {
-        lock_guard<mutex> lock(balanceMutex);
-
-        if (coinFilter.has_value() && !coinFilter->empty())
-        {
-            if (balances.find(*coinFilter) != balances.end())
-            {
-                return;
-            }
-        }
-        else
-        {
-            if (!balances.empty())
-            {
-                return;
-            }
-        }
-    }
-
-    try
-    {
-        refreshBalancesFromRest("SPOT", coinFilter);
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit balance REST seed (SPOT) failed: " << e.what() << endl;
-    }
-
-    if (coinFilter.has_value() && !coinFilter->empty())
-    {
-        lock_guard<mutex> lock(balanceMutex);
-        if (balances.find(*coinFilter) == balances.end())
-        {
-            balances.emplace(*coinFilter, AssetBalance{*coinFilter, Decimal{}, Decimal{}});
-        }
-    }
+    const Decimal units = quantity / stepSize;
+    return units == boost::decimal::floor(units);
 }
 
-void BybitDealService::ensureBalancesSeeded(const string &coinFilter)
+optional<string>
+BybitDealService::validateBaseQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const
 {
-    ensureBalancesSeeded(optional<string>(coinFilter));
-}
-
-bool BybitDealService::capMarketQtyByBalance(bool isBuy,
-                                             const string &baseAsset,
-                                             const string &quoteAsset,
-                                             const SymbolInfo &symbolInfo,
-                                             Decimal lastPrice,
-                                             Decimal &qtyInBase,
-                                             string &reason)
-{
-    try
+    if (!isQuantityStepValid(quantity, symbolInfo.stepSize))
     {
-        ensureBalancesSeeded(quoteAsset);
-        ensureBalancesSeeded(baseAsset);
+        return "quantity is not valid for step size";
     }
-    catch (const exception &e)
+    if (symbolInfo.minQty > 0 && quantity < symbolInfo.minQty)
     {
-        cerr << "Bybit capMarketQtyByBalance: ensureBalancesSeeded failed (continuing): " << e.what() << endl;
+        return "quantity " + DecimalConverter::formatDecimal(quantity) + " is below minQty " +
+               DecimalConverter::formatDecimal(symbolInfo.minQty);
+    }
+    if (symbolInfo.maxQty > 0 && quantity > symbolInfo.maxQty)
+    {
+        return "quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxQty " +
+               DecimalConverter::formatDecimal(symbolInfo.maxQty);
     }
 
-    const Decimal stepSize = symbolInfo.stepSize > 0 ? symbolInfo.stepSize : Decimal{0};
-    const Decimal minQty = symbolInfo.minQty > 0 ? symbolInfo.minQty : Decimal{0};
-    const Decimal minNotional = symbolInfo.minNotional > 0 ? symbolInfo.minNotional : Decimal{0};
-
-    if (qtyInBase <= 0)
+    const bool hasNotionalRule = symbolInfo.minNotional > 0 || symbolInfo.maxNotional > 0;
+    if (hasNotionalRule && price <= 0)
     {
-        reason = "requested quantity <= 0";
-        return false;
+        return "price is required for notional validation";
     }
 
-    const Decimal price = lastPrice;
-
-    if (isBuy)
+    if (price > 0)
     {
-        const auto quoteBalance = getBalance(quoteAsset);
-        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
-
-        if (quoteFree <= 0)
+        const Decimal notional = quantity * price;
+        if (symbolInfo.minNotional > 0 && notional < symbolInfo.minNotional)
         {
-            reason = "no free " + quoteAsset + " balance";
-            return false;
+            return "notional " + DecimalConverter::formatDecimal(notional) + " is below minOrderAmt " +
+                   DecimalConverter::formatDecimal(symbolInfo.minNotional);
         }
-        if (price <= 0)
+        if (symbolInfo.maxNotional > 0 && notional > symbolInfo.maxNotional)
         {
-            reason = "missing last price";
-            return false;
+            return "notional " + DecimalConverter::formatDecimal(notional) + " is above maxOrderAmt " +
+                   DecimalConverter::formatDecimal(symbolInfo.maxNotional);
+        }
+    }
+
+    return nullopt;
         }
 
-        const Decimal maximumQtyByQuote = (quoteFree * DecimalConverter::parseDecimal("0.99")) / price;
-        qtyInBase = min(qtyInBase, maximumQtyByQuote);
-    }
-    else
+optional<string> BybitDealService::validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const
     {
-        const auto baseBalance = getBalance(baseAsset);
-        const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
-
-        if (baseFree <= 0)
-        {
-            reason = "no free " + baseAsset + " balance";
-            return false;
-        }
-
-        qtyInBase = min(qtyInBase, baseFree);
-    }
-
-    if (stepSize > 0)
+    if (symbolInfo.minNotional > 0 && quantity < symbolInfo.minNotional)
     {
-        qtyInBase = DecimalConverter::floorToStep(qtyInBase, stepSize);
+        return "quote quantity " + DecimalConverter::formatDecimal(quantity) + " is below minOrderAmt " +
+               DecimalConverter::formatDecimal(symbolInfo.minNotional);
     }
-
-    if (minQty > 0 && qtyInBase < minQty)
+    if (symbolInfo.maxNotional > 0 && quantity > symbolInfo.maxNotional)
     {
-        reason = "quantity below minQty after balance cap";
-        return false;
+        return "quote quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxOrderAmt " +
+               DecimalConverter::formatDecimal(symbolInfo.maxNotional);
     }
 
-    if (minNotional > 0 && price > 0 && (qtyInBase * price) < minNotional)
-    {
-        reason = "notional below minOrderAmt after balance cap";
-        return false;
-    }
-
-    return true;
+    return nullopt;
 }
 
 void BybitDealService::startUserStream()
@@ -429,11 +342,11 @@ void BybitDealService::startUserStream()
                 setStreamStatus(StreamStatus::CONNECTED);
                 try
                 {
-                    ensureBalancesSeeded();
+                    getBalancesRest();
                 }
                 catch (const exception &exception)
                 {
-                    cerr << "Bybit: initial balance seed failed: " << exception.what() << endl;
+                    cerr << "Bybit: initial balance refresh failed: " << exception.what() << endl;
                 }
 
                 shared_ptr<WebsocketStream> websocketStreamCopy;
@@ -720,56 +633,31 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
 {
     const string symbol = baseAsset + quoteAsset;
 
-    SymbolInfo symbolInfo;
-    Decimal stepSize{};
-    Decimal minOrderAmount{};
+    SymbolInfo symbolInfo = getSymbolInfo(symbol);
+    const Decimal lastPrice = getTickerPrice(symbol);
+    optional<string> quantityError = validateBaseQuantity(quantity, lastPrice, symbolInfo);
+    throwIf(quantityError.has_value(), "Bybit buyCrypto: " + quantityError.value_or(""));
 
     try
     {
-        symbolInfo = getSymbolInfo(symbol);
-        stepSize = symbolInfo.stepSize;
-        minOrderAmount = symbolInfo.minNotional;
+        const auto quoteBalance = getBalance(quoteAsset);
+        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
+        const Decimal requiredQuoteAmount = quantity * lastPrice;
+        throwIf(quoteFree < requiredQuoteAmount,
+                "Bybit BUY aborted: insufficient balance: need " +
+                    DecimalConverter::formatDecimal(requiredQuoteAmount) + " " + quoteAsset + ", have " +
+                    DecimalConverter::formatDecimal(quoteFree));
     }
-    catch (...)
+    catch (const exception &exception)
     {
-        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
+        throw runtime_error(string("Bybit buyCrypto: ") + exception.what());
     }
 
-    const Decimal lastPrice = getTickerPrice(symbol);
-
-    Decimal minimumQuantityForNotional{};
-    if (lastPrice > 0 && minOrderAmount > 0)
-    {
-        minimumQuantityForNotional = (minOrderAmount * DecimalConverter::parseDecimal("1.10")) / lastPrice;
-    }
-
-    Decimal safeQuantity = max(quantity, minimumQuantityForNotional);
-    if (stepSize > 0)
-    {
-        safeQuantity = DecimalConverter::ceilToStep(safeQuantity, stepSize);
-    }
-
-    if (symbolInfo.stepSize > 0 && symbolInfo.minQty > 0)
-    {
-        string reason;
-        Decimal cappedQuantity = safeQuantity;
-
-        if (!capMarketQtyByBalance(true, baseAsset, quoteAsset, symbolInfo, lastPrice, cappedQuantity, reason))
-        {
-            ostringstream messageStream;
-            messageStream << "Bybit BUY aborted: " << reason
-                          << " (requestedQty=" << DecimalConverter::formatByStep(safeQuantity, stepSize) << ")";
-            throw runtime_error(messageStream.str());
-        }
-
-        safeQuantity = cappedQuantity;
-    }
-
-    cout << "Bybit Safe Qty: " << DecimalConverter::formatByStep(safeQuantity, stepSize)
+    cout << "Bybit Requested Qty: " << DecimalConverter::formatByStep(quantity, symbolInfo.stepSize)
          << " (Req: " << DecimalConverter::formatDecimal(quantity)
          << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
-         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(minOrderAmount)
-         << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
+         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
+         << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
 
     const msec timestamp = getTimestamp();
     const string body = createBody(baseAsset,
@@ -777,8 +665,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
                                    OrderCategory::SPOT,
                                    OrderOperation::BUY,
                                    OrderType::MARKET,
-                                   safeQuantity,
-                                   stepSize);
+                                   quantity,
+                                   symbolInfo.stepSize);
 
     const string signature = getSignature(body, timestamp);
     const flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
@@ -800,8 +688,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
     info.side = "Buy";
     info.type = "Market";
     info.status = "New";
-    info.origQty = safeQuantity;
-    info.leavesQty = safeQuantity;
+    info.origQty = quantity;
+    info.leavesQty = quantity;
 
     parseAndSetParameter(info.orderId, resultObject, "orderId", true);
     parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
@@ -816,56 +704,29 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
 {
     const string symbol = baseAsset + quoteAsset;
 
-    SymbolInfo symbolInfo;
-    Decimal stepSize{};
-    Decimal minOrderAmount{};
+    SymbolInfo symbolInfo = getSymbolInfo(symbol);
+    const Decimal lastPrice = getTickerPrice(symbol);
+    optional<string> quantityError = validateBaseQuantity(quantity, lastPrice, symbolInfo);
+    throwIf(quantityError.has_value(), "Bybit sellCrypto: " + quantityError.value_or(""));
 
     try
     {
-        symbolInfo = getSymbolInfo(symbol);
-        stepSize = symbolInfo.stepSize;
-        minOrderAmount = symbolInfo.minNotional;
+        const auto baseBalance = getBalance(baseAsset);
+        const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
+        throwIf(baseFree < quantity,
+                "Bybit SELL aborted: insufficient balance: need " + DecimalConverter::formatDecimal(quantity) + " " +
+                    baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
     }
-    catch (...)
+    catch (const exception &exception)
     {
-        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
+        throw runtime_error(string("Bybit sellCrypto: ") + exception.what());
     }
 
-    const Decimal lastPrice = getTickerPrice(symbol);
-
-    Decimal minimumQuantityForNotional{};
-    if (lastPrice > 0 && minOrderAmount > 0)
-    {
-        minimumQuantityForNotional = (minOrderAmount * DecimalConverter::parseDecimal("1.10")) / lastPrice;
-    }
-
-    Decimal safeQuantity = max(quantity, minimumQuantityForNotional);
-    if (stepSize > 0)
-    {
-        safeQuantity = DecimalConverter::ceilToStep(safeQuantity, stepSize);
-    }
-
-    if (symbolInfo.stepSize > 0 && symbolInfo.minQty > 0)
-    {
-        string reason;
-        Decimal cappedQuantity = safeQuantity;
-
-        if (!capMarketQtyByBalance(false, baseAsset, quoteAsset, symbolInfo, lastPrice, cappedQuantity, reason))
-        {
-            ostringstream messageStream;
-            messageStream << "Bybit SELL aborted: " << reason
-                          << " (requestedQty=" << DecimalConverter::formatByStep(safeQuantity, stepSize) << ")";
-            throw runtime_error(messageStream.str());
-        }
-
-        safeQuantity = cappedQuantity;
-    }
-
-    cout << "Bybit Safe Qty: " << DecimalConverter::formatByStep(safeQuantity, stepSize)
+    cout << "Bybit Requested Qty: " << DecimalConverter::formatByStep(quantity, symbolInfo.stepSize)
          << " (Req: " << DecimalConverter::formatDecimal(quantity)
          << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
-         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(minOrderAmount)
-         << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
+         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
+         << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
 
     const msec timestamp = getTimestamp();
     const string body = createBody(baseAsset,
@@ -873,8 +734,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
                                    OrderCategory::SPOT,
                                    OrderOperation::SELL,
                                    OrderType::MARKET,
-                                   safeQuantity,
-                                   stepSize);
+                                   quantity,
+                                   symbolInfo.stepSize);
 
     const string signature = getSignature(body, timestamp);
     const flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
@@ -896,8 +757,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     info.side = "Sell";
     info.type = "Market";
     info.status = "New";
-    info.origQty = safeQuantity;
-    info.leavesQty = safeQuantity;
+    info.origQty = quantity;
+    info.leavesQty = quantity;
 
     parseAndSetParameter(info.orderId, resultObject, "orderId", true);
     parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
@@ -931,6 +792,26 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     // Fetch symbol info for precision
     SymbolInfo info = getSymbolInfo(request.symbol, category);
+    const bool isQuoteMarketBuy = request.type == "MARKET" && request.side == "BUY" && request.marketUnit.has_value() &&
+                                  *request.marketUnit == "quoteCoin";
+    Decimal marketLastPrice{};
+    if (request.type == "LIMIT" && request.price.has_value())
+    {
+        optional<string> quantityError = validateBaseQuantity(request.quantity, *request.price, info);
+        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
+    }
+    else if (isQuoteMarketBuy)
+    {
+        optional<string> quantityError = validateQuoteQuantity(request.quantity, info);
+        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
+    }
+    else
+    {
+        marketLastPrice = getTickerPrice(request.symbol);
+        optional<string> quantityError = validateBaseQuantity(request.quantity, marketLastPrice, info);
+        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
+    }
+
     try
     {
         const bool isBuyOrder = (request.side == "BUY");
@@ -939,8 +820,6 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
         if (isBuyOrder)
         {
-            ensureBalancesSeeded(quoteAsset);
-
             const auto quoteBalance = getBalance(quoteAsset);
             const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
 
@@ -952,16 +831,15 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
             }
             else
             {
-                if (request.marketUnit.has_value() && *request.marketUnit == "quoteCoin")
+                if (isQuoteMarketBuy)
                 {
                     requiredQuoteAmount = request.quantity;
                 }
                 else
                 {
-                    const Decimal lastPrice = getTickerPrice(request.symbol);
-                    if (lastPrice > 0)
+                    if (marketLastPrice > 0)
                     {
-                        requiredQuoteAmount = request.quantity * lastPrice;
+                        requiredQuoteAmount = request.quantity * marketLastPrice;
                     }
                 }
             }
@@ -985,8 +863,6 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
         }
         else
         {
-            ensureBalancesSeeded(baseAsset);
-
             const auto baseBalance = getBalance(baseAsset);
             const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
 
@@ -1371,6 +1247,12 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
         symbolInfoCache[symbol] = info;
     }
     return info;
+}
+
+Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, const string &category)
+{
+    const SymbolInfo info = getSymbolInfo(symbol, category);
+    return DecimalConverter::ceilToStep(quantity, info.stepSize);
 }
 
 OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj,
@@ -2009,7 +1891,24 @@ bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
 
 flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
 {
-    ensureBalancesSeeded(nullopt);
+    try
+    {
+        refreshBalancesFromRest("UNIFIED", nullopt);
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit balance REST refresh (UNIFIED) failed: " << e.what() << endl;
+    }
+
+    try
+    {
+        refreshBalancesFromRest("SPOT", nullopt);
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit balance REST refresh (SPOT) failed: " << e.what() << endl;
+    }
+
     return getBalances();
 }
 

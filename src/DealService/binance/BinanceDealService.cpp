@@ -115,10 +115,7 @@ std::string BinanceDealService::sendOrder(const string &query, const flat_map<st
     cout << "Order response: " << response << endl;
 
     optional<string> errorOutput = binanceResponseOk(response);
-    if (errorOutput.has_value())
-    {
-        throw runtime_error("Order failed: " + errorOutput.value());
-    }
+    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
     return response;
 }
 
@@ -511,56 +508,68 @@ Decimal BinanceDealService::getTickerPrice(const string &symbol)
     return Decimal{};
 }
 
-Decimal BinanceDealService::calculateSafeQty(const string &symbol,
-                                             Decimal quantity,
-                                             Decimal price,
-                                             Decimal stepSize,
-                                             Decimal minNotional)
+bool BinanceDealService::isQuantityStepValid(Decimal quantity, Decimal stepSize) const
 {
-    if (price <= 0 || stepSize <= 0)
+    if (stepSize <= 0)
     {
-        return quantity;
+        return true;
     }
 
-    Decimal requiredQty{};
-    if (minNotional > 0)
+    const Decimal units = quantity / stepSize;
+    return units == boost::decimal::floor(units);
+}
+
+optional<string> BinanceDealService::validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const
+{
+    if (!isQuantityStepValid(quantity, info.stepSize))
     {
-        requiredQty = (minNotional * DecimalConverter::parseDecimal("1.10")) / price;
+        return "quantity is not valid for step size";
+    }
+    if (info.minQty > 0 && quantity < info.minQty)
+    {
+        return "quantity " + DecimalConverter::formatDecimal(quantity) + " is below minQty " +
+               DecimalConverter::formatDecimal(info.minQty);
+    }
+    if (info.maxQty > 0 && quantity > info.maxQty)
+    {
+        return "quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxQty " +
+               DecimalConverter::formatDecimal(info.maxQty);
     }
 
-    Decimal safeQty = max(quantity, requiredQty);
-    safeQty = DecimalConverter::ceilToStep(safeQty, stepSize);
+    const bool hasNotionalRule = info.minNotional > 0 || info.maxNotional > 0;
+    if (hasNotionalRule && price <= 0)
+    {
+        return "price is required for notional validation";
+    }
 
-    cout << "Binance Safe Qty: " << DecimalConverter::formatByStep(safeQty, stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity)
-         << ", Price: " << DecimalConverter::formatDecimal(price)
-         << ", MinNotional: " << DecimalConverter::formatDecimal(minNotional)
-         << ", Step: " << DecimalConverter::formatDecimal(stepSize) << ")" << endl;
+    if (price > 0)
+    {
+        const Decimal notional = quantity * price;
+        if (info.minNotional > 0 && notional < info.minNotional)
+        {
+            return "notional " + DecimalConverter::formatDecimal(notional) + " is below minNotional " +
+                   DecimalConverter::formatDecimal(info.minNotional);
+        }
+        if (info.maxNotional > 0 && notional > info.maxNotional)
+        {
+            return "notional " + DecimalConverter::formatDecimal(notional) + " is above maxNotional " +
+                   DecimalConverter::formatDecimal(info.maxNotional);
+        }
+    }
 
-    return safeQty;
+    return nullopt;
 }
 
 OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
     string symbol = baseAsset + quoteAsset;
-    Decimal stepSize{};
-    Decimal minNotional{};
-
-    try
-    {
-        SymbolInfo info = getSymbolInfo(symbol);
-        stepSize = info.stepSize;
-        minNotional = info.minNotional;
-    }
-    catch (...)
-    {
-        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
-    }
+    SymbolInfo info = getSymbolInfo(symbol);
 
     Decimal price = getTickerPrice(symbol);
-    Decimal safeQty = calculateSafeQty(symbol, quantity, price, stepSize, minNotional);
+    optional<string> quantityError = validateQuantity(quantity, price, info);
+    throwIf(quantityError.has_value(), "Binance buyCrypto: " + quantityError.value_or(""));
 
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, safeQty, stepSize);
+    string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity, info.stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
 
     string response = sendOrder(query, headers);
@@ -574,24 +583,13 @@ OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &q
 OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
     string symbol = baseAsset + quoteAsset;
-    Decimal stepSize{};
-    Decimal minNotional{};
-
-    try
-    {
-        SymbolInfo info = getSymbolInfo(symbol);
-        stepSize = info.stepSize;
-        minNotional = info.minNotional;
-    }
-    catch (...)
-    {
-        cerr << "Failed to get symbol info for " << symbol << ", using defaults" << endl;
-    }
+    SymbolInfo info = getSymbolInfo(symbol);
 
     Decimal price = getTickerPrice(symbol);
-    Decimal safeQty = calculateSafeQty(symbol, quantity, price, stepSize, minNotional);
+    optional<string> quantityError = validateQuantity(quantity, price, info);
+    throwIf(quantityError.has_value(), "Binance sellCrypto: " + quantityError.value_or(""));
 
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, safeQty, stepSize);
+    string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity, info.stepSize);
     flat_map<string, string> headers = createHeaders(apiKey);
 
     string response = sendOrder(query, headers);
@@ -616,6 +614,10 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     }
 
     SymbolInfo info = getSymbolInfo(request.symbol);
+    const Decimal validationPrice =
+        request.type == "LIMIT" && request.price.has_value() ? *request.price : getTickerPrice(request.symbol);
+    optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
+    throwIf(quantityError.has_value(), "Binance placeOrder: " + quantityError.value_or(""));
 
     auto timestamp = chrono::system_clock::now();
     ostringstream queryStream;
@@ -772,6 +774,12 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
     return info;
 }
 
+Decimal BinanceDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, const string &category)
+{
+    const SymbolInfo info = getSymbolInfo(symbol, category);
+    return DecimalConverter::ceilToStep(quantity, info.stepSize);
+}
+
 OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
@@ -852,14 +860,18 @@ string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long lo
     const SymbolInfo info = getSymbolInfo(request.symbol);
     const Decimal belowPrice = request.stopLimitPrice.has_value() ? *request.stopLimitPrice : request.stopPrice;
     const string belowTif = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : string("GTC");
+    optional<string> aboveQuantityError = validateQuantity(request.quantity, request.price, info);
+    throwIf(aboveQuantityError.has_value(), "Binance placeOco above leg: " + aboveQuantityError.value_or(""));
+    optional<string> belowQuantityError = validateQuantity(request.quantity, belowPrice, info);
+    throwIf(belowQuantityError.has_value(), "Binance placeOco below leg: " + belowQuantityError.value_or(""));
 
     ostringstream queryStream;
     // clang-format off
     queryStream << "symbol=" << request.symbol
                 << "&side=" << request.side
                 << "&quantity=" << DecimalConverter::formatByStep(request.quantity, info.stepSize)
-                << "&aboveType=LIMIT_MAKER" << "&abovePrice="
-                << DecimalConverter::formatByStep(request.price, info.tickSize)
+                << "&aboveType=LIMIT_MAKER"
+                << "&abovePrice=" << DecimalConverter::formatByStep(request.price, info.tickSize)
                 << "&belowType=STOP_LOSS_LIMIT"
                 << "&belowStopPrice=" << DecimalConverter::formatByStep(request.stopPrice, info.tickSize)
                 << "&belowPrice=" << DecimalConverter::formatByStep(belowPrice, info.tickSize)
@@ -1074,10 +1086,8 @@ flat_map<string, AssetBalance> BinanceDealService::getBalances() const
     return balances;
 }
 
-bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &category)
+bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &)
 {
-    (void)category;
-
     throwIf(symbol.empty(), "Binance cancelAllOpenOrders: symbol cannot be empty");
 
     ostringstream queryStream;

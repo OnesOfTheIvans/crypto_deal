@@ -2,6 +2,7 @@
 #include "../src/DealService/common/DecimalConverter.hpp"
 #include "../src/DealService/common/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
+#include "PrivateAccess.hpp"
 #include <gtest/gtest.h>
 
 class BinanceDealServiceTest : public ::testing::Test
@@ -113,10 +114,10 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
         "clientOrderId": "4VaNZmqo4CpVWQNBx9TBWT",
         "transactTime": 1779052073333,
         "price": "0.00000000",
-        "origQty": "0.00010000",
-        "executedQty": "0.00010000",
+        "origQty": "0.00020000",
+        "executedQty": "0.00020000",
         "origQuoteOrderQty": "0.00000000",
-        "cummulativeQuoteQty": "7.82535400",
+        "cummulativeQuoteQty": "15.65070800",
         "status": "FILLED",
         "timeInForce": "GTC",
         "type": "MARKET",
@@ -124,7 +125,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
         "workingTime": 1779052073333,
         "fills": [{
             "price": "78253.54000000",
-            "qty": "0.00010000",
+            "qty": "0.00020000",
             "commission": "0.00000000",
             "commissionAsset": "BTC",
             "tradeId": 1515535
@@ -136,14 +137,27 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
     MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
 
-    OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.00009"));
+    OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0002"));
 
     EXPECT_EQ(info.symbol, "BTCUSDT");
     EXPECT_EQ(info.orderId, "4458118");
     EXPECT_EQ(info.status, "FILLED");
     EXPECT_EQ(info.side, "BUY");
     EXPECT_EQ(info.type, "MARKET");
-    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0001"));
+    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0002"));
+}
+
+TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsBelowMinNotional)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", R"({
+        "symbol": "BTCUSDT",
+        "price": "50000.00000000"
+    })");
+
+    EXPECT_THROW(service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0001")), std::runtime_error);
 }
 
 TEST_F(BinanceDealServiceTest, CancelOrder_Success)
@@ -225,6 +239,16 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("10.0"));
 }
 
+TEST_F(BinanceDealServiceTest, CeilQuantityToStep)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+
+    EXPECT_EQ(service.ceilQuantityToStep("BTCUSDT", DecimalConverter::parseDecimal("0.00019")),
+              DecimalConverter::parseDecimal("0.0002"));
+}
+
 TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
@@ -266,7 +290,7 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
     EXPECT_THROW(service.getSymbolInfo("UNKNOWN"), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, MarketSellOrder_RoundsToStep)
+TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInvalidStep)
 {
     auto service = createService();
 
@@ -275,33 +299,18 @@ TEST_F(BinanceDealServiceTest, MarketSellOrder_RoundsToStep)
         "symbol": "BTCUSDT",
         "price": "78253.54000000"
     })");
-    MockNetwork::instance().setResponse("/api/v3/order", R"({
-        "symbol": "BTCUSDT",
-        "orderId": 4458119,
-        "clientOrderId": "sell-client",
-        "transactTime": 1779052073334,
-        "price": "0.00000000",
-        "origQty": "0.00020000",
-        "executedQty": "0.00020000",
-        "cummulativeQuoteQty": "15.65070800",
-        "status": "FILLED",
-        "type": "MARKET",
-        "side": "SELL"
-    })");
 
-    OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.00019"));
-
-    EXPECT_EQ(info.symbol, "BTCUSDT");
-    EXPECT_EQ(info.orderId, "4458119");
-    EXPECT_EQ(info.side, "SELL");
-    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0002"));
-
-    const auto &lastRequest = MockNetwork::instance().lastRequest();
-    EXPECT_EQ(lastRequest.method, "POST");
-    EXPECT_NE(lastRequest.target.find("side=SELL"), std::string::npos);
-    EXPECT_NE(lastRequest.target.find("quantity=0.0002"), std::string::npos);
-    ASSERT_TRUE(lastRequest.headers.contains("X-MBX-APIKEY"));
-    EXPECT_EQ(lastRequest.headers.at("X-MBX-APIKEY"), "api_key");
+    try
+    {
+        service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.00019"));
+        FAIL() << "Expected sellCrypto to reject invalid step";
+    }
+    catch (const std::runtime_error &e)
+    {
+        std::string msg = e.what();
+        EXPECT_NE(msg.find("quantity is not valid for step size"), std::string::npos);
+        EXPECT_EQ(msg.find("0.0002"), std::string::npos);
+    }
 }
 
 TEST_F(BinanceDealServiceTest, GetOrder_ParsesDetailedResponse)
@@ -355,6 +364,47 @@ TEST_F(BinanceDealServiceTest, GetBalancesRest_SeedsBalanceCache)
     EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("10.5"));
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("0.25"));
     EXPECT_EQ(service.getBalance("BTC")->free, DecimalConverter::parseDecimal("0.125"));
+}
+
+TEST_F(BinanceDealServiceTest, UserStreamAccountPositionUpdatesBalanceCache)
+{
+    auto service = createService();
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, R"({
+        "event": {
+            "e": "outboundAccountPosition",
+            "B": [
+                { "a": "USDT", "f": "123.45", "l": "6.78" },
+                { "a": "BTC", "f": "0.25", "l": "0.05" }
+            ]
+        }
+    })");
+
+    const auto usdt = service.getBalance("USDT");
+    ASSERT_TRUE(usdt.has_value());
+    EXPECT_EQ(usdt->free, DecimalConverter::parseDecimal("123.45"));
+    EXPECT_EQ(usdt->locked, DecimalConverter::parseDecimal("6.78"));
+
+    const auto btc = service.getBalance("BTC");
+    ASSERT_TRUE(btc.has_value());
+    EXPECT_EQ(btc->free, DecimalConverter::parseDecimal("0.25"));
+    EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
+}
+
+TEST_F(BinanceDealServiceTest, UserStreamIgnoresNonBalanceEvent)
+{
+    auto service = createService();
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, R"({
+        "event": {
+            "e": "executionReport",
+            "B": [
+                { "a": "USDT", "f": "123.45", "l": "6.78" }
+            ]
+        }
+    })");
+
+    EXPECT_FALSE(service.getBalance("USDT").has_value());
 }
 
 TEST_F(BinanceDealServiceTest, GetBalancesRest_ApiError)
@@ -428,7 +478,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
     req.side = "SELL";
-    req.quantity = DecimalConverter::parseDecimal("0.00019");
+    req.quantity = DecimalConverter::parseDecimal("0.0002");
     req.price = DecimalConverter::parseDecimal("90000");
     req.stopPrice = DecimalConverter::parseDecimal("60000");
     req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
@@ -447,6 +497,24 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
     EXPECT_EQ(lastRequest.method, "POST");
     EXPECT_NE(lastRequest.target.find("quantity=0.0002"), std::string::npos);
     EXPECT_NE(lastRequest.target.find("belowTimeInForce=GTC"), std::string::npos);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = "SELL";
+    req.quantity = DecimalConverter::parseDecimal("0.00019");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+    req.stopLimitTimeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
 TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)

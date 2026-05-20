@@ -105,6 +105,9 @@ class DealService
 
     virtual SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") = 0;
 
+    virtual Decimal
+    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") = 0;
+
     virtual OcoInfo placeOco(const PlaceOcoRequest &request) = 0;
 
     virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
