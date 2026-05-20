@@ -4,6 +4,7 @@
 #include "common/OrderQuery.hpp"
 #include "common/PlaceOcoRequest.hpp"
 #include "common/PlaceOrderRequest.hpp"
+#include "common/exception_handling.hpp"
 #include "type_aliasing.hpp"
 
 // DEBUG
@@ -13,6 +14,7 @@
 #include <thread>
 
 using namespace std;
+using namespace exception_handling;
 
 OperationFactory::OperationFactory()
 {
@@ -39,7 +41,7 @@ OperationFactory::OperationFactory()
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = "BUY";
+                              context.side = OrderOperation::BUY;
 
                               return context;
                           };
@@ -68,7 +70,7 @@ OperationFactory::OperationFactory()
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = "SELL";
+                              context.side = OrderOperation::SELL;
 
                               return context;
                           };
@@ -81,9 +83,12 @@ OperationFactory::OperationFactory()
                           return [preset](OperationContext &context) -> OperationContext &
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                              throwIf(!preset.side.has_value(), "Side is required for PLACE_ORDER");
+                              throwIf(!preset.type.has_value(), "Type is required for PLACE_ORDER");
+
                               PlaceOrderRequest request;
 
-                              if (preset.side == "BUY")
+                              if (preset.side.value() == OrderOperation::BUY)
                               {
                                   request.symbol = preset.outAsset + context.inAsset;
                               }
@@ -119,7 +124,7 @@ OperationFactory::OperationFactory()
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = preset.side;
+                              context.side = preset.side.value();
 
                               return context;
                           };
@@ -134,23 +139,21 @@ OperationFactory::OperationFactory()
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderQuery request;
 
-                              if (context.side == "BUY")
+                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_ORDER");
+
+                              if (context.side.value() == OrderOperation::BUY)
                               {
                                   request.symbol = context.inAsset + context.previousInAsset;
                               }
-                              else if (context.side == "SELL")
+                              else if (context.side.value() == OrderOperation::SELL)
                               {
                                   request.symbol = context.previousInAsset + context.inAsset;
-                              }
-                              else
-                              {
-                                  throw std::runtime_error("Side is missing or invalid for CANCEL_ORDER");
                               }
 
                               request.orderId = context.orderId;
                               service->cancelOrder(request);
 
-                              context.side = "";
+                              context.side = std::nullopt;
 
                               return context;
                           };
@@ -164,9 +167,11 @@ OperationFactory::OperationFactory()
             return [preset](OperationContext &context) -> OperationContext &
             {
                 auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                throwIf(!preset.side.has_value(), "Side is required for PLACE_OCO");
+
                 PlaceOcoRequest request;
 
-                if (preset.side == "BUY")
+                if (preset.side.value() == OrderOperation::BUY)
                 {
                     request.symbol = preset.outAsset + context.inAsset;
                 }
@@ -189,7 +194,7 @@ OperationFactory::OperationFactory()
                 context.orderId = ocoInfo.listClientOrderId.empty() ? ocoInfo.orderListId : ocoInfo.listClientOrderId;
                 context.previousInAsset = context.inAsset;
                 context.inAsset = preset.outAsset;
-                context.side = preset.side;
+                context.side = preset.side.value();
 
                 // Polling loop to wait for execution
                 cout << "Waiting for OCO execution (" << context.orderId.value_or("unknown") << ")..." << endl;
@@ -257,23 +262,21 @@ OperationFactory::OperationFactory()
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderListQuery request;
 
-                              if (context.side == "BUY")
+                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_OCO");
+
+                              if (context.side.value() == OrderOperation::BUY)
                               {
                                   request.symbol = context.inAsset + context.previousInAsset;
                               }
-                              else if (context.side == "SELL")
+                              else if (context.side.value() == OrderOperation::SELL)
                               {
                                   request.symbol = context.previousInAsset + context.inAsset;
-                              }
-                              else
-                              {
-                                  throw std::runtime_error("Side is missing or invalid for CANCEL_OCO");
                               }
 
                               request.listClientOrderId = context.orderId;
                               service->cancelOco(request);
 
-                              context.side = "";
+                              context.side = std::nullopt;
 
                               return context;
                           };
@@ -297,7 +300,7 @@ OperationFactory::OperationFactory()
                      << " to the address " << preset.address << "." << endl;
                 context.exchangerType = preset.destinationExchanger;
 
-                context.side = "";
+                context.side = std::nullopt;
 
                 return context;
             };

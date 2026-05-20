@@ -4,10 +4,10 @@
 #include "DealService.hpp"
 #include "ExchangerType.hpp"
 #include "OrderCategory.hpp"
-#include "OrderOperation.hpp"
-#include "OrderType.hpp"
 #include "common/OcoInfo.hpp"
 #include "common/OrderListQuery.hpp"
+#include "common/OrderOperation.hpp"
+#include "common/OrderType.hpp"
 #include "common/PlaceOcoRequest.hpp"
 #include "common/SymbolInfo.hpp"
 
@@ -75,8 +75,8 @@ class BybitDealService : public DealService
     std::string createBody(const std::string &baseAsset,
                            const std::string &quoteAsset,
                            const bybit::OrderCategory &category,
-                           const bybit::OrderOperation &operation,
-                           const bybit::OrderType &type,
+                           const OrderOperation &operation,
+                           const OrderType &type,
                            Decimal quantity,
                            Decimal stepSize = Decimal{});
 
@@ -131,6 +131,8 @@ class BybitDealService : public DealService
     validateBaseQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const;
 
     std::optional<std::string> validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const;
+
+    void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
   public:
     BybitDealService(const std::string &host,

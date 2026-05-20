@@ -3,11 +3,11 @@
 
 #include "DealService.hpp"
 #include "ExchangerType.hpp"
-#include "OrderOperation.hpp"
-#include "OrderType.hpp"
 #include "common/OcoInfo.hpp"
 #include "common/OrderInfo.hpp"
 #include "common/OrderListQuery.hpp"
+#include "common/OrderOperation.hpp"
+#include "common/OrderType.hpp"
 #include "common/PlaceOcoRequest.hpp"
 #include "common/SymbolInfo.hpp"
 
@@ -53,8 +53,8 @@ class BinanceDealService : public DealService
 
     std::string createQuery(const std::string &baseAsset,
                             const std::string &quoteAsset,
-                            const binance::OrderOperation &operation,
-                            const binance::OrderType &type,
+                            const OrderOperation &operation,
+                            const OrderType &type,
                             Decimal quantity,
                             Decimal stepSize = Decimal{});
 
@@ -63,6 +63,8 @@ class BinanceDealService : public DealService
     bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
 
     std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const;
+
+    void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 

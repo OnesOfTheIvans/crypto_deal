@@ -326,8 +326,8 @@ namespace {
             PlaceOrderRequest req;
             req.symbol = symbol;
             req.category = category;
-            req.side = "BUY";
-            req.type = "LIMIT";
+            req.side = OrderOperation::BUY;
+            req.type = OrderType::LIMIT;
             req.quantity = DecimalConverter::parseDecimal("0.0002");
             req.price = DecimalConverter::parseDecimal("65000.0");
             req.timeInForce = string("GTC");
@@ -397,7 +397,7 @@ namespace {
 
         PlaceOcoRequest oco;
         oco.symbol = symbol;
-        oco.side = "SELL";
+        oco.side = OrderOperation::SELL;
         oco.quantity = DecimalConverter::parseDecimal("0.00010");
 
         oco.price = DecimalConverter::parseDecimal("90000.0");

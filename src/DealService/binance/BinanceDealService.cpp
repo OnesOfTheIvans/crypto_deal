@@ -1,5 +1,5 @@
 #include "BinanceDealService.hpp"
-#include "common/EnumStringConverter.hpp"
+#include "EnumStringConverter.hpp"
 #include "common/HttpRequestContext.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
@@ -600,31 +600,39 @@ OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &
     return createOrderInfo(jsonValue.as_object());
 }
 
-OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
+void BinanceDealService::validatePlaceOrderRequest(const PlaceOrderRequest &request) const
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.side.has_value(), "Side is required");
+    throwIf(!request.type.has_value(), "Type is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
-    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
-    throwIf(request.type != "MARKET" && request.type != "LIMIT", "Invalid type: " + request.type);
-    if (request.type == "LIMIT")
+    if (request.type.value() == OrderType::LIMIT)
     {
         throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
                 "TimeInForce required for LIMIT orders");
     }
+}
+
+OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
+{
+    validatePlaceOrderRequest(request);
 
     SymbolInfo info = getSymbolInfo(request.symbol);
-    const Decimal validationPrice =
-        request.type == "LIMIT" && request.price.has_value() ? *request.price : getTickerPrice(request.symbol);
+    const Decimal validationPrice = request.type.value() == OrderType::LIMIT && request.price.has_value()
+                                        ? *request.price
+                                        : getTickerPrice(request.symbol);
     optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
     throwIf(quantityError.has_value(), "Binance placeOrder: " + quantityError.value_or(""));
 
     auto timestamp = chrono::system_clock::now();
     ostringstream queryStream;
-    queryStream << "symbol=" << request.symbol << "&side=" << request.side << "&type=" << request.type
+    queryStream << "symbol=" << request.symbol
+                << "&side=" << EnumStringConverter<OrderOperation>::toString(request.side.value())
+                << "&type=" << EnumStringConverter<OrderType>::toString(request.type.value())
                 << "&quantity=" << DecimalConverter::formatByStep(request.quantity, info.stepSize);
 
-    if (request.type == "LIMIT")
+    if (request.type.value() == OrderType::LIMIT)
     {
         queryStream << "&price=" << DecimalConverter::formatByStep(*request.price, info.tickSize)
                     << "&timeInForce=" << *request.timeInForce;
@@ -852,7 +860,7 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
 {
     throwIf(request.symbol.empty(), "Binance placeOco: symbol cannot be empty");
-    throwIf(request.side.empty(), "Binance placeOco: side cannot be empty");
+    throwIf(!request.side.has_value(), "Binance placeOco: side is required");
     throwIf(request.quantity <= 0, "Binance placeOco: quantity must be > 0");
     throwIf(request.price <= 0, "Binance placeOco: price must be > 0");
     throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
@@ -868,7 +876,7 @@ string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long lo
     ostringstream queryStream;
     // clang-format off
     queryStream << "symbol=" << request.symbol
-                << "&side=" << request.side
+                << "&side=" << EnumStringConverter<OrderOperation>::toString(request.side.value())
                 << "&quantity=" << DecimalConverter::formatByStep(request.quantity, info.stepSize)
                 << "&aboveType=LIMIT_MAKER"
                 << "&abovePrice=" << DecimalConverter::formatByStep(request.price, info.tickSize)

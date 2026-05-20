@@ -1,6 +1,7 @@
 #ifndef PLACE_OCO_REQUEST_H
 #define PLACE_OCO_REQUEST_H
 
+#include "OrderOperation.hpp"
 #include "type_aliasing.hpp"
 
 #include <optional>
@@ -8,8 +9,8 @@
 
 struct PlaceOcoRequest
 {
-    std::string symbol; // "WLDUSDT"
-    std::string side;   // "BUY" or "SELL"
+    std::string symbol;                 // "WLDUSDT"
+    std::optional<OrderOperation> side; // BUY or SELL
     Decimal quantity{};
 
     Decimal price{};     // LIMIT leg price

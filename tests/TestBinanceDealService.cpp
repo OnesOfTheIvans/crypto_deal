@@ -81,8 +81,8 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("1.0");
     req.price = DecimalConverter::parseDecimal("50000.0");
     req.timeInForce = "GTC";
@@ -253,6 +253,8 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
     PlaceOrderRequest req;
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     EXPECT_THROW(service.placeOrder(req), std::runtime_error); // Empty symbol
 
     req.symbol = "ETHUSDT";
@@ -272,8 +274,8 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
 
     PlaceOrderRequest req;
     req.symbol = "ETHUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("1.0");
     req.price = DecimalConverter::parseDecimal("2000");
     req.timeInForce = "GTC";
@@ -477,7 +479,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "SELL";
+    req.side = OrderOperation::SELL;
     req.quantity = DecimalConverter::parseDecimal("0.0002");
     req.price = DecimalConverter::parseDecimal("90000");
     req.stopPrice = DecimalConverter::parseDecimal("60000");
@@ -507,7 +509,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "SELL";
+    req.side = OrderOperation::SELL;
     req.quantity = DecimalConverter::parseDecimal("0.00019");
     req.price = DecimalConverter::parseDecimal("90000");
     req.stopPrice = DecimalConverter::parseDecimal("60000");
@@ -523,7 +525,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "SELL";
+    req.side = OrderOperation::SELL;
     req.quantity = DecimalConverter::parseDecimal("0.0002");
     req.price = DecimalConverter::parseDecimal("90000");
     req.stopPrice = DecimalConverter::parseDecimal("60000");

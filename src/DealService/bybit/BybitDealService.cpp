@@ -1,5 +1,5 @@
 #include "BybitDealService.hpp"
-#include "common/EnumStringConverter.hpp"
+#include "EnumStringConverter.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 #include <cstdlib>
@@ -769,21 +769,28 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     return info;
 }
 
-OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
+void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &request) const
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.side.has_value(), "Side is required");
+    throwIf(!request.type.has_value(), "Type is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
-    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
-    throwIf(request.type != "MARKET" && request.type != "LIMIT", "Invalid type: " + request.type);
-    if (request.type == "LIMIT")
+    if (request.type.value() == OrderType::LIMIT)
     {
         throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
                 "TimeInForce required for LIMIT orders");
     }
+    }
 
-    string side = (request.side == "BUY") ? "Buy" : "Sell";        // TODO solve compare issue
-    string type = (request.type == "MARKET") ? "Market" : "Limit"; // TODO solve compare issue
+OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
+{
+    validatePlaceOrderRequest(request);
+
+    const OrderOperation requestSide = request.side.value();
+    const OrderType requestType = request.type.value();
+    string side = EnumStringConverter<OrderOperation>::toString(requestSide);
+    string type = EnumStringConverter<OrderType>::toString(requestType);
     string category = request.category;
     if (category.empty())
     {
@@ -792,10 +799,10 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     // Fetch symbol info for precision
     SymbolInfo info = getSymbolInfo(request.symbol, category);
-    const bool isQuoteMarketBuy = request.type == "MARKET" && request.side == "BUY" && request.marketUnit.has_value() &&
-                                  *request.marketUnit == "quoteCoin";
+    const bool isQuoteMarketBuy = requestType == OrderType::MARKET && requestSide == OrderOperation::BUY &&
+                                  request.marketUnit.has_value() && *request.marketUnit == "quoteCoin";
     Decimal marketLastPrice{};
-    if (request.type == "LIMIT" && request.price.has_value())
+    if (requestType == OrderType::LIMIT && request.price.has_value())
     {
         optional<string> quantityError = validateBaseQuantity(request.quantity, *request.price, info);
         throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
@@ -814,7 +821,7 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     try
     {
-        const bool isBuyOrder = (request.side == "BUY");
+        const bool isBuyOrder = requestSide == OrderOperation::BUY;
         const string &baseAsset = info.baseAsset;
         const string &quoteAsset = info.quoteAsset;
 
@@ -825,7 +832,7 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
             Decimal requiredQuoteAmount{};
 
-            if (request.type == "LIMIT" && request.price.has_value())
+            if (requestType == OrderType::LIMIT && request.price.has_value())
             {
                 requiredQuoteAmount = request.quantity * (*request.price);
             }
@@ -889,7 +896,7 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
     // Use formatByStep for qty and price to avoid scientific notation and ensure correct precision
     body["qty"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
 
-    if (request.type == "LIMIT")
+    if (requestType == OrderType::LIMIT)
     {
         body["price"] = DecimalConverter::formatByStep(*request.price, info.tickSize);
         body["timeInForce"] = *request.timeInForce;
@@ -1363,10 +1370,10 @@ namespace {
 OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.side.has_value(), "Side is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
     throwIf(request.price <= 0, "Price must be greater than 0");
     throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
-    throwIf(request.side != "BUY" && request.side != "SELL", "Invalid side: " + request.side);
     throwIf(request.stopLimitPrice.has_value() && *request.stopLimitPrice <= 0,
             "StopLimitPrice must be greater than 0 if set");
 
@@ -1396,7 +1403,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     PlaceOrderRequest takeProfitRequest;
     takeProfitRequest.symbol = request.symbol;
     takeProfitRequest.side = request.side;
-    takeProfitRequest.type = "LIMIT";
+    takeProfitRequest.type = OrderType::LIMIT;
     takeProfitRequest.quantity = request.quantity;
     takeProfitRequest.price = request.price;
     takeProfitRequest.timeInForce = "GTC";
@@ -1425,13 +1432,13 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 
     if (request.stopLimitPrice.has_value())
     {
-        stopLossRequest.type = "LIMIT";
+        stopLossRequest.type = OrderType::LIMIT;
         stopLossRequest.price = *request.stopLimitPrice;
         stopLossRequest.timeInForce = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : "GTC";
     }
     else
     {
-        stopLossRequest.type = "MARKET";
+        stopLossRequest.type = OrderType::MARKET;
         stopLossRequest.marketUnit = "baseCoin";
     }
 

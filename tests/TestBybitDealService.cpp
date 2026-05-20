@@ -116,8 +116,8 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("0.5");
     req.price = DecimalConverter::parseDecimal("45000.0");
     req.timeInForce = "GTC";
@@ -141,8 +141,8 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("0.0001");
     req.price = DecimalConverter::parseDecimal("50000.0");
     req.timeInForce = "GTC";
@@ -316,7 +316,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
+    req.side = OrderOperation::BUY;
     req.quantity = DecimalConverter::parseDecimal("0.5");
     req.price = DecimalConverter::parseDecimal("45000.0");
     req.stopPrice = DecimalConverter::parseDecimal("40000.0");
@@ -331,6 +331,8 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
     PlaceOrderRequest req;
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 
     req.symbol = "BTCUSDT";
@@ -349,8 +351,8 @@ TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("0.1");
     req.price = DecimalConverter::parseDecimal("50000");
 
@@ -377,14 +379,14 @@ TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
     auto service = createService();
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "HOLD"; // Invalid
-    req.quantity = DecimalConverter::parseDecimal("1");
+    req.side = OrderOperation::BUY;
+    req.quantity = 0;
     req.price = DecimalConverter::parseDecimal("100");
     req.stopPrice = DecimalConverter::parseDecimal("90");
 
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 
-    req.side = "BUY";
+    req.quantity = DecimalConverter::parseDecimal("1");
     req.stopLimitPrice = DecimalConverter::parseDecimal("-50.0");
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
@@ -416,7 +418,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "SELL";
+    req.side = OrderOperation::SELL;
     req.quantity = DecimalConverter::parseDecimal("0.5");
     req.price = DecimalConverter::parseDecimal("60000");
     req.stopPrice = DecimalConverter::parseDecimal("55000");
@@ -471,8 +473,8 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "BUY";
-    req.type = "LIMIT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("1");
     req.price = DecimalConverter::parseDecimal("50000");
     req.timeInForce = "GTC";
@@ -695,7 +697,7 @@ TEST_F(BybitDealServiceTest, CancelOco_Success)
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
-    req.side = "SELL";
+    req.side = OrderOperation::SELL;
     req.quantity = DecimalConverter::parseDecimal("0.5");
     req.price = DecimalConverter::parseDecimal("60000");
     req.stopPrice = DecimalConverter::parseDecimal("55000");
