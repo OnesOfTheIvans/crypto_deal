@@ -106,7 +106,7 @@ class BybitDealService : public DealService
 
     std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
-    bool bybitResponseOk(const std::string &response, std::string *errOut);
+    std::optional<std::string> bybitResponseOk(const std::string &response);
 
     void handleUserStreamMessage(const std::string &msg);
 

@@ -128,8 +128,8 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
 
     const string response = httpsPost(requestContext);
 
-    string errorMessage;
-    throwIf(!bybitResponseOk(response, &errorMessage), "Bybit wallet-balance failed: " + errorMessage);
+    optional<string> errorMessage = bybitResponseOk(response);
+    throwIf(errorMessage.has_value(), "Bybit wallet-balance failed: " + errorMessage.value_or(""));
 
     beast::error_code jsonError;
     json::value parsedValue = json::parse(response, jsonError);
@@ -496,35 +496,23 @@ void BybitDealService::stopUserStream()
     }
 }
 
-bool BybitDealService::bybitResponseOk(const string &response, string *errOut)
+optional<string> BybitDealService::bybitResponseOk(const string &response)
 {
     beast::error_code ec;
     json::value val = json::parse(response, ec);
     if (ec)
     {
-        if (errOut)
-        {
-            *errOut = "JSON parse error: " + ec.message();
-        }
-        return false;
+        return "JSON parse error: " + ec.message();
     }
     if (!val.is_object())
     {
-        if (errOut)
-        {
-            *errOut = "Response is not a JSON object";
-        }
-        return false;
+        return "Response is not a JSON object";
     }
 
     const json::object &object = val.as_object();
     if (!object.contains("retCode") || !object.at("retCode").is_number())
     {
-        if (errOut)
-        {
-            *errOut = "Missing retCode in response";
-        }
-        return false;
+        return "Missing retCode in response";
     }
 
     ResponseDto responseDto;
@@ -534,23 +522,15 @@ bool BybitDealService::bybitResponseOk(const string &response, string *errOut)
     }
     catch (const exception &)
     {
-        if (errOut)
-        {
-            *errOut = "Missing retCode in response";
-        }
-        return false;
+        return "Missing retCode in response";
     }
 
     if (responseDto.retCode != 0)
     {
-        if (errOut)
-        {
-            *errOut = getErrorMessage(responseDto);
-        }
-        return false;
+        return getErrorMessage(responseDto);
     }
 
-    return true;
+    return nullopt;
 }
 
 string BybitDealService::sendOrder(const string &body, const flat_map<string, string> &headers)
@@ -564,8 +544,8 @@ string BybitDealService::sendOrder(const string &body, const flat_map<string, st
     string response = httpsPost(context);
     cout << "Order response: " << response << endl;
 
-    string err;
-    throwIf(!bybitResponseOk(response, &err), "Order failed: " + err);
+    optional<string> errorOutput = bybitResponseOk(response);
+    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
     return response;
 }
 
