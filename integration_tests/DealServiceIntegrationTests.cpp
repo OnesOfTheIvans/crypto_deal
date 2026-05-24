@@ -221,7 +221,7 @@ namespace {
         {
             auto cfgOpt = tryLoadConfig();
             ASSERT_TRUE(cfgOpt.has_value()) << "Config load failed (see failures above).";
-            cfg = *cfgOpt;
+            cfg = cfgOpt.value();
 
             svc = tryCreateService(GetParam(), cfg);
             ASSERT_TRUE(svc != nullptr) << "Service create failed (see failures above).";

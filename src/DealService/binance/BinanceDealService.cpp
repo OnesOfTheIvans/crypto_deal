@@ -581,7 +581,7 @@ void BinanceDealService::validatePlaceOrderRequest(const PlaceOrderRequest &requ
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
     if (request.type.value() == OrderType::LIMIT)
     {
-        throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
+        throwIf(!request.price.has_value() || request.price.value() <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
                 "TimeInForce required for LIMIT orders");
     }
@@ -593,7 +593,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 
     SymbolInfo info = getSymbolInfo(request.symbol);
     const Decimal validationPrice = request.type.value() == OrderType::LIMIT && request.price.has_value()
-                                        ? *request.price
+                                        ? request.price.value()
                                         : getTickerPrice(request.symbol);
     optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
     throwIf(quantityError.has_value(), "Binance placeOrder: " + quantityError.value_or(""));
@@ -607,13 +607,13 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 
     if (request.type.value() == OrderType::LIMIT)
     {
-        queryStream << "&price=" << DecimalConverter::formatByStep(*request.price, info.tickSize)
-                    << "&timeInForce=" << *request.timeInForce;
+        queryStream << "&price=" << DecimalConverter::formatByStep(request.price.value(), info.tickSize)
+                    << "&timeInForce=" << request.timeInForce.value();
     }
 
     if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
     {
-        queryStream << "&newClientOrderId=" << *request.clientOrderId;
+        queryStream << "&newClientOrderId=" << request.clientOrderId.value();
     }
 
     queryStream << "&newOrderRespType=RESULT" << "&recvWindow=" << recvWindow
@@ -652,11 +652,11 @@ string BinanceDealService::buildQueryForOrder(const OrderQuery &request)
 
     if (request.orderId.has_value())
     {
-        queryStream << "&orderId=" << *request.orderId;
+        queryStream << "&orderId=" << request.orderId.value();
     }
     if (request.clientOrderId.has_value())
     {
-        queryStream << "&origClientOrderId=" << *request.clientOrderId;
+        queryStream << "&origClientOrderId=" << request.clientOrderId.value();
     }
 
     queryStream << "&recvWindow=" << recvWindow
@@ -756,7 +756,7 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
     throwIf(request.price <= 0, "Price must be > 0");
     throwIf(request.stopPrice <= 0, "Stop Price must be > 0");
 
-    if (request.stopLimitPrice.has_value() && *request.stopLimitPrice > 0)
+    if (request.stopLimitPrice.has_value() && request.stopLimitPrice.value() > 0)
     {
         throwIf(!request.stopLimitTimeInForce.has_value() || request.stopLimitTimeInForce->empty(),
                 "stopLimitTimeInForce required if stopLimitPrice is set");
@@ -825,8 +825,9 @@ string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long lo
     throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
 
     const SymbolInfo info = getSymbolInfo(request.symbol);
-    const Decimal belowPrice = request.stopLimitPrice.has_value() ? *request.stopLimitPrice : request.stopPrice;
-    const string belowTif = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : string("GTC");
+    const Decimal belowPrice = request.stopLimitPrice.has_value() ? request.stopLimitPrice.value() : request.stopPrice;
+    const string belowTif =
+        request.stopLimitTimeInForce.has_value() ? request.stopLimitTimeInForce.value() : string("GTC");
     optional<string> aboveQuantityError = validateQuantity(request.quantity, request.price, info);
     throwIf(aboveQuantityError.has_value(), "Binance placeOco above leg: " + aboveQuantityError.value_or(""));
     optional<string> belowQuantityError = validateQuantity(request.quantity, belowPrice, info);
@@ -847,17 +848,17 @@ string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long lo
 
     if (request.listClientOrderId.has_value())
     {
-        queryStream << "&listClientOrderId=" << *request.listClientOrderId;
+        queryStream << "&listClientOrderId=" << request.listClientOrderId.value();
     }
 
     if (request.limitClientOrderId.has_value())
     {
-        queryStream << "&aboveClientOrderId=" << *request.limitClientOrderId;
+        queryStream << "&aboveClientOrderId=" << request.limitClientOrderId.value();
     }
 
     if (request.stopClientOrderId.has_value())
     {
-        queryStream << "&belowClientOrderId=" << *request.stopClientOrderId;
+        queryStream << "&belowClientOrderId=" << request.stopClientOrderId.value();
     }
 
     queryStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
@@ -872,12 +873,12 @@ string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, lo
 
     if (request.orderListId.has_value())
     {
-        queryStringStream << "&orderListId=" << *request.orderListId;
+        queryStringStream << "&orderListId=" << request.orderListId.value();
     }
 
     if (request.listClientOrderId.has_value())
     {
-        queryStringStream << "&listClientOrderId=" << *request.listClientOrderId;
+        queryStringStream << "&listClientOrderId=" << request.listClientOrderId.value();
     }
 
     queryStringStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;

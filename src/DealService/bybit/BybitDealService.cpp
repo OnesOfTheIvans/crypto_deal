@@ -113,7 +113,7 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
     queryStream << "accountType=" << accountType;
     if (coinFilter.has_value() && !coinFilter->empty())
     {
-        queryStream << "&coin=" << *coinFilter;
+        queryStream << "&coin=" << coinFilter.value();
     }
     const string queryString = queryStream.str();
 
@@ -714,7 +714,7 @@ void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &reques
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
     if (request.type.value() == OrderType::LIMIT)
     {
-        throwIf(!request.price.has_value() || *request.price <= 0, "Price must be > 0 for LIMIT orders");
+        throwIf(!request.price.has_value() || request.price.value() <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
                 "TimeInForce required for LIMIT orders");
     }
@@ -737,11 +737,11 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
     // Fetch symbol info for precision
     SymbolInfo info = getSymbolInfo(request.symbol, category);
     const bool isQuoteMarketBuy = requestType == OrderType::MARKET && requestSide == OrderOperation::BUY &&
-                                  request.marketUnit.has_value() && *request.marketUnit == "quoteCoin";
+                                  request.marketUnit.has_value() && request.marketUnit.value() == "quoteCoin";
     Decimal marketLastPrice{};
     if (requestType == OrderType::LIMIT && request.price.has_value())
     {
-        optional<string> quantityError = validateBaseQuantity(request.quantity, *request.price, info);
+        optional<string> quantityError = validateBaseQuantity(request.quantity, request.price.value(), info);
         throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
     }
     else if (isQuoteMarketBuy)
@@ -771,7 +771,7 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
             if (requestType == OrderType::LIMIT && request.price.has_value())
             {
-                requiredQuoteAmount = request.quantity * (*request.price);
+                requiredQuoteAmount = request.quantity * request.price.value();
             }
             else
             {
@@ -826,26 +826,26 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     if (requestType == OrderType::LIMIT)
     {
-        body["price"] = DecimalConverter::formatByStep(*request.price, info.tickSize);
-        body["timeInForce"] = *request.timeInForce;
+        body["price"] = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
+        body["timeInForce"] = request.timeInForce.value();
     }
 
     if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
     {
-        body["orderLinkId"] = *request.clientOrderId;
+        body["orderLinkId"] = request.clientOrderId.value();
     }
 
     if (request.triggerPrice.has_value() && !request.triggerPrice->empty())
     {
-        body["triggerPrice"] = *request.triggerPrice;
+        body["triggerPrice"] = request.triggerPrice.value();
     }
     if (request.orderFilter.has_value() && !request.orderFilter->empty())
     {
-        body["orderFilter"] = *request.orderFilter;
+        body["orderFilter"] = request.orderFilter.value();
     }
     if (request.marketUnit.has_value() && !request.marketUnit->empty())
     {
-        body["marketUnit"] = *request.marketUnit;
+        body["marketUnit"] = request.marketUnit.value();
     }
 
     string bodyStr = json::serialize(body);
@@ -890,11 +890,11 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 
     if (request.orderId.has_value())
     {
-        body["orderId"] = *request.orderId;
+        body["orderId"] = request.orderId.value();
     }
     if (request.clientOrderId.has_value())
     {
-        body["orderLinkId"] = *request.clientOrderId;
+        body["orderLinkId"] = request.clientOrderId.value();
     }
 
     string bodyStr = json::serialize(body);
@@ -939,11 +939,11 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
 
     if (request.orderId.has_value())
     {
-        queryStream << "&orderId=" << *request.orderId;
+        queryStream << "&orderId=" << request.orderId.value();
     }
     if (request.clientOrderId.has_value())
     {
-        queryStream << "&orderLinkId=" << *request.clientOrderId;
+        queryStream << "&orderLinkId=" << request.clientOrderId.value();
     }
 
     string queryString = queryStream.str();
@@ -983,7 +983,7 @@ OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const 
 
     if (request.orderId.has_value())
     {
-        info.orderId = *request.orderId;
+        info.orderId = request.orderId.value();
     }
     else
     {
@@ -992,7 +992,7 @@ OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const 
 
     if (request.clientOrderId.has_value())
     {
-        info.clientOrderId = *request.clientOrderId;
+        info.clientOrderId = request.clientOrderId.value();
     }
     else
     {
@@ -1037,12 +1037,12 @@ OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result,
 
     if (request.timeInForce.has_value())
     {
-        info.timeInForce = *request.timeInForce;
+        info.timeInForce = request.timeInForce.value();
     }
 
     if (request.price.has_value())
     {
-        info.price = *request.price;
+        info.price = request.price.value();
     }
 
     info.origQty = request.quantity;
@@ -1123,7 +1123,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
     }
     else if (request.orderId.has_value())
     {
-        info.orderId = *request.orderId;
+        info.orderId = request.orderId.value();
     }
 
     if (order.orderLinkId.has_value())
@@ -1132,7 +1132,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
     }
     else if (request.clientOrderId.has_value())
     {
-        info.clientOrderId = *request.clientOrderId;
+        info.clientOrderId = request.clientOrderId.value();
     }
 
     info.side = order.side.value_or("");
@@ -1215,13 +1215,13 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
     throwIf(request.price <= 0, "Price must be greater than 0");
     throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
-    throwIf(request.stopLimitPrice.has_value() && *request.stopLimitPrice <= 0,
+    throwIf(request.stopLimitPrice.has_value() && request.stopLimitPrice.value() <= 0,
             "StopLimitPrice must be greater than 0 if set");
 
     string groupId;
     if (request.listClientOrderId.has_value() && !request.listClientOrderId->empty())
     {
-        groupId = *request.listClientOrderId;
+        groupId = request.listClientOrderId.value();
     }
     else
     {
@@ -1274,8 +1274,9 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     if (request.stopLimitPrice.has_value())
     {
         stopLossRequest.type = OrderType::LIMIT;
-        stopLossRequest.price = *request.stopLimitPrice;
-        stopLossRequest.timeInForce = request.stopLimitTimeInForce.has_value() ? *request.stopLimitTimeInForce : "GTC";
+        stopLossRequest.price = request.stopLimitPrice.value();
+        stopLossRequest.timeInForce =
+            request.stopLimitTimeInForce.has_value() ? request.stopLimitTimeInForce.value() : "GTC";
     }
     else
     {
@@ -1344,11 +1345,11 @@ OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
     string groupId;
     if (request.orderListId.has_value())
     {
-        groupId = *request.orderListId;
+        groupId = request.orderListId.value();
     }
     else if (request.listClientOrderId.has_value())
     {
-        groupId = *request.listClientOrderId;
+        groupId = request.listClientOrderId.value();
     }
     else
     {
@@ -1406,7 +1407,7 @@ OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
             takeProfitCancelInfo.symbol = ocoGroup.takeProfit.symbol;
             if (ocoGroup.takeProfit.orderId)
             {
-                takeProfitCancelInfo.orderId = *ocoGroup.takeProfit.orderId;
+                takeProfitCancelInfo.orderId = ocoGroup.takeProfit.orderId.value();
             }
         }
     }
@@ -1442,7 +1443,7 @@ OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
             stopLossCancelInfo.symbol = ocoGroup.stopLeg.symbol;
             if (ocoGroup.stopLeg.orderId)
             {
-                stopLossCancelInfo.orderId = *ocoGroup.stopLeg.orderId;
+                stopLossCancelInfo.orderId = ocoGroup.stopLeg.orderId.value();
             }
         }
     }
