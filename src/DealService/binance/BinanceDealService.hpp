@@ -3,13 +3,17 @@
 
 #include "DealService.hpp"
 #include "ExchangerType.hpp"
-#include "common/OcoInfo.hpp"
-#include "common/OrderInfo.hpp"
-#include "common/OrderListQuery.hpp"
-#include "common/OrderOperation.hpp"
-#include "common/OrderType.hpp"
-#include "common/PlaceOcoRequest.hpp"
-#include "common/SymbolInfo.hpp"
+#include "common/domain/OcoInfo.hpp"
+#include "common/domain/OrderInfo.hpp"
+#include "common/domain/OrderListQuery.hpp"
+#include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderType.hpp"
+#include "common/domain/PlaceOcoRequest.hpp"
+#include "common/domain/SymbolInfo.hpp"
+#include "domain/OcoDto.hpp"
+#include "domain/OrderDto.hpp"
+#include "domain/StreamBalanceDto.hpp"
+#include "domain/SymbolDto.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -20,7 +24,7 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
 
-#include "common/OrderQuery.hpp"
+#include "common/domain/OrderQuery.hpp"
 
 #include <map>
 #include <mutex>
@@ -72,19 +76,17 @@ class BinanceDealService : public DealService
 
     std::optional<std::string> binanceResponseOk(const std::string &response);
 
-    Decimal parseAmount(const json::object &o, const char *key);
-
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
-    void updateCache(const json::array &balancesArray);
+    void updateCache(const std::vector<binance::StreamBalanceDto> &balances);
 
     void handleUserStreamMessage(const std::string &msg);
 
     std::string buildUserStreamSubscribeRequestJson();
 
-    OrderInfo createOrderInfo(const json::object &obj);
+    OrderInfo createOrderInfo(const binance::OrderDto &order);
 
-    SymbolInfo createSymbolInfo(const json::object &symbolObject);
+    SymbolInfo createSymbolInfo(const binance::SymbolDto &symbol);
 
     std::string buildQueryForOrder(const OrderQuery &request);
 
@@ -92,7 +94,7 @@ class BinanceDealService : public DealService
 
     std::string buildOcoCancelQuery(const OrderListQuery &request, long long timestamp);
 
-    OcoInfo createOcoInfo(const json::object &object);
+    OcoInfo createOcoInfo(const binance::OcoDto &oco);
 
     void setStreamStatus(StreamStatus status);
 

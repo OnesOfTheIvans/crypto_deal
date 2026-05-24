@@ -2,8 +2,8 @@
 #define BYBIT_ENUM_STRING_CONVERTER_H
 
 #include "OrderCategory.hpp"
-#include "common/OrderOperation.hpp"
-#include "common/OrderType.hpp"
+#include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderType.hpp"
 
 #include <string>
 #include <type_traits>

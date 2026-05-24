@@ -1,6 +1,6 @@
 #include "../src/DealService/bybit/BybitDealService.hpp"
 #include "../src/DealService/common/DecimalConverter.hpp"
-#include "../src/DealService/common/OrderInfo.hpp"
+#include "../src/DealService/common/domain/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
 #include "PrivateAccess.hpp"
 #include <gtest/gtest.h>
@@ -11,6 +11,13 @@ class BybitDealServiceTest : public ::testing::Test
     void SetUp() override
     {
         MockNetwork::instance().reset();
+        MockNetwork::instance().setResponse("/v5/market/time", R"({
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "timeSecond": "1776977716"
+            }
+        })");
     }
 
     BybitDealService createService()

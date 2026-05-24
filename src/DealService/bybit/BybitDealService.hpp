@@ -4,14 +4,20 @@
 #include "DealService.hpp"
 #include "ExchangerType.hpp"
 #include "OrderCategory.hpp"
-#include "common/OcoInfo.hpp"
-#include "common/OrderListQuery.hpp"
-#include "common/OrderOperation.hpp"
-#include "common/OrderType.hpp"
-#include "common/PlaceOcoRequest.hpp"
-#include "common/SymbolInfo.hpp"
+#include "common/domain/OcoInfo.hpp"
+#include "common/domain/OrderListQuery.hpp"
+#include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderType.hpp"
+#include "common/domain/PlaceOcoRequest.hpp"
+#include "common/domain/SymbolInfo.hpp"
+#include "domain/CoinBalanceDto.hpp"
+#include "domain/InstrumentDto.hpp"
+#include "domain/OrderDto.hpp"
+#include "domain/OrderResultDto.hpp"
+#include "domain/StreamMessageDto.hpp"
+#include "domain/StreamOrderMessageDto.hpp"
 
-#include "common/OrderQuery.hpp"
+#include "common/domain/OrderQuery.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -66,9 +72,7 @@ class BybitDealService : public DealService
     flat_map<std::string, BybitOcoGroup> ocoGroups;
     flat_map<std::string, std::string> ocoLegToGroup;
 
-    Decimal parseAmount(const boost::json::object &jsonObject, const char *key);
-
-    AssetBalance parseBalance(const boost::json::object &coinObject);
+    AssetBalance parseBalance(const bybit::CoinBalanceDto &coin);
 
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
@@ -80,20 +84,20 @@ class BybitDealService : public DealService
                            Decimal quantity,
                            Decimal stepSize = Decimal{});
 
-    OrderInfo createOrderInfo(const json::object &result,
+    OrderInfo createOrderInfo(const bybit::OrderResultDto &result,
                               const PlaceOrderRequest &request,
                               const std::string &side,
                               const std::string &type,
                               msec timestamp);
 
-    OrderInfo createOrderInfo(const json::object &result, const OrderQuery &request, msec timestamp);
+    OrderInfo createOrderInfo(const bybit::OrderResultDto &result, const OrderQuery &request, msec timestamp);
 
-    OrderInfo createDetailedOrderInfo(const json::object &orderObj,
+    OrderInfo createDetailedOrderInfo(const bybit::OrderDto &order,
                                       const OrderQuery &request,
                                       const std::string &category,
                                       msec timestamp);
 
-    SymbolInfo createSymbolInfo(const json::object &instrument, const std::string &symbol);
+    SymbolInfo createSymbolInfo(const bybit::InstrumentDto &instrument, const std::string &symbol);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -106,17 +110,15 @@ class BybitDealService : public DealService
 
     void handleUserStreamMessage(const std::string &msg);
 
-    void handleWalletUpdate(const boost::json::object &root);
+    void handleWalletUpdate(const bybit::StreamMessageDto &message);
 
-    void handleOrderUpdate(const boost::json::object &root);
+    void handleOrderUpdate(const bybit::StreamOrderMessageDto &message);
 
     void processOcoUpdate(const std::string &orderLinkId);
 
     void setStreamStatus(StreamStatus status);
 
     void setStreamError(const std::string &error);
-
-    long long getServerTime();
 
     void syncTime();
 

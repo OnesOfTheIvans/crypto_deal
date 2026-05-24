@@ -1,8 +1,8 @@
 #ifndef BINANCE_ENUM_STRING_CONVERTER_H
 #define BINANCE_ENUM_STRING_CONVERTER_H
 
-#include "common/OrderOperation.hpp"
-#include "common/OrderType.hpp"
+#include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderType.hpp"
 
 #include <string>
 #include <type_traits>

@@ -3,7 +3,7 @@
 
 #include "ExchangerPull.hpp"
 #include "ExchangerType.hpp"
-#include "common/OrderOperation.hpp"
+#include "common/domain/OrderOperation.hpp"
 #include "common/type_aliasing.hpp"
 
 #include <optional>

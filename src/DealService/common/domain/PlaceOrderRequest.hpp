@@ -3,7 +3,7 @@
 
 #include "OrderOperation.hpp"
 #include "OrderType.hpp"
-#include "type_aliasing.hpp"
+#include "common/type_aliasing.hpp"
 
 #include <optional>
 #include <string>

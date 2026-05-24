@@ -2,8 +2,8 @@
 #define CONFIG_H
 
 #include "ExchangerType.hpp"
-#include "common/OrderOperation.hpp"
-#include "common/OrderType.hpp"
+#include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderType.hpp"
 #include "common/type_aliasing.hpp"
 
 #include <optional>

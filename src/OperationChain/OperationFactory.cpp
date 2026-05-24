@@ -1,9 +1,9 @@
 #include "OperationFactory.hpp"
 #include "DealService.hpp"
-#include "common/OrderListQuery.hpp"
-#include "common/OrderQuery.hpp"
-#include "common/PlaceOcoRequest.hpp"
-#include "common/PlaceOrderRequest.hpp"
+#include "common/domain/OrderListQuery.hpp"
+#include "common/domain/OrderQuery.hpp"
+#include "common/domain/PlaceOcoRequest.hpp"
+#include "common/domain/PlaceOrderRequest.hpp"
 #include "common/exception_handling.hpp"
 #include "type_aliasing.hpp"
 

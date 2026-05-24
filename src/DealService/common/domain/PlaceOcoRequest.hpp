@@ -2,7 +2,7 @@
 #define PLACE_OCO_REQUEST_H
 
 #include "OrderOperation.hpp"
-#include "type_aliasing.hpp"
+#include "common/type_aliasing.hpp"
 
 #include <optional>
 #include <string>

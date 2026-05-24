@@ -1,7 +1,7 @@
 #ifndef ORDER_INFO_H
 #define ORDER_INFO_H
 
-#include "type_aliasing.hpp"
+#include "common/type_aliasing.hpp"
 
 #include <string>
 

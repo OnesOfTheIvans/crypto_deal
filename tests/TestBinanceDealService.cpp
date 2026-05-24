@@ -1,6 +1,6 @@
 #include "../src/DealService/binance/BinanceDealService.hpp"
 #include "../src/DealService/common/DecimalConverter.hpp"
-#include "../src/DealService/common/OrderInfo.hpp"
+#include "../src/DealService/common/domain/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
 #include "PrivateAccess.hpp"
 #include <gtest/gtest.h>
@@ -355,7 +355,7 @@ TEST_F(BinanceDealServiceTest, GetBalancesRest_SeedsBalanceCache)
     MockNetwork::instance().setResponse("/api/v3/account", R"({
         "balances": [
             { "asset": "USDT", "free": "10.50000000", "locked": "0.25000000" },
-            { "asset": "BTC", "free": 0.125, "locked": 0 }
+            { "asset": "BTC", "free": "0.12500000", "locked": "0.00000000" }
         ]
     })");
 

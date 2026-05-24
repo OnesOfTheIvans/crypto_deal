@@ -1,7 +1,7 @@
 #ifndef SYMBOL_INFO_H
 #define SYMBOL_INFO_H
 
-#include "type_aliasing.hpp"
+#include "common/type_aliasing.hpp"
 
 #include <string>
 

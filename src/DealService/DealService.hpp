@@ -1,21 +1,20 @@
 #ifndef DEAL_SERVICE_H
 #define DEAL_SERVICE_H
 
-#include "AssetBalance.hpp"
 #include "ExchangerType.hpp"
-#include "common/OcoInfo.hpp"
-#include "common/OrderInfo.hpp"
-#include "common/OrderListQuery.hpp"
-#include "common/OrderQuery.hpp"
-#include "common/PlaceOcoRequest.hpp"
-#include "common/PlaceOrderRequest.hpp"
-#include "common/SymbolInfo.hpp"
+#include "common/domain/AssetBalance.hpp"
+#include "common/domain/OcoInfo.hpp"
+#include "common/domain/OrderInfo.hpp"
+#include "common/domain/OrderListQuery.hpp"
+#include "common/domain/OrderQuery.hpp"
+#include "common/domain/PlaceOcoRequest.hpp"
+#include "common/domain/PlaceOrderRequest.hpp"
+#include "common/domain/SymbolInfo.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
-#include <boost/json.hpp>
 
 #include <atomic>
 #include <optional>
@@ -40,26 +39,6 @@ class DealService
     std::thread runner;
 
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
-
-    void parseAndSetParameter(std::string &destinationField,
-                              const boost::json::object &sourceObject,
-                              boost::json::string_view fieldName,
-                              bool isOptional = false) const;
-
-    void parseAndSetParameter(Decimal &destinationField,
-                              const boost::json::object &sourceObject,
-                              boost::json::string_view fieldName,
-                              bool isOptional = false) const;
-
-    void parseAndSetParameter(long long &destinationField,
-                              const boost::json::object &sourceObject,
-                              boost::json::string_view fieldName,
-                              bool isOptional = false) const;
-
-    void parseAndSetParameter(int &destinationField,
-                              const boost::json::object &sourceObject,
-                              boost::json::string_view fieldName,
-                              bool isOptional = false) const;
 
   public:
     DealService(std::string host,

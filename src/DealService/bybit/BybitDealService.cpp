@@ -2,6 +2,14 @@
 #include "EnumStringConverter.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
+#include "domain/AuthResponseDto.hpp"
+#include "domain/InstrumentInfoResponseDto.hpp"
+#include "domain/OrderResponseDto.hpp"
+#include "domain/RealtimeOrderResponseDto.hpp"
+#include "domain/ResponseDto.hpp"
+#include "domain/ServerTimeResponseDto.hpp"
+#include "domain/TickerResponseDto.hpp"
+#include "domain/WalletBalanceResponseDto.hpp"
 #include <cstdlib>
 
 #include <algorithm>
@@ -15,6 +23,31 @@
 using namespace std;
 using namespace bybit;
 using namespace exception_handling;
+
+namespace {
+    template <typename ResponseDtoType> string getErrorMessage(const ResponseDtoType &response)
+    {
+        return "Bybit Error " + to_string(response.retCode) + ": " + response.retMsg.value_or("Unknown Error");
+    }
+
+    template <typename ResponseDtoType> ResponseDtoType parseResponseToDto(const json::value &value)
+    {
+        const ResponseDtoType response = json::value_to<ResponseDtoType>(value);
+        throwIf(response.retCode != 0, getErrorMessage(response));
+
+        return response;
+    }
+
+    Decimal parseToDecimal(const optional<string> &value)
+    {
+        return value.has_value() && !value->empty() ? DecimalConverter::parseDecimal(value.value()) : Decimal{};
+    }
+
+    long long parseTimestamp(const optional<string> &value)
+    {
+        return value.has_value() && !value->empty() ? stoll(value.value()) : 0;
+    }
+} // namespace
 
 DealService::StreamStatus BybitDealService::getUserStreamStatus() const
 {
@@ -52,20 +85,14 @@ void BybitDealService::syncTime()
     json::value val = json::parse(response, ec);
     if (!ec && val.is_object())
     {
-        const auto &root = val.as_object();
-        if (root.contains("result") && root.at("result").is_object())
-        {
-            const auto &res = root.at("result").as_object();
-            if (res.contains("timeSecond") && res.at("timeSecond").is_string())
-            {
-                long long serverTime = stoll(res.at("timeSecond").as_string().c_str()) * 1000;
-                long long localTime =
-                    chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-                serverTimeOffset = serverTime - localTime;
-                timeSynced = true;
-                cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
-            }
-        }
+        const ServerTimeResponseDto responseDto = parseResponseToDto<ServerTimeResponseDto>(val);
+        throwIf(!responseDto.result.has_value(), "Missing result object");
+        long long serverTime = stoll(responseDto.result.value().timeSecond) * 1000;
+        long long localTime =
+            chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
+        serverTimeOffset = serverTime - localTime;
+        timeSynced = true;
+        cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
     }
 }
 
@@ -108,61 +135,30 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
     json::value parsedValue = json::parse(response, jsonError);
     throwIf(jsonError || !parsedValue.is_object(), "Bybit wallet-balance JSON parse error");
 
-    const json::object &rootObject = parsedValue.as_object();
-    const auto *resultValue = rootObject.if_contains("result");
-    if (!resultValue || !resultValue->is_object())
+    const WalletBalanceResponseDto responseDto = parseResponseToDto<WalletBalanceResponseDto>(parsedValue);
+    if (!responseDto.result.has_value() || !responseDto.result.value().list.has_value())
     {
         return;
     }
 
-    const json::object &resultObject = resultValue->as_object();
-    const auto *listValue = resultObject.if_contains("list");
-    if (!listValue || !listValue->is_array())
+    for (const WalletAccountDto &account : responseDto.result.value().list.value())
     {
-        return;
-    }
-
-    const json::array &accountList = listValue->as_array();
-    for (const json::value &accountValue : accountList)
-    {
-        if (!accountValue.is_object())
+        if (!account.coin.has_value())
         {
             continue;
         }
 
-        const json::object &accountObject = accountValue.as_object();
-        const auto *coinListValue = accountObject.if_contains("coin");
-        if (!coinListValue || !coinListValue->is_array())
+        for (const CoinBalanceDto &coin : account.coin.value())
         {
-            continue;
-        }
+            const Decimal walletBalance = parseToDecimal(coin.walletBalance);
 
-        const json::array &coinList = coinListValue->as_array();
-        for (const json::value &coinValue : coinList)
-        {
-            if (!coinValue.is_object())
-            {
-                continue;
-            }
-
-            const json::object &coinObject = coinValue.as_object();
-            const auto *coinNameValue = coinObject.if_contains("coin");
-            if (!coinNameValue || !coinNameValue->is_string())
-            {
-                continue;
-            }
-
-            const string assetName = string(coinNameValue->as_string().c_str());
-
-            const Decimal walletBalance = parseAmount(coinObject, "walletBalance");
-
-            Decimal freeAmount = parseAmount(coinObject, "availableToWithdraw");
+            Decimal freeAmount = parseToDecimal(coin.availableToWithdraw);
             if (freeAmount <= 0)
             {
-                freeAmount = parseAmount(coinObject, "availableToTrade");
+                freeAmount = parseToDecimal(coin.availableToTrade);
             }
 
-            Decimal lockedAmount = parseAmount(coinObject, "locked");
+            Decimal lockedAmount = parseToDecimal(coin.locked);
 
             if (freeAmount <= 0 && walletBalance > 0)
             {
@@ -173,7 +169,7 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
                 lockedAmount = max(Decimal{0}, walletBalance - freeAmount);
             }
 
-            updateBalanceCache(assetName, freeAmount, lockedAmount);
+            updateBalanceCache(coin.coin, freeAmount, lockedAmount);
         }
     }
 }
@@ -229,10 +225,10 @@ BybitDealService::validateBaseQuantity(Decimal quantity, Decimal price, const Sy
     }
 
     return nullopt;
-        }
+}
 
 optional<string> BybitDealService::validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const
-    {
+{
     if (symbolInfo.minNotional > 0 && quantity < symbolInfo.minNotional)
     {
         return "quote quantity " + DecimalConverter::formatDecimal(quantity) + " is below minOrderAmt " +
@@ -318,10 +314,10 @@ void BybitDealService::startUserStream()
                     json::value val = json::parse(msg, ec);
                     if (!ec && val.is_object())
                     {
-                        json::object &root = val.as_object();
-                        if (root.contains("op") && root.at("op").as_string() == "auth")
+                        const AuthResponseDto authResponse = json::value_to<AuthResponseDto>(val);
+                        if (authResponse.op.has_value() && authResponse.op.value() == "auth")
                         {
-                            throwIf(!root.contains("success") || !root.at("success").as_bool(),
+                            throwIf(!authResponse.success.has_value() || !authResponse.success.value(),
                                     "Bybit stream: auth failed: " + msg);
                             cout << "Bybit stream authenticated successfully." << endl;
                         }
@@ -442,29 +438,6 @@ string BybitDealService::getSignature(const string &body, const msec &timestamp)
     return hmac_sha256(secretKey, sign_input.str());
 }
 
-Decimal BybitDealService::parseAmount(const json::object &jsonObject, const char *key)
-{
-    if (auto *value = jsonObject.if_contains(key))
-    {
-        if (value->is_string())
-        {
-            std::string_view text = value->as_string().c_str();
-
-            if (text.empty())
-            {
-                return Decimal{};
-            }
-
-            return DecimalConverter::parseDecimal(text);
-        }
-        if (value->is_number())
-        {
-            return DecimalConverter::parseDecimal(json::serialize(*value));
-        }
-    }
-    return Decimal{};
-}
-
 void BybitDealService::updateBalanceCache(const string &asset, Decimal free, Decimal locked)
 {
     lock_guard<mutex> g(balanceMutex);
@@ -480,19 +453,13 @@ void BybitDealService::updateBalanceCache(const string &asset, Decimal free, Dec
     }
 }
 
-AssetBalance BybitDealService::parseBalance(const json::object &coinObject)
+AssetBalance BybitDealService::parseBalance(const CoinBalanceDto &coin)
 {
-    auto *nameValue = coinObject.if_contains("coin");
-    throwIf(!nameValue || !nameValue->is_string(), "Bybit balance stream: missing or invalid 'coin' field");
-
-    const json::string &assetNameString = nameValue->as_string();
-    string asset(assetNameString.c_str(), assetNameString.size());
-
-    const Decimal walletBalance = parseAmount(coinObject, "walletBalance");
-    const Decimal locked = parseAmount(coinObject, "locked");
+    const Decimal walletBalance = parseToDecimal(coin.walletBalance);
+    const Decimal locked = parseToDecimal(coin.locked);
     const Decimal free = walletBalance - locked;
 
-    return AssetBalance{asset, free, locked};
+    return AssetBalance{coin.coin, free, locked};
 }
 
 void BybitDealService::stopUserStream()
@@ -550,29 +517,35 @@ bool BybitDealService::bybitResponseOk(const string &response, string *errOut)
         return false;
     }
 
-    const auto &obj = val.as_object();
-    if (obj.contains("retCode") && obj.at("retCode").is_number())
-    {
-        long long retCode = obj.at("retCode").as_int64();
-        if (retCode != 0)
-        {
-            if (errOut)
-            {
-                string msg = "Unknown Error";
-                if (obj.contains("retMsg") && obj.at("retMsg").is_string())
-                {
-                    msg = obj.at("retMsg").as_string().c_str();
-                }
-                *errOut = "Bybit Error " + to_string(retCode) + ": " + msg;
-            }
-            return false;
-        }
-    }
-    else
+    const json::object &object = val.as_object();
+    if (!object.contains("retCode") || !object.at("retCode").is_number())
     {
         if (errOut)
         {
             *errOut = "Missing retCode in response";
+        }
+        return false;
+    }
+
+    ResponseDto responseDto;
+    try
+    {
+        responseDto = json::value_to<ResponseDto>(val);
+    }
+    catch (const exception &)
+    {
+        if (errOut)
+        {
+            *errOut = "Missing retCode in response";
+        }
+        return false;
+    }
+
+    if (responseDto.retCode != 0)
+    {
+        if (errOut)
+        {
+            *errOut = getErrorMessage(responseDto);
         }
         return false;
     }
@@ -608,22 +581,10 @@ Decimal BybitDealService::getTickerPrice(const string &symbol)
     json::value jsonValue = json::parse(response, errorCode);
     if (!errorCode && jsonValue.is_object())
     {
-        const auto &rootObject = jsonValue.as_object();
-        if (rootObject.contains("result") && rootObject.at("result").is_object())
+        const TickerResponseDto responseDto = json::value_to<TickerResponseDto>(jsonValue);
+        if (responseDto.result.has_value() && !responseDto.result.value().list.empty())
         {
-            const auto &resultObject = rootObject.at("result").as_object();
-            if (resultObject.contains("list") && resultObject.at("list").is_array())
-            {
-                const auto &tickerList = resultObject.at("list").as_array();
-                if (!tickerList.empty() && tickerList[0].is_object())
-                {
-                    const auto &tickerItem = tickerList[0].as_object();
-                    if (tickerItem.contains("lastPrice") && tickerItem.at("lastPrice").is_string())
-                    {
-                        return DecimalConverter::parseDecimal(tickerItem.at("lastPrice").as_string().c_str());
-                    }
-                }
-            }
+            return DecimalConverter::parseDecimal(responseDto.result.value().list[0].lastPrice);
         }
     }
     return Decimal{};
@@ -677,10 +638,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
     json::value jsonValue = json::parse(response, errorCode);
     throwIf(errorCode || !jsonValue.is_object(), "Failed to parse buyCrypto response");
 
-    const json::object &jsonObject = jsonValue.as_object();
-    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
-            "Missing result in buyCrypto response");
-    const json::object &resultObject = jsonObject.at("result").as_object();
+    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result in buyCrypto response");
 
     OrderInfo info;
     info.symbol = symbol;
@@ -691,8 +650,8 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
     info.origQty = quantity;
     info.leavesQty = quantity;
 
-    parseAndSetParameter(info.orderId, resultObject, "orderId", true);
-    parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
+    info.orderId = responseDto.result.value().orderId.value_or("");
+    info.clientOrderId = responseDto.result.value().orderLinkId.value_or("");
 
     info.createdTimeMs = timestamp;
     info.updatedTimeMs = timestamp;
@@ -746,10 +705,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     json::value jsonValue = json::parse(response, errorCode);
     throwIf(errorCode || !jsonValue.is_object(), "Failed to parse sellCrypto response");
 
-    const json::object &jsonObject = jsonValue.as_object();
-    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
-            "Missing result in sellCrypto response");
-    const json::object &resultObject = jsonObject.at("result").as_object();
+    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result in sellCrypto response");
 
     OrderInfo info;
     info.symbol = symbol;
@@ -760,8 +717,8 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
     info.origQty = quantity;
     info.leavesQty = quantity;
 
-    parseAndSetParameter(info.orderId, resultObject, "orderId", true);
-    parseAndSetParameter(info.clientOrderId, resultObject, "orderLinkId", true);
+    info.orderId = responseDto.result.value().orderId.value_or("");
+    info.clientOrderId = responseDto.result.value().orderLinkId.value_or("");
 
     info.createdTimeMs = timestamp;
     info.updatedTimeMs = timestamp;
@@ -781,7 +738,7 @@ void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &reques
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
                 "TimeInForce required for LIMIT orders");
     }
-    }
+}
 
 OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 {
@@ -854,14 +811,9 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
             if (requiredQuoteAmount > 0)
             {
                 requiredQuoteAmount *= DecimalConverter::parseDecimal("1.01");
-                if (quoteFree < requiredQuoteAmount)
-                {
-                    ostringstream messageStream;
-                    messageStream << "Insufficient balance: need ~"
-                                  << DecimalConverter::formatDecimal(requiredQuoteAmount) << " " << quoteAsset
-                                  << ", have " << DecimalConverter::formatDecimal(quoteFree);
-                    throw runtime_error(messageStream.str());
-                }
+                throwIf(quoteFree < requiredQuoteAmount,
+                        "Insufficient balance: need ~" + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
+                            quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
             }
             else
             {
@@ -873,13 +825,9 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
             const auto baseBalance = getBalance(baseAsset);
             const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
 
-            if (baseFree < request.quantity)
-            {
-                ostringstream messageStream;
-                messageStream << "Insufficient balance: need " << DecimalConverter::formatDecimal(request.quantity)
-                              << " " << baseAsset << ", have " << DecimalConverter::formatDecimal(baseFree);
-                throw runtime_error(messageStream.str());
-            }
+            throwIf(baseFree < request.quantity,
+                    "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " +
+                        baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
         }
     }
     catch (const exception &exception)
@@ -938,30 +886,10 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
     throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
     throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
-    json::object &jsonObject = jsonValue.as_object();
+    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object in response");
 
-    int retCode = -1;
-    if (jsonObject.contains("retCode") && jsonObject.at("retCode").is_number())
-    {
-        retCode = jsonObject.at("retCode").as_int64();
-    }
-
-    if (retCode != 0)
-    {
-        string message = "Unknown Error";
-        if (jsonObject.contains("retMsg") && jsonObject.at("retMsg").is_string())
-        {
-            message = jsonObject.at("retMsg").as_string().c_str();
-        }
-        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
-    }
-
-    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
-            "Missing result object in response");
-
-    json::object &result = jsonObject.at("result").as_object();
-
-    return createOrderInfo(result, request, side, type, timestamp);
+    return createOrderInfo(responseDto.result.value(), request, side, type, timestamp);
 }
 
 OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
@@ -1008,30 +936,10 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
     throwIf(errorCode.failed(), "Bybit cancelOrder: JSON parse error: " + errorCode.message());
     throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
-    json::object &jsonObject = jsonValue.as_object();
+    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object in response");
 
-    int retCode = -1;
-    if (jsonObject.contains("retCode") && jsonObject.at("retCode").is_number())
-    {
-        retCode = jsonObject.at("retCode").as_int64();
-    }
-
-    if (retCode != 0)
-    {
-        string message = "Unknown Error";
-        if (jsonObject.contains("retMsg") && jsonObject.at("retMsg").is_string())
-        {
-            message = jsonObject.at("retMsg").as_string().c_str();
-        }
-        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
-    }
-
-    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
-            "Missing result object in response");
-
-    json::object &result = jsonObject.at("result").as_object();
-
-    return createOrderInfo(result, request, timestamp);
+    return createOrderInfo(responseDto.result.value(), request, timestamp);
 }
 
 OrderInfo BybitDealService::getOrder(const OrderQuery &request)
@@ -1077,39 +985,15 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
     throwIf(errorCode.failed(), "Bybit getOrder: JSON parse error: " + errorCode.message());
     throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
-    json::object &jsonObject = jsonValue.as_object();
+    const RealtimeOrderResponseDto responseDto = parseResponseToDto<RealtimeOrderResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object in response");
 
-    int retCode = -1;
-    if (jsonObject.contains("retCode") && jsonObject.at("retCode").is_number())
-    {
-        retCode = jsonObject.at("retCode").as_int64();
-    }
+    throwIf(responseDto.result.value().list.empty(), "Order not found (empty list)");
 
-    if (retCode != 0)
-    {
-        string message = "Unknown Error";
-        if (jsonObject.contains("retMsg") && jsonObject.at("retMsg").is_string())
-        {
-            message = jsonObject.at("retMsg").as_string().c_str();
-        }
-        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
-    }
-
-    throwIf(!jsonObject.contains("result") || !jsonObject.at("result").is_object(),
-            "Missing result object in response");
-    json::object &result = jsonObject.at("result").as_object();
-
-    throwIf(!result.contains("list") || !result.at("list").is_array(), "Missing or invalid list in response");
-    json::array &orderList = result.at("list").as_array();
-
-    throwIf(orderList.empty(), "Order not found (empty list)");
-    throwIf(!orderList[0].is_object(), "Invalid order object in list");
-    const json::object &orderObject = orderList[0].as_object();
-
-    return createDetailedOrderInfo(orderObject, request, category, timestamp);
+    return createDetailedOrderInfo(responseDto.result.value().list[0], request, category, timestamp);
 }
 
-OrderInfo BybitDealService::createOrderInfo(const json::object &result, const OrderQuery &request, msec timestamp)
+OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const OrderQuery &request, msec timestamp)
 {
     OrderInfo info;
     info.symbol = request.symbol;
@@ -1123,7 +1007,7 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result, const Or
     }
     else
     {
-        parseAndSetParameter(info.orderId, result, "orderId", true);
+        info.orderId = result.orderId.value_or("");
     }
 
     if (request.clientOrderId.has_value())
@@ -1132,7 +1016,7 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result, const Or
     }
     else
     {
-        parseAndSetParameter(info.clientOrderId, result, "orderLinkId", true);
+        info.clientOrderId = result.orderLinkId.value_or("");
     }
 
     info.executedQty = 0;
@@ -1144,7 +1028,7 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result, const Or
     return info;
 }
 
-OrderInfo BybitDealService::createOrderInfo(const json::object &result,
+OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result,
                                             const PlaceOrderRequest &request,
                                             const string &side,
                                             const string &type,
@@ -1162,8 +1046,9 @@ OrderInfo BybitDealService::createOrderInfo(const json::object &result,
         info.category = request.category;
     }
 
-    parseAndSetParameter(info.orderId, result, "orderId");
-    parseAndSetParameter(info.clientOrderId, result, "orderLinkId", true);
+    throwIf(!result.orderId.has_value(), "Missing required string field: orderId");
+    info.orderId = result.orderId.value();
+    info.clientOrderId = result.orderLinkId.value_or("");
 
     info.side = side;
     info.type = type;
@@ -1219,36 +1104,12 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
     throwIf(errorCode.failed(), "Bybit getSymbolInfo: JSON parse error: " + errorCode.message());
     throwIf(!jsonValue.is_object(), "Response is not a JSON object");
 
-    json::object &rootObject = jsonValue.as_object();
+    const InstrumentInfoResponseDto responseDto = parseResponseToDto<InstrumentInfoResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object");
 
-    int retCode = -1;
-    if (rootObject.contains("retCode") && rootObject.at("retCode").is_number())
-    {
-        retCode = rootObject.at("retCode").as_int64();
-    }
+    throwIf(responseDto.result.value().list.empty(), "Symbol not found: " + symbol);
 
-    if (retCode != 0)
-    {
-        string message = "Unknown Error";
-        if (rootObject.contains("retMsg") && rootObject.at("retMsg").is_string())
-        {
-            message = rootObject.at("retMsg").as_string().c_str();
-        }
-        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
-    }
-
-    throwIf(!rootObject.contains("result") || !rootObject.at("result").is_object(), "Missing result object");
-
-    json::object &resultObject = rootObject.at("result").as_object();
-
-    throwIf(!resultObject.contains("list") || !resultObject.at("list").is_array(), "Missing list in result");
-
-    json::array &instrumentList = resultObject.at("list").as_array();
-    throwIf(instrumentList.empty(), "Symbol not found: " + symbol);
-
-    throwIf(!instrumentList[0].is_object(), "Invalid instrument object");
-
-    SymbolInfo info = createSymbolInfo(instrumentList[0].as_object(), symbol);
+    SymbolInfo info = createSymbolInfo(responseDto.result.value().list[0], symbol);
     {
         lock_guard<mutex> lock(symbolInfoMutex);
         symbolInfoCache[symbol] = info;
@@ -1262,13 +1123,13 @@ Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quant
     return DecimalConverter::ceilToStep(quantity, info.stepSize);
 }
 
-OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj,
+OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
                                                     const OrderQuery &request,
                                                     const string &category,
                                                     msec timestamp)
 {
     OrderInfo info;
-    parseAndSetParameter(info.symbol, orderObj, "symbol", true);
+    info.symbol = order.symbol.value_or("");
     if (info.symbol.empty())
     {
         info.symbol = request.symbol;
@@ -1276,36 +1137,36 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
 
     info.category = category;
 
-    if (orderObj.contains("orderId"))
+    if (order.orderId.has_value())
     {
-        parseAndSetParameter(info.orderId, orderObj, "orderId");
+        info.orderId = order.orderId.value();
     }
     else if (request.orderId.has_value())
     {
         info.orderId = *request.orderId;
     }
 
-    if (orderObj.contains("orderLinkId"))
+    if (order.orderLinkId.has_value())
     {
-        parseAndSetParameter(info.clientOrderId, orderObj, "orderLinkId");
+        info.clientOrderId = order.orderLinkId.value();
     }
     else if (request.clientOrderId.has_value())
     {
         info.clientOrderId = *request.clientOrderId;
     }
 
-    parseAndSetParameter(info.side, orderObj, "side", true);
-    parseAndSetParameter(info.type, orderObj, "orderType", true);
-    parseAndSetParameter(info.timeInForce, orderObj, "timeInForce", true);
-    parseAndSetParameter(info.status, orderObj, "orderStatus", true);
-    parseAndSetParameter(info.price, orderObj, "price", true);
-    parseAndSetParameter(info.origQty, orderObj, "qty", true);
-    parseAndSetParameter(info.executedQty, orderObj, "cumExecQty", true);
-    parseAndSetParameter(info.cumQuoteQty, orderObj, "cumExecValue", true);
-    parseAndSetParameter(info.leavesQty, orderObj, "leavesQty", true);
-    parseAndSetParameter(info.avgPrice, orderObj, "avgPrice", true);
-    parseAndSetParameter(info.createdTimeMs, orderObj, "createdTime", true);
-    parseAndSetParameter(info.updatedTimeMs, orderObj, "updatedTime", true);
+    info.side = order.side.value_or("");
+    info.type = order.orderType.value_or("");
+    info.timeInForce = order.timeInForce.value_or("");
+    info.status = order.orderStatus.value_or("");
+    info.price = parseToDecimal(order.price);
+    info.origQty = parseToDecimal(order.qty);
+    info.executedQty = parseToDecimal(order.cumExecQty);
+    info.cumQuoteQty = parseToDecimal(order.cumExecValue);
+    info.leavesQty = parseToDecimal(order.leavesQty);
+    info.avgPrice = parseToDecimal(order.avgPrice);
+    info.createdTimeMs = parseTimestamp(order.createdTime);
+    info.updatedTimeMs = parseTimestamp(order.updatedTime);
 
     if (info.updatedTimeMs == 0)
     {
@@ -1315,41 +1176,41 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const json::object &orderObj
     return info;
 }
 
-SymbolInfo BybitDealService::createSymbolInfo(const json::object &instrument, const string &symbol)
+SymbolInfo BybitDealService::createSymbolInfo(const InstrumentDto &instrument, const string &symbol)
 {
     SymbolInfo info;
     info.symbol = symbol;
-    parseAndSetParameter(info.symbol, instrument, "symbol", true);
-    parseAndSetParameter(info.status, instrument, "status", true);
-    parseAndSetParameter(info.baseAsset, instrument, "baseCoin", true);
-    parseAndSetParameter(info.quoteAsset, instrument, "quoteCoin", true);
-
-    if (instrument.contains("priceFilter") && instrument.at("priceFilter").is_object())
+    if (instrument.symbol.has_value())
     {
-        const json::object &priceFilter = instrument.at("priceFilter").as_object();
-        parseAndSetParameter(info.tickSize, priceFilter, "tickSize", true);
-        parseAndSetParameter(info.minPrice, priceFilter, "minPrice", true);
-        parseAndSetParameter(info.maxPrice, priceFilter, "maxPrice", true);
+        info.symbol = instrument.symbol.value();
+    }
+    info.status = instrument.status.value_or("");
+    info.baseAsset = instrument.baseCoin.value_or("");
+    info.quoteAsset = instrument.quoteCoin.value_or("");
+
+    if (instrument.priceFilter.has_value())
+    {
+        const PriceFilterDto &priceFilter = instrument.priceFilter.value();
+        info.tickSize = parseToDecimal(priceFilter.tickSize);
+        info.minPrice = parseToDecimal(priceFilter.minPrice);
+        info.maxPrice = parseToDecimal(priceFilter.maxPrice);
     }
 
-    if (instrument.contains("lotSizeFilter") && instrument.at("lotSizeFilter").is_object())
+    if (instrument.lotSizeFilter.has_value())
     {
-        const json::object &lotSizeFilter = instrument.at("lotSizeFilter").as_object();
-        parseAndSetParameter(info.stepSize, lotSizeFilter, "qtyStep", true);
+        const LotSizeFilterDto &lotSizeFilter = instrument.lotSizeFilter.value();
+        info.stepSize = parseToDecimal(lotSizeFilter.qtyStep);
 
         if (info.stepSize <= 0)
         {
-            if (lotSizeFilter.contains("basePrecision"))
-            {
-                parseAndSetParameter(info.stepSize, lotSizeFilter, "basePrecision");
-            }
+            info.stepSize = parseToDecimal(lotSizeFilter.basePrecision);
         }
 
-        parseAndSetParameter(info.minQty, lotSizeFilter, "minOrderQty", true);
-        parseAndSetParameter(info.maxQty, lotSizeFilter, "maxOrderQty", true);
+        info.minQty = parseToDecimal(lotSizeFilter.minOrderQty);
+        info.maxQty = parseToDecimal(lotSizeFilter.maxOrderQty);
 
-        parseAndSetParameter(info.minNotional, lotSizeFilter, "minOrderAmt", true);
-        parseAndSetParameter(info.maxNotional, lotSizeFilter, "maxOrderAmt", true);
+        info.minNotional = parseToDecimal(lotSizeFilter.minOrderAmt);
+        info.maxNotional = parseToDecimal(lotSizeFilter.maxOrderAmt);
     }
 
     throwIf(info.tickSize <= 0, "Invalid tickSize");
@@ -1666,23 +1527,21 @@ void BybitDealService::handleUserStreamMessage(const string &msg)
             return;
         }
 
-        json::object &rootObject = jsonValue.as_object();
-
-        auto *topicValue = rootObject.if_contains("topic");
-        if (!topicValue || !topicValue->is_string())
+        const StreamMessageDto message = json::value_to<StreamMessageDto>(jsonValue);
+        if (!message.topic.has_value())
         {
             return;
         }
 
-        string topic = topicValue->as_string().c_str();
+        const string &topic = message.topic.value();
 
         if (topic == "wallet")
         {
-            handleWalletUpdate(rootObject);
+            handleWalletUpdate(message);
         }
         else if (topic == "order")
         {
-            handleOrderUpdate(rootObject);
+            handleOrderUpdate(json::value_to<StreamOrderMessageDto>(jsonValue));
         }
     }
     catch (const exception &e)
@@ -1691,72 +1550,49 @@ void BybitDealService::handleUserStreamMessage(const string &msg)
     }
 }
 
-void BybitDealService::handleWalletUpdate(const json::object &root)
+void BybitDealService::handleWalletUpdate(const StreamMessageDto &message)
 {
-    auto *dataValue = root.if_contains("data");
-    if (dataValue && dataValue->is_array())
+    if (!message.data.has_value())
     {
-        const json::array &dataArray = dataValue->as_array();
-        for (const json::value &itemValue : dataArray)
+        return;
+    }
+
+    for (const WalletAccountDto &item : message.data.value())
+    {
+        if (item.coin.has_value())
         {
-            if (itemValue.is_object())
+            for (const CoinBalanceDto &coin : item.coin.value())
             {
-                const json::object &itemObject = itemValue.as_object();
-                auto *coinValue = itemObject.if_contains("coin");
-                if (coinValue && coinValue->is_array())
+                try
                 {
-                    const json::array &coins = coinValue->as_array();
-                    for (const json::value &coinItem : coins)
-                    {
-                        if (coinItem.is_object())
-                        {
-                            try
-                            {
-                                AssetBalance balance = parseBalance(coinItem.as_object());
-                                updateBalanceCache(balance.asset, balance.free, balance.locked);
-                            }
-                            catch (const exception &e)
-                            {
-                                cerr << "Bybit stream wallet parsing error: " << e.what() << endl;
-                            }
-                        }
-                    }
+                    AssetBalance balance = parseBalance(coin);
+                    updateBalanceCache(balance.asset, balance.free, balance.locked);
+                }
+                catch (const exception &e)
+                {
+                    cerr << "Bybit stream wallet parsing error: " << e.what() << endl;
                 }
             }
         }
     }
 }
 
-void BybitDealService::handleOrderUpdate(const json::object &root)
+void BybitDealService::handleOrderUpdate(const StreamOrderMessageDto &message)
 {
-    auto *dataValue = root.if_contains("data");
-    if (dataValue && dataValue->is_array())
+    if (!message.data.has_value())
     {
-        const json::array &dataArray = dataValue->as_array();
-        for (const json::value &itemValue : dataArray)
+        return;
+    }
+
+    for (const StreamOrderDto &order : message.data.value())
+    {
+        const auto &status = order.orderStatus;
+        if (status.has_value() && status.value() == "Filled")
         {
-            if (itemValue.is_object())
+            const auto &orderLinkId = order.orderLinkId;
+            if (orderLinkId.has_value())
             {
-                const json::object &order = itemValue.as_object();
-                string status;
-                if (order.contains("orderStatus"))
-                {
-                    status = order.at("orderStatus").as_string().c_str();
-                }
-
-                if (status == "Filled")
-                {
-                    string orderLinkId;
-                    if (order.contains("orderLinkId"))
-                    {
-                        orderLinkId = order.at("orderLinkId").as_string().c_str();
-                    }
-
-                    if (!orderLinkId.empty())
-                    {
-                        processOcoUpdate(orderLinkId);
-                    }
-                }
+                processOcoUpdate(orderLinkId.value());
             }
         }
     }
@@ -1875,23 +1711,7 @@ bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
     throwIf(errorCode.failed(), "Bybit cancelAllOpenOrders: JSON parse error: " + errorCode.message());
     throwIf(!jsonValue.is_object(), "Bybit cancelAllOpenOrders: Response is not a JSON object");
 
-    json::object &jsonObject = jsonValue.as_object();
-
-    int retCode = -1;
-    if (jsonObject.contains("retCode") && jsonObject.at("retCode").is_number())
-    {
-        retCode = static_cast<int>(jsonObject.at("retCode").as_int64());
-    }
-
-    if (retCode != 0)
-    {
-        string message = "Unknown Error";
-        if (jsonObject.contains("retMsg") && jsonObject.at("retMsg").is_string())
-        {
-            message = jsonObject.at("retMsg").as_string().c_str();
-        }
-        throw runtime_error("Bybit Error " + to_string(retCode) + ": " + message);
-    }
+    parseResponseToDto<ResponseDto>(jsonValue);
 
     return true;
 }
