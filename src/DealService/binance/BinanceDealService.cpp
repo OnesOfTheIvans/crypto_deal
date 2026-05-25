@@ -43,11 +43,6 @@ namespace {
         return object.contains("code") && object.contains("msg");
     }
 
-    string parseToString(const optional<int64_t> &value)
-    {
-        return value.has_value() ? to_string(value.value()) : "";
-    }
-
     Decimal parseToDecimal(const optional<string> &value)
     {
         return value.has_value() && !value->empty() ? DecimalConverter::parseDecimal(value.value()) : Decimal{};
@@ -925,39 +920,7 @@ OcoInfo BinanceDealService::createOcoInfo(const OcoDto &oco)
 
     for (const OrderDto &report : oco.orderReports)
     {
-        OrderInfo orderInfo;
-
-        orderInfo.symbol = report.symbol.value_or("");
-        orderInfo.orderId = parseToString(report.orderId);
-        orderInfo.clientOrderId = report.clientOrderId.value_or("");
-        orderInfo.side = report.side.value_or("");
-        orderInfo.type = report.type.value_or("");
-        orderInfo.status = report.status.value_or("");
-        orderInfo.timeInForce = report.timeInForce.value_or("");
-
-        orderInfo.price = parseToDecimal(report.price);
-        orderInfo.origQty = parseToDecimal(report.origQty);
-        orderInfo.executedQty = parseToDecimal(report.executedQty);
-
-        if (report.cummulativeQuoteQty.has_value())
-        {
-            orderInfo.cumQuoteQty = parseToDecimal(report.cummulativeQuoteQty);
-        }
-        else if (report.cumulativeQuoteQty.has_value())
-        {
-            orderInfo.cumQuoteQty = parseToDecimal(report.cumulativeQuoteQty);
-        }
-
-        orderInfo.createdTimeMs = report.transactTime.value_or(0);
-        orderInfo.updatedTimeMs = orderInfo.createdTimeMs;
-
-        orderInfo.leavesQty = orderInfo.origQty - orderInfo.executedQty;
-        if (orderInfo.executedQty > 0)
-        {
-            orderInfo.avgPrice = orderInfo.cumQuoteQty / orderInfo.executedQty;
-        }
-
-        info.orders.push_back(orderInfo);
+        info.orders.push_back(createOrderInfo(report));
     }
 
     return info;
@@ -1111,7 +1074,7 @@ void BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
             const ErrorDto error = json::value_to<ErrorDto>(jsonValue);
             const long long code = error.code.value_or(0);
 
-            throwIf(code != -2011 && code != -2013, getErrorMessage(error))
+            throwIf(code != -2011 && code != -2013, getErrorMessage(error));
         }
 
         return;

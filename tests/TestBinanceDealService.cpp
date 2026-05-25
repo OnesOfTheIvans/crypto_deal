@@ -511,6 +511,45 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
     EXPECT_NE(lastRequest.target.find("belowTimeInForce=GTC"), std::string::npos);
 }
 
+TEST_F(BinanceDealServiceTest, PlaceOco_RequiresOrderReportCoreFields)
+{
+    auto service = createService();
+
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/orderList/oco", R"({
+        "orderListId": 777,
+        "listClientOrderId": "oco-list-id",
+        "transactionTime": 1779052073334,
+        "orderReports": [
+            {
+                "orderId": 1,
+                "clientOrderId": "limit-leg",
+                "price": "90000.00000000",
+                "origQty": "0.00020000",
+                "executedQty": "0.00000000",
+                "cummulativeQuoteQty": "0.00000000",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "LIMIT_MAKER",
+                "side": "SELL",
+                "transactTime": 1779052073334
+            }
+        ]
+    })");
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::SELL;
+    req.quantity = DecimalConverter::parseDecimal("0.0002");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+    req.stopLimitTimeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+}
+
 TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
 {
     auto service = createService();
