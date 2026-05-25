@@ -188,7 +188,7 @@ class BybitDealService : public DealService
 
     std::string getUserStreamLastError() const override;
 
-    bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
+    void cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
 };

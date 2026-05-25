@@ -103,7 +103,7 @@ class DealService
 
     virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
 
-    virtual bool cancelAllOpenOrders(const std::string &symbol, const std::string &category) = 0;
+    virtual void cancelAllOpenOrders(const std::string &symbol, const std::string &category) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalancesRest() = 0;
 

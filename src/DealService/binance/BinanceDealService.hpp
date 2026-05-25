@@ -165,7 +165,7 @@ class BinanceDealService : public DealService
 
     std::string getUserStreamLastError() const override;
 
-    bool cancelAllOpenOrders(const std::string &symbol, const std::string &) override;
+    void cancelAllOpenOrders(const std::string &symbol, const std::string &) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
 };

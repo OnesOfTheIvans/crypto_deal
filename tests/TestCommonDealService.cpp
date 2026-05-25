@@ -69,9 +69,8 @@ namespace {
         {
             return {};
         }
-        bool cancelAllOpenOrders(const std::string &, const std::string &) override
+        void cancelAllOpenOrders(const std::string &, const std::string &) override
         {
-            return true;
         }
         flat_map<std::string, AssetBalance> getBalancesRest() override
         {

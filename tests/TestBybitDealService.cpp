@@ -663,7 +663,7 @@ TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
         "retMsg": "Params Error"
     })");
 
-    EXPECT_TRUE(service.cancelAllOpenOrders("BTCUSDT", "spot"));
+    EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"));
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "POST");
     EXPECT_NE(MockNetwork::instance().lastRequest().body.find(R"("symbol":"BTCUSDT")"), std::string::npos);
 

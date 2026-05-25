@@ -1084,7 +1084,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalances() const
     return balances;
 }
 
-bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &)
+void BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &)
 {
     throwIf(symbol.empty(), "Binance cancelAllOpenOrders: symbol cannot be empty");
 
@@ -1111,23 +1111,13 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
             const ErrorDto error = json::value_to<ErrorDto>(jsonValue);
             const long long code = error.code.value_or(0);
 
-            if (code == -2011 || code == -2013)
-            {
-                return true;
-            }
-
-            throw runtime_error(getErrorMessage(error));
+            throwIf(code != -2011 && code != -2013, getErrorMessage(error))
         }
 
-        return true;
+        return;
     }
 
-    if (jsonValue.is_array())
-    {
-        return true;
-    }
-
-    throw runtime_error("Binance cancelAllOpenOrders: Unexpected response type");
+    throwIf(!jsonValue.is_array(), "Binance cancelAllOpenOrders: Unexpected response type");
 }
 
 flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()

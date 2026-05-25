@@ -1709,7 +1709,7 @@ void BybitDealService::processOcoUpdate(const string &orderLinkId)
     }
 }
 
-bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &category)
+void BybitDealService::cancelAllOpenOrders(const string &symbol, const string &category)
 {
     const string effectiveCategory = category.empty() ? "spot" : category;
 
@@ -1743,8 +1743,6 @@ bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
     throwIf(!jsonValue.is_object(), "Bybit cancelAllOpenOrders: Response is not a JSON object");
 
     parseResponseToDto<ResponseDto>(jsonValue);
-
-    return true;
 }
 
 flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
