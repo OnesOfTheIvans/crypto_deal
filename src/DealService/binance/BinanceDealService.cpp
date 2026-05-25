@@ -211,7 +211,7 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
     return {{"X-MBX-APIKEY", apiKey}};
 }
 
-optional<string> BinanceDealService::binanceResponseOk(const string &response)
+optional<string> BinanceDealService::isResponseStatusOk(const string &response)
 {
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
@@ -282,7 +282,7 @@ std::string BinanceDealService::sendOrder(const boost::urls::url &url, const fla
     string response = httpsPost(context);
     cout << "Order response: " << response << endl;
 
-    optional<string> errorOutput = binanceResponseOk(response);
+    optional<string> errorOutput = isResponseStatusOk(response);
     throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
     return response;
 }

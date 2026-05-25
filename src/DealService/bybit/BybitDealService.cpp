@@ -142,7 +142,7 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
 
     const string response = httpsPost(requestContext);
 
-    optional<string> errorMessage = bybitResponseOk(response);
+    optional<string> errorMessage = isResponseStatusOk(response);
     throwIf(errorMessage.has_value(), "Bybit wallet-balance failed: " + errorMessage.value_or(""));
 
     beast::error_code jsonError;
@@ -510,7 +510,7 @@ void BybitDealService::stopUserStream()
     }
 }
 
-optional<string> BybitDealService::bybitResponseOk(const string &response)
+optional<string> BybitDealService::isResponseStatusOk(const string &response)
 {
     beast::error_code ec;
     json::value val = json::parse(response, ec);
@@ -591,7 +591,7 @@ string BybitDealService::sendOrder(const string &body, const flat_map<string, st
     string response = httpsPost(context);
     cout << "Order response: " << response << endl;
 
-    optional<string> errorOutput = bybitResponseOk(response);
+    optional<string> errorOutput = isResponseStatusOk(response);
     throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
     return response;
 }

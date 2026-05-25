@@ -90,7 +90,7 @@ class BinanceDealService : public DealService
 
     std::string sendOrder(const boost::urls::url &url, const flat_map<std::string, std::string> &headers);
 
-    std::optional<std::string> binanceResponseOk(const std::string &response);
+    std::optional<std::string> isResponseStatusOk(const std::string &response);
 
     json::value parseAndValidate(const std::string &response);
 

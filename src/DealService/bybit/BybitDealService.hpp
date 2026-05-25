@@ -106,7 +106,7 @@ class BybitDealService : public DealService
 
     std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
 
-    std::optional<std::string> bybitResponseOk(const std::string &response);
+    std::optional<std::string> isResponseStatusOk(const std::string &response);
 
     void setRequestParameters(boost::urls::url &url,
                               const std::string &accountType,
