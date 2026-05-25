@@ -93,6 +93,8 @@ class BinanceDealService : public DealService
 
     json::value parseAndValidate(const std::string &response);
 
+    void checkCancelAllOpenOrdersResult(const std::string &response);
+
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
     void updateCache(const std::vector<binance::StreamBalanceDto> &balances);

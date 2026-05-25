@@ -249,6 +249,28 @@ json::value BinanceDealService::parseAndValidate(const string &response)
     return jsonValue;
 }
 
+void BinanceDealService::checkCancelAllOpenOrdersResult(const string &response)
+{
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    throwIf(errorCode.failed(), "Binance cancelAllOpenOrders: JSON parse error: " + errorCode.message());
+
+    if (jsonValue.is_object())
+    {
+        if (hasErrorResponse(jsonValue))
+        {
+            const ErrorDto error = json::value_to<ErrorDto>(jsonValue);
+            const long long code = error.code.value_or(0);
+
+            throwIf(code != -2011 && code != -2013, getErrorMessage(error));
+        }
+
+        return;
+    }
+
+    throwIf(!jsonValue.is_array(), "Binance cancelAllOpenOrders: Unexpected response type");
+}
+
 std::string BinanceDealService::sendOrder(const boost::urls::url &url, const flat_map<string, string> &headers)
 {
     string target = getTarget(url);
@@ -1063,24 +1085,7 @@ void BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
     const string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance cancelAllOpenOrders: JSON parse error: " + errorCode.message());
-
-    if (jsonValue.is_object())
-    {
-        if (hasErrorResponse(jsonValue))
-        {
-            const ErrorDto error = json::value_to<ErrorDto>(jsonValue);
-            const long long code = error.code.value_or(0);
-
-            throwIf(code != -2011 && code != -2013, getErrorMessage(error));
-        }
-
-        return;
-    }
-
-    throwIf(!jsonValue.is_array(), "Binance cancelAllOpenOrders: Unexpected response type");
+    checkCancelAllOpenOrdersResult(response);
 }
 
 flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
