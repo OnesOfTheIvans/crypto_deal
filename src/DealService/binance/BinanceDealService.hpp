@@ -10,6 +10,7 @@
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "domain/AccountBalanceDto.hpp"
 #include "domain/OcoDto.hpp"
 #include "domain/OrderDto.hpp"
 #include "domain/StreamBalanceDto.hpp"
@@ -98,6 +99,8 @@ class BinanceDealService : public DealService
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
     void updateCache(const std::vector<binance::StreamBalanceDto> &balances);
+
+    void updateCache(const std::vector<binance::AccountBalanceDto> &balances);
 
     void handleUserStreamMessage(const std::string &msg);
 

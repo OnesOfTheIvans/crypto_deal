@@ -329,10 +329,21 @@ void BinanceDealService::updateCache(const vector<StreamBalanceDto> &balanceDtos
 {
     for (const StreamBalanceDto &balance : balanceDtos)
     {
-        Decimal free = parseToDecimal(balance.f);
-        Decimal locked = parseToDecimal(balance.l);
+        const Decimal free = parseToDecimal(balance.f);
+        const Decimal locked = parseToDecimal(balance.l);
 
         updateBalanceCache(balance.a, free, locked);
+    }
+}
+
+void BinanceDealService::updateCache(const vector<AccountBalanceDto> &balanceDtos)
+{
+    for (const AccountBalanceDto &balance : balanceDtos)
+    {
+        const Decimal free = parseToDecimal(balance.free);
+        const Decimal locked = parseToDecimal(balance.locked);
+
+        updateBalanceCache(balance.asset, free, locked);
     }
 }
 
@@ -1111,13 +1122,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 
     const AccountDto account = json::value_to<AccountDto>(jsonValue);
 
-    for (const AccountBalanceDto &balance : account.balances)
-    {
-        const Decimal free = parseToDecimal(balance.free);
-        const Decimal locked = parseToDecimal(balance.locked);
-
-        updateBalanceCache(balance.asset, free, locked);
-    }
+    updateCache(account.balances);
 
     return getBalances();
 }
