@@ -105,6 +105,8 @@ class BinanceDealService : public DealService
 
     SymbolInfo createSymbolInfo(const binance::SymbolDto &symbol);
 
+    void processSymbolFilters(SymbolInfo &info, const binance::FilterDto &filter);
+
     OcoInfo createOcoInfo(const binance::OcoDto &oco);
 
     void setStreamStatus(StreamStatus status);

@@ -3,7 +3,9 @@
 
 #include "common/domain/OrderOperation.hpp"
 #include "common/domain/OrderType.hpp"
+#include "domain/FilterType.hpp"
 
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -16,13 +18,34 @@ namespace binance {
     {
       private:
         static const std::unordered_map<E, std::string> conversionalMap;
+        static const std::unordered_map<std::string, E> reverseConversionalMap;
 
       public:
         static std::string toString(E key)
         {
             return conversionalMap.at(key);
         }
+
+        static std::optional<E> parseString(const std::string &value)
+        {
+            const auto it = reverseConversionalMap.find(value);
+            return it != reverseConversionalMap.end() ? std::optional<E>{it->second} : std::nullopt;
+        }
     };
+
+    template <>
+    inline const std::unordered_map<FilterType, std::string> EnumStringConverter<FilterType>::conversionalMap{
+        {FilterType::PRICE_FILTER, "PRICE_FILTER"},
+        {FilterType::LOT_SIZE, "LOT_SIZE"},
+        {FilterType::MIN_NOTIONAL, "MIN_NOTIONAL"},
+        {FilterType::NOTIONAL, "NOTIONAL"}};
+
+    template <>
+    inline const std::unordered_map<std::string, FilterType> EnumStringConverter<FilterType>::reverseConversionalMap{
+        {"PRICE_FILTER", FilterType::PRICE_FILTER},
+        {"LOT_SIZE", FilterType::LOT_SIZE},
+        {"MIN_NOTIONAL", FilterType::MIN_NOTIONAL},
+        {"NOTIONAL", FilterType::NOTIONAL}};
 
     template <>
     inline const std::unordered_map<OrderOperation, std::string> EnumStringConverter<OrderOperation>::conversionalMap{

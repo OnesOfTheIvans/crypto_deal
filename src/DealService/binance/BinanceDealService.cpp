@@ -975,32 +975,7 @@ SymbolInfo BinanceDealService::createSymbolInfo(const SymbolDto &symbol)
 
     for (const FilterDto &filter : symbol.filters)
     {
-        if (filter.filterType.has_value())
-        {
-            const string &type = filter.filterType.value();
-
-            if (type == "PRICE_FILTER")
-            {
-                info.minPrice = parseToDecimal(filter.minPrice);
-                info.maxPrice = parseToDecimal(filter.maxPrice);
-                info.tickSize = parseToDecimal(filter.tickSize);
-            }
-            else if (type == "LOT_SIZE")
-            {
-                info.minQty = parseToDecimal(filter.minQty);
-                info.maxQty = parseToDecimal(filter.maxQty);
-                info.stepSize = parseToDecimal(filter.stepSize);
-            }
-            else if (type == "MIN_NOTIONAL")
-            {
-                info.minNotional = parseToDecimal(filter.minNotional);
-            }
-            else if (type == "NOTIONAL")
-            {
-                info.minNotional = parseToDecimal(filter.minNotional);
-                info.maxNotional = parseToDecimal(filter.maxNotional);
-            }
-        }
+        processSymbolFilters(info, filter);
     }
 
     throwIf(info.tickSize <= 0, "Invalid tickSize");
@@ -1008,6 +983,42 @@ SymbolInfo BinanceDealService::createSymbolInfo(const SymbolDto &symbol)
     throwIf(info.minQty <= 0, "Invalid minQty");
 
     return info;
+}
+
+void BinanceDealService::processSymbolFilters(SymbolInfo &info, const FilterDto &filter)
+{
+    if (!filter.filterType.has_value())
+    {
+        return;
+    }
+
+    const optional<FilterType> type = EnumStringConverter<FilterType>::parseString(filter.filterType.value());
+
+    if (!type.has_value())
+    {
+        return;
+    }
+
+    switch (type.value())
+    {
+    case FilterType::PRICE_FILTER:
+        info.minPrice = parseToDecimal(filter.minPrice);
+        info.maxPrice = parseToDecimal(filter.maxPrice);
+        info.tickSize = parseToDecimal(filter.tickSize);
+        break;
+    case FilterType::LOT_SIZE:
+        info.minQty = parseToDecimal(filter.minQty);
+        info.maxQty = parseToDecimal(filter.maxQty);
+        info.stepSize = parseToDecimal(filter.stepSize);
+        break;
+    case FilterType::MIN_NOTIONAL:
+        info.minNotional = parseToDecimal(filter.minNotional);
+        break;
+    case FilterType::NOTIONAL:
+        info.minNotional = parseToDecimal(filter.minNotional);
+        info.maxNotional = parseToDecimal(filter.maxNotional);
+        break;
+    }
 }
 
 OrderInfo BinanceDealService::createOrderInfo(const OrderDto &order)
