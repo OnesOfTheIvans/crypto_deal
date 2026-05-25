@@ -55,12 +55,27 @@ class BinanceDealService : public DealService
     std::atomic<long long> lastSyncMonoMs{0};
     std::mutex timeSyncMutex;
 
-    std::string createQuery(const std::string &baseAsset,
-                            const std::string &quoteAsset,
-                            const OrderOperation &operation,
-                            const OrderType &type,
-                            Decimal quantity,
-                            Decimal stepSize = Decimal{});
+    void setRequestParameters(boost::urls::url &url,
+                              const std::string &baseAsset,
+                              const std::string &quoteAsset,
+                              const OrderOperation &operation,
+                              const OrderType &type,
+                              Decimal quantity,
+                              Decimal stepSize = Decimal{});
+
+    void setRequestParameters(boost::urls::url &url, const PlaceOrderRequest &request, const SymbolInfo &info);
+
+    void setRequestParameters(boost::urls::url &url, const OrderQuery &request);
+
+    void setRequestParameters(boost::urls::url &url, const PlaceOcoRequest &request);
+
+    void setRequestParameters(boost::urls::url &url, const OrderListQuery &request);
+
+    void setRequestParameters(boost::urls::url &url);
+
+    void setRequestParameters(boost::urls::url &url, const std::string &symbol, bool isPrivate);
+
+    void signUrl(boost::urls::url &url);
 
     Decimal getTickerPrice(const std::string &symbol);
 
@@ -72,9 +87,11 @@ class BinanceDealService : public DealService
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
-    std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
+    std::string sendOrder(const boost::urls::url &url, const flat_map<std::string, std::string> &headers);
 
     std::optional<std::string> binanceResponseOk(const std::string &response);
+
+    json::value parseAndValidate(const std::string &response);
 
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
@@ -88,12 +105,6 @@ class BinanceDealService : public DealService
 
     SymbolInfo createSymbolInfo(const binance::SymbolDto &symbol);
 
-    std::string buildQueryForOrder(const OrderQuery &request);
-
-    std::string buildOcoQuery(const PlaceOcoRequest &request, long long timestamp);
-
-    std::string buildOcoCancelQuery(const OrderListQuery &request, long long timestamp);
-
     OcoInfo createOcoInfo(const binance::OcoDto &oco);
 
     void setStreamStatus(StreamStatus status);
@@ -106,7 +117,7 @@ class BinanceDealService : public DealService
 
     void syncTime();
 
-    long long getTimestamp();
+    long long getServerTimestamp();
 
     void handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream);
 

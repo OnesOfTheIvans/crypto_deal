@@ -47,9 +47,24 @@ namespace {
     {
         return value.has_value() && !value->empty() ? stoll(value.value()) : 0;
     }
+
+    string toString(boost::urls::pct_string_view value)
+    {
+        return {value.begin(), value.end()};
+    }
+
+    string getTarget(const boost::urls::url &url)
+    {
+        return toString(url.encoded_target());
+    }
+
+    string getQuery(const boost::urls::url &url)
+    {
+        return toString(url.encoded_query());
+    }
 } // namespace
 
-DealService::StreamStatus BybitDealService::getUserStreamStatus() const
+StreamStatus BybitDealService::getUserStreamStatus() const
 {
     lock_guard<mutex> lock(streamStatusMutex);
     return streamStatus;
@@ -76,7 +91,9 @@ void BybitDealService::setStreamError(const string &error)
 
 void BybitDealService::syncTime()
 {
-    string target = "/v5/market/time";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/time");
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
     string response = httpsPost(context);
@@ -96,7 +113,7 @@ void BybitDealService::syncTime()
     }
 }
 
-long long BybitDealService::getTimestamp()
+long long BybitDealService::getServerTimestamp()
 {
     if (!timeSynced)
     {
@@ -109,19 +126,16 @@ long long BybitDealService::getTimestamp()
 
 void BybitDealService::refreshBalancesFromRest(const string &accountType, const optional<string> &coinFilter)
 {
-    ostringstream queryStream;
-    queryStream << "accountType=" << accountType;
-    if (coinFilter.has_value() && !coinFilter->empty())
-    {
-        queryStream << "&coin=" << coinFilter.value();
-    }
-    const string queryString = queryStream.str();
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/account/wallet-balance");
+    setRequestParameters(requestUrl, accountType, coinFilter);
+    const string queryString = getQuery(requestUrl);
 
-    const msec timestamp = getTimestamp();
+    const msec timestamp = getServerTimestamp();
     const string signature = getSignature(queryString, timestamp);
     const auto headers = createHeaders(apiKey, signature, timestamp);
 
-    const string target = "/v5/account/wallet-balance?" + queryString;
+    const string target = getTarget(requestUrl);
     HttpRequestContext requestContext(ioc, ctx, host, target);
     requestContext.prepareRequest(http::verb::get);
     requestContext.setRequestHeaders(headers);
@@ -296,7 +310,7 @@ void BybitDealService::startUserStream()
 
                 setStreamStatus(StreamStatus::CONNECTING);
 
-                const long long expires = getTimestamp() + 5000;
+                const long long expires = getServerTimestamp() + 5000;
                 const string payload = "GET/realtime" + to_string(expires);
                 const string sig = hmac_sha256(secretKey, payload);
 
@@ -533,10 +547,43 @@ optional<string> BybitDealService::bybitResponseOk(const string &response)
     return nullopt;
 }
 
+void BybitDealService::setRequestParameters(boost::urls::url &url,
+                                            const string &accountType,
+                                            const optional<string> &coinFilter)
+{
+    map<string, string> parameterMap;
+    parameterMap["accountType"] = accountType;
+    if (coinFilter.has_value() && !coinFilter->empty())
+    {
+        parameterMap["coin"] = coinFilter.value();
+    }
+    setUrlParameters(url, parameterMap);
+}
+
+void BybitDealService::setRequestParameters(boost::urls::url &url, const string &symbol, const string &category)
+{
+    map<string, string> parameterMap;
+    parameterMap["category"] = category;
+    parameterMap["symbol"] = symbol;
+    setUrlParameters(url, parameterMap);
+}
+
+void BybitDealService::setRequestParameters(boost::urls::url &url, const OrderQuery &request, const string &category)
+{
+    map<string, string> parameterMap;
+    parameterMap["category"] = category;
+    parameterMap["symbol"] = request.symbol;
+    setParameterIfPresent(parameterMap, "orderId", request.orderId);
+    setParameterIfPresent(parameterMap, "orderLinkId", request.clientOrderId);
+    setUrlParameters(url, parameterMap);
+}
+
 string BybitDealService::sendOrder(const string &body, const flat_map<string, string> &headers)
 {
     cout << "Sending order..." << endl;
-    string target = "/v5/order/create";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/order/create");
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
@@ -551,7 +598,10 @@ string BybitDealService::sendOrder(const string &body, const flat_map<string, st
 
 Decimal BybitDealService::getTickerPrice(const string &symbol)
 {
-    string target = "/v5/market/tickers?category=spot&symbol=" + symbol;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/tickers");
+    setRequestParameters(requestUrl, symbol, string("spot"));
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
 
@@ -600,7 +650,7 @@ OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quo
          << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
          << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
 
-    const msec timestamp = getTimestamp();
+    const msec timestamp = getServerTimestamp();
     const string body = createBody(baseAsset,
                                    quoteAsset,
                                    OrderCategory::SPOT,
@@ -667,7 +717,7 @@ OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &qu
          << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
          << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
 
-    const msec timestamp = getTimestamp();
+    const msec timestamp = getServerTimestamp();
     const string body = createBody(baseAsset,
                                    quoteAsset,
                                    OrderCategory::SPOT,
@@ -850,10 +900,12 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     string bodyStr = json::serialize(body);
 
-    msec timestamp = getTimestamp();
+    msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
     auto headers = createHeaders(apiKey, signature, timestamp);
-    string target = "/v5/order/create";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/order/create");
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
@@ -899,10 +951,12 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 
     string bodyStr = json::serialize(body);
 
-    msec timestamp = getTimestamp();
+    msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
     auto headers = createHeaders(apiKey, signature, timestamp);
-    string target = "/v5/order/cancel";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/order/cancel");
+    string target = getTarget(requestUrl);
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
@@ -934,26 +988,17 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
         category = "spot";
     }
 
-    ostringstream queryStream;
-    queryStream << "category=" << category << "&symbol=" << request.symbol;
-
-    if (request.orderId.has_value())
-    {
-        queryStream << "&orderId=" << request.orderId.value();
-    }
-    if (request.clientOrderId.has_value())
-    {
-        queryStream << "&orderLinkId=" << request.clientOrderId.value();
-    }
-
-    string queryString = queryStream.str();
-    msec timestamp = getTimestamp();
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/order/realtime");
+    setRequestParameters(requestUrl, request, category);
+    string queryString = getQuery(requestUrl);
+    msec timestamp = getServerTimestamp();
 
     string signature = getSignature(queryString, timestamp);
 
     auto headers = createHeaders(apiKey, signature, timestamp);
 
-    string target = "/v5/order/realtime?" + queryString;
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
     context.setRequestHeaders(headers);
@@ -1073,7 +1118,10 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
         }
     }
 
-    string target = "/v5/market/instruments-info?category=" + effectiveCategory + "&symbol=" + symbol;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/instruments-info");
+    setRequestParameters(requestUrl, symbol, effectiveCategory);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
 
@@ -1225,7 +1273,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     }
     else
     {
-        msec now = getTimestamp();
+        msec now = getServerTimestamp();
         int randomSuffix = rand() % 10000;
         groupId = "OCO_" + to_string(now) + "_" + to_string(randomSuffix);
     }
@@ -1675,11 +1723,13 @@ bool BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
 
     const string bodyStr = json::serialize(body);
 
-    const msec timestamp = getTimestamp();
+    const msec timestamp = getServerTimestamp();
     const string signature = getSignature(bodyStr, timestamp);
     const auto headers = createHeaders(apiKey, signature, timestamp);
 
-    const string target = "/v5/order/cancel-all";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/order/cancel-all");
+    const string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);

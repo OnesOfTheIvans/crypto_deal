@@ -12,6 +12,7 @@ target_link_libraries(DealServiceIntegrationTests PRIVATE
     crypto
 
     Boost::json
+    Boost::url
 )
 
 if(WIN32)

@@ -57,31 +57,158 @@ namespace {
     {
         return value.has_value() ? static_cast<int>(value.value()) : 0;
     }
+
+    string toString(boost::urls::pct_string_view value)
+    {
+        return {value.begin(), value.end()};
+    }
+
+    string getTarget(const boost::urls::url &url)
+    {
+        return toString(url.encoded_target());
+    }
+
+    string getQuery(const boost::urls::url &url)
+    {
+        return toString(url.encoded_query());
+    }
 } // namespace
 
-string BinanceDealService::createQuery(const string &baseAsset,
-                                       const string &quoteAsset,
-                                       const OrderOperation &operation,
-                                       const OrderType &type,
-                                       Decimal quantity,
-                                       Decimal stepSize)
+void BinanceDealService::setRequestParameters(boost::urls::url &url,
+                                              const string &baseAsset,
+                                              const string &quoteAsset,
+                                              const OrderOperation &operation,
+                                              const OrderType &type,
+                                              Decimal quantity,
+                                              Decimal stepSize)
 {
-    const string qtyStr = DecimalConverter::formatByStep(quantity, stepSize);
+    map<string, string> parameterMap;
+    parameterMap["quantity"] = DecimalConverter::formatByStep(quantity, stepSize);
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(operation);
+    parameterMap["symbol"] = baseAsset + quoteAsset;
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    parameterMap["type"] = EnumStringConverter<OrderType>::toString(type);
 
-    auto timestamp = chrono::system_clock::now();
-    ostringstream queryStream;
-    // clang-format off
-    queryStream << "symbol=" << baseAsset << quoteAsset
-       << "&side=" << EnumStringConverter<OrderOperation>::toString(operation)
-       << "&type=" << EnumStringConverter<OrderType>::toString(type)
-       << "&quantity=" << qtyStr
-       << "&recvWindow=" << recvWindow
-       << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
-    // clang-format on
+    setUrlParameters(url, parameterMap);
+}
 
-    string query_string = queryStream.str();
-    string signature = hmac_sha256(secretKey, query_string);
-    return query_string + "&signature=" + signature;
+void BinanceDealService::setRequestParameters(boost::urls::url &url,
+                                              const PlaceOrderRequest &request,
+                                              const SymbolInfo &info)
+{
+    map<string, string> parameterMap;
+    parameterMap["newOrderRespType"] = "RESULT";
+    parameterMap["quantity"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side.value());
+    parameterMap["symbol"] = request.symbol;
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    parameterMap["type"] = EnumStringConverter<OrderType>::toString(request.type.value());
+
+    if (request.type.value() == OrderType::LIMIT)
+    {
+        parameterMap["price"] = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
+        parameterMap["timeInForce"] = request.timeInForce.value();
+    }
+
+    if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
+    {
+        setParameterIfPresent(parameterMap, "newClientOrderId", request.clientOrderId);
+    }
+
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::setRequestParameters(boost::urls::url &url, const OrderQuery &request)
+{
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
+
+    map<string, string> parameterMap;
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["symbol"] = request.symbol;
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    setParameterIfPresent(parameterMap, "orderId", request.orderId);
+    setParameterIfPresent(parameterMap, "origClientOrderId", request.clientOrderId);
+
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::setRequestParameters(boost::urls::url &url, const PlaceOcoRequest &request)
+{
+    throwIf(request.symbol.empty(), "Binance placeOco: symbol cannot be empty");
+    throwIf(!request.side.has_value(), "Binance placeOco: side is required");
+    throwIf(request.quantity <= 0, "Binance placeOco: quantity must be > 0");
+    throwIf(request.price <= 0, "Binance placeOco: price must be > 0");
+    throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
+
+    const SymbolInfo info = getSymbolInfo(request.symbol);
+    const Decimal belowPrice = request.stopLimitPrice.has_value() ? request.stopLimitPrice.value() : request.stopPrice;
+    const string belowTif =
+        request.stopLimitTimeInForce.has_value() ? request.stopLimitTimeInForce.value() : string("GTC");
+    optional<string> aboveQuantityError = validateQuantity(request.quantity, request.price, info);
+    throwIf(aboveQuantityError.has_value(), "Binance placeOco above leg: " + aboveQuantityError.value_or(""));
+    optional<string> belowQuantityError = validateQuantity(request.quantity, belowPrice, info);
+    throwIf(belowQuantityError.has_value(), "Binance placeOco below leg: " + belowQuantityError.value_or(""));
+
+    map<string, string> parameterMap;
+    parameterMap["abovePrice"] = DecimalConverter::formatByStep(request.price, info.tickSize);
+    parameterMap["aboveType"] = "LIMIT_MAKER";
+    parameterMap["belowPrice"] = DecimalConverter::formatByStep(belowPrice, info.tickSize);
+    parameterMap["belowStopPrice"] = DecimalConverter::formatByStep(request.stopPrice, info.tickSize);
+    parameterMap["belowTimeInForce"] = belowTif;
+    parameterMap["belowType"] = "STOP_LOSS_LIMIT";
+    parameterMap["quantity"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side.value());
+    parameterMap["symbol"] = request.symbol;
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    setParameterIfPresent(parameterMap, "listClientOrderId", request.listClientOrderId);
+    setParameterIfPresent(parameterMap, "aboveClientOrderId", request.limitClientOrderId);
+    setParameterIfPresent(parameterMap, "belowClientOrderId", request.stopClientOrderId);
+
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::setRequestParameters(boost::urls::url &url, const OrderListQuery &request)
+{
+    map<string, string> parameterMap;
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["symbol"] = request.symbol;
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    setParameterIfPresent(parameterMap, "orderListId", request.orderListId);
+    setParameterIfPresent(parameterMap, "listClientOrderId", request.listClientOrderId);
+
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::setRequestParameters(boost::urls::url &url, const string &symbol, bool isPrivate)
+{
+    map<string, string> parameterMap;
+    parameterMap["symbol"] = symbol;
+    if (isPrivate)
+    {
+        parameterMap["recvWindow"] = to_string(recvWindow);
+        parameterMap["timestamp"] = to_string(getServerTimestamp());
+    }
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::setRequestParameters(boost::urls::url &url)
+{
+    map<string, string> parameterMap;
+    parameterMap["recvWindow"] = to_string(recvWindow);
+    parameterMap["timestamp"] = to_string(getServerTimestamp());
+    setUrlParameters(url, parameterMap);
+}
+
+void BinanceDealService::signUrl(boost::urls::url &url)
+{
+    const string queryString = getQuery(url);
+    const string signature = hmac_sha256(secretKey, queryString);
+    url.params().append({"signature", signature});
 }
 
 flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
@@ -116,9 +243,20 @@ optional<string> BinanceDealService::binanceResponseOk(const string &response)
     return "Unexpected response structure (missing orderId/status)";
 }
 
-std::string BinanceDealService::sendOrder(const string &query, const flat_map<string, string> &headers)
+json::value BinanceDealService::parseAndValidate(const string &response)
 {
-    string target = "/api/v3/order?" + query;
+    beast::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+
+    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    return jsonValue;
+}
+
+std::string BinanceDealService::sendOrder(const boost::urls::url &url, const flat_map<string, string> &headers)
+{
+    string target = getTarget(url);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders(headers);
@@ -135,7 +273,7 @@ std::string BinanceDealService::sendOrder(const string &query, const flat_map<st
 string BinanceDealService::buildUserStreamSubscribeRequestJson()
 {
 
-    auto ts = getTimestamp();
+    auto ts = getServerTimestamp();
 
     string payload = "apiKey=" + apiKey + "&timestamp=" + to_string(ts);
 
@@ -217,7 +355,7 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
     updateCache(event.B.value());
 }
 
-DealService::StreamStatus BinanceDealService::getUserStreamStatus() const
+StreamStatus BinanceDealService::getUserStreamStatus() const
 {
     lock_guard<mutex> lock(streamStatusMutex);
     return streamStatus;
@@ -244,7 +382,9 @@ void BinanceDealService::setStreamError(const string &error)
 
 long long BinanceDealService::getServerTime()
 {
-    string target = "/api/v3/time";
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/time");
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
     string response = httpsPost(context);
@@ -290,7 +430,7 @@ void BinanceDealService::syncTime()
     cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
 }
 
-long long BinanceDealService::getTimestamp()
+long long BinanceDealService::getServerTimestamp()
 {
     syncTime();
     auto now = chrono::system_clock::now();
@@ -465,7 +605,10 @@ void BinanceDealService::stopUserStream()
 
 Decimal BinanceDealService::getTickerPrice(const string &symbol)
 {
-    string target = "/api/v3/ticker/price?symbol=" + symbol;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/ticker/price");
+    setRequestParameters(requestUrl, symbol, false);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
 
@@ -542,10 +685,19 @@ OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &q
     optional<string> quantityError = validateQuantity(quantity, price, info);
     throwIf(quantityError.has_value(), "Binance buyCrypto: " + quantityError.value_or(""));
 
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::BUY, OrderType::MARKET, quantity, info.stepSize);
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/order");
+    setRequestParameters(requestUrl,
+                         baseAsset,
+                         quoteAsset,
+                         OrderOperation::BUY,
+                         OrderType::MARKET,
+                         quantity,
+                         info.stepSize);
+    signUrl(requestUrl);
     flat_map<string, string> headers = createHeaders(apiKey);
 
-    string response = sendOrder(query, headers);
+    string response = sendOrder(requestUrl, headers);
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
@@ -562,10 +714,19 @@ OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &
     optional<string> quantityError = validateQuantity(quantity, price, info);
     throwIf(quantityError.has_value(), "Binance sellCrypto: " + quantityError.value_or(""));
 
-    string query = createQuery(baseAsset, quoteAsset, OrderOperation::SELL, OrderType::MARKET, quantity, info.stepSize);
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/order");
+    setRequestParameters(requestUrl,
+                         baseAsset,
+                         quoteAsset,
+                         OrderOperation::SELL,
+                         OrderType::MARKET,
+                         quantity,
+                         info.stepSize);
+    signUrl(requestUrl);
     flat_map<string, string> headers = createHeaders(apiKey);
 
-    string response = sendOrder(query, headers);
+    string response = sendOrder(requestUrl, headers);
 
     beast::error_code errorCode;
     json::value jsonValue = json::parse(response, errorCode);
@@ -598,99 +759,47 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
     throwIf(quantityError.has_value(), "Binance placeOrder: " + quantityError.value_or(""));
 
-    auto timestamp = chrono::system_clock::now();
-    ostringstream queryStream;
-    queryStream << "symbol=" << request.symbol
-                << "&side=" << EnumStringConverter<OrderOperation>::toString(request.side.value())
-                << "&type=" << EnumStringConverter<OrderType>::toString(request.type.value())
-                << "&quantity=" << DecimalConverter::formatByStep(request.quantity, info.stepSize);
-
-    if (request.type.value() == OrderType::LIMIT)
-    {
-        queryStream << "&price=" << DecimalConverter::formatByStep(request.price.value(), info.tickSize)
-                    << "&timeInForce=" << request.timeInForce.value();
-    }
-
-    if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
-    {
-        queryStream << "&newClientOrderId=" << request.clientOrderId.value();
-    }
-
-    queryStream << "&newOrderRespType=RESULT" << "&recvWindow=" << recvWindow
-                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
-
-    string queryString = queryStream.str();
-    string signature = hmac_sha256(secretKey, queryString);
-    string fullQuery = queryString + "&signature=" + signature;
-
-    string target = "/api/v3/order?" + fullQuery;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/order");
+    setRequestParameters(requestUrl, request, info);
+    signUrl(requestUrl);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 
     string response = httpsPost(context);
 
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     return createOrderInfo(json::value_to<OrderDto>(jsonValue));
 }
 
-string BinanceDealService::buildQueryForOrder(const OrderQuery &request)
-{
-    throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
-            "Either orderId or clientOrderId must be provided");
-
-    auto timestamp = chrono::system_clock::now();
-    ostringstream queryStream;
-    queryStream << "symbol=" << request.symbol;
-
-    if (request.orderId.has_value())
-    {
-        queryStream << "&orderId=" << request.orderId.value();
-    }
-    if (request.clientOrderId.has_value())
-    {
-        queryStream << "&origClientOrderId=" << request.clientOrderId.value();
-    }
-
-    queryStream << "&recvWindow=" << recvWindow
-                << "&timestamp=" << chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
-
-    string queryString = queryStream.str();
-    string signature = hmac_sha256(secretKey, queryString);
-    return queryString + "&signature=" + signature;
-}
-
 OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
 {
-    string fullQuery = buildQueryForOrder(request);
-    string target = "/api/v3/order?" + fullQuery;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/order");
+    setRequestParameters(requestUrl, request);
+    signUrl(requestUrl);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 
     string response = httpsPost(context);
 
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance cancelOrder: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     return createOrderInfo(json::value_to<OrderDto>(jsonValue));
 }
 
 OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 {
-    string fullQuery = buildQueryForOrder(request);
-    string target = "/api/v3/order?" + fullQuery;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/order");
+    setRequestParameters(requestUrl, request);
+    signUrl(requestUrl);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
@@ -720,7 +829,10 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
         }
     }
 
-    string target = "/api/v3/exchangeInfo?symbol=" + symbol;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/exchangeInfo");
+    setRequestParameters(requestUrl, symbol, false);
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
 
@@ -762,26 +874,19 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
                 "stopLimitTimeInForce required if stopLimitPrice is set");
     }
 
-    auto timestamp = chrono::system_clock::now();
-    msec timestampMs = chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/orderList/oco");
+    setRequestParameters(requestUrl, request);
+    signUrl(requestUrl);
 
-    string queryString = buildOcoQuery(request, timestampMs);
-    string signature = hmac_sha256(secretKey, queryString);
-    string fullQuery = queryString + "&signature=" + signature;
-
-    string target = "/api/v3/orderList/oco?" + fullQuery;
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance placeOco: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     return createOcoInfo(json::value_to<OcoDto>(jsonValue));
 }
@@ -792,98 +897,21 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
     throwIf(!request.orderListId.has_value() && !request.listClientOrderId.has_value(),
             "Either orderListId or listClientOrderId must be provided");
 
-    auto timestamp = chrono::system_clock::now();
-    msec timestampMs = chrono::duration_cast<chrono::milliseconds>(timestamp.time_since_epoch()).count();
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/orderList");
+    setRequestParameters(requestUrl, request);
+    signUrl(requestUrl);
 
-    string queryString = buildOcoCancelQuery(request, timestampMs);
-    string signature = hmac_sha256(secretKey, queryString);
-    string fullQuery = queryString + "&signature=" + signature;
-
-    string target = "/api/v3/orderList?" + fullQuery;
+    string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
     context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance cancelOco: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     return createOcoInfo(json::value_to<OcoDto>(jsonValue));
-}
-
-string BinanceDealService::buildOcoQuery(const PlaceOcoRequest &request, long long timestamp)
-{
-    throwIf(request.symbol.empty(), "Binance placeOco: symbol cannot be empty");
-    throwIf(!request.side.has_value(), "Binance placeOco: side is required");
-    throwIf(request.quantity <= 0, "Binance placeOco: quantity must be > 0");
-    throwIf(request.price <= 0, "Binance placeOco: price must be > 0");
-    throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
-
-    const SymbolInfo info = getSymbolInfo(request.symbol);
-    const Decimal belowPrice = request.stopLimitPrice.has_value() ? request.stopLimitPrice.value() : request.stopPrice;
-    const string belowTif =
-        request.stopLimitTimeInForce.has_value() ? request.stopLimitTimeInForce.value() : string("GTC");
-    optional<string> aboveQuantityError = validateQuantity(request.quantity, request.price, info);
-    throwIf(aboveQuantityError.has_value(), "Binance placeOco above leg: " + aboveQuantityError.value_or(""));
-    optional<string> belowQuantityError = validateQuantity(request.quantity, belowPrice, info);
-    throwIf(belowQuantityError.has_value(), "Binance placeOco below leg: " + belowQuantityError.value_or(""));
-
-    ostringstream queryStream;
-    // clang-format off
-    queryStream << "symbol=" << request.symbol
-                << "&side=" << EnumStringConverter<OrderOperation>::toString(request.side.value())
-                << "&quantity=" << DecimalConverter::formatByStep(request.quantity, info.stepSize)
-                << "&aboveType=LIMIT_MAKER"
-                << "&abovePrice=" << DecimalConverter::formatByStep(request.price, info.tickSize)
-                << "&belowType=STOP_LOSS_LIMIT"
-                << "&belowStopPrice=" << DecimalConverter::formatByStep(request.stopPrice, info.tickSize)
-                << "&belowPrice=" << DecimalConverter::formatByStep(belowPrice, info.tickSize)
-                << "&belowTimeInForce=" << belowTif;
-    // clang-format on
-
-    if (request.listClientOrderId.has_value())
-    {
-        queryStream << "&listClientOrderId=" << request.listClientOrderId.value();
-    }
-
-    if (request.limitClientOrderId.has_value())
-    {
-        queryStream << "&aboveClientOrderId=" << request.limitClientOrderId.value();
-    }
-
-    if (request.stopClientOrderId.has_value())
-    {
-        queryStream << "&belowClientOrderId=" << request.stopClientOrderId.value();
-    }
-
-    queryStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
-
-    return queryStream.str();
-}
-
-string BinanceDealService::buildOcoCancelQuery(const OrderListQuery &request, long long timestamp)
-{
-    ostringstream queryStringStream;
-    queryStringStream << "symbol=" << request.symbol;
-
-    if (request.orderListId.has_value())
-    {
-        queryStringStream << "&orderListId=" << request.orderListId.value();
-    }
-
-    if (request.listClientOrderId.has_value())
-    {
-        queryStringStream << "&listClientOrderId=" << request.listClientOrderId.value();
-    }
-
-    queryStringStream << "&recvWindow=" << recvWindow << "&timestamp=" << timestamp;
-
-    return queryStringStream.str();
 }
 
 OcoInfo BinanceDealService::createOcoInfo(const OcoDto &oco)
@@ -1049,12 +1077,11 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 {
     throwIf(symbol.empty(), "Binance cancelAllOpenOrders: symbol cannot be empty");
 
-    ostringstream queryStream;
-    queryStream << "symbol=" << symbol << "&recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
-
-    const string queryString = queryStream.str();
-    const string signature = hmac_sha256(secretKey, queryString);
-    const string target = "/api/v3/openOrders?" + queryString + "&signature=" + signature;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/openOrders");
+    setRequestParameters(requestUrl, symbol, true);
+    signUrl(requestUrl);
+    const string target = getTarget(requestUrl);
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
@@ -1094,12 +1121,11 @@ bool BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
 flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 {
-    ostringstream queryStream;
-    queryStream << "recvWindow=" << recvWindow << "&timestamp=" << getTimestamp();
-
-    const string queryString = queryStream.str();
-    const string signature = hmac_sha256(secretKey, queryString);
-    const string target = "/api/v3/account?" + queryString + "&signature=" + signature;
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/account");
+    setRequestParameters(requestUrl);
+    signUrl(requestUrl);
+    const string target = getTarget(requestUrl);
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);

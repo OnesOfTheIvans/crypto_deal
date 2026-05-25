@@ -126,11 +126,11 @@ namespace {
         for (int i = 0; i < tries; ++i)
         {
             const auto st = svc.getUserStreamStatus();
-            if (st == DealService::StreamStatus::CONNECTED)
+            if (st == StreamStatus::CONNECTED)
             {
                 return true;
             }
-            if (st == DealService::StreamStatus::ERROR)
+            if (st == StreamStatus::ERROR)
             {
                 return false;
             }
@@ -147,7 +147,7 @@ namespace {
             {
                 return true;
             }
-            if (svc.getUserStreamStatus() != DealService::StreamStatus::CONNECTED)
+            if (svc.getUserStreamStatus() != StreamStatus::CONNECTED)
             {
                 return false;
             }

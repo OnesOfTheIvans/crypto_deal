@@ -108,6 +108,14 @@ class BybitDealService : public DealService
 
     std::optional<std::string> bybitResponseOk(const std::string &response);
 
+    void setRequestParameters(boost::urls::url &url,
+                              const std::string &accountType,
+                              const std::optional<std::string> &coinFilter);
+
+    void setRequestParameters(boost::urls::url &url, const std::string &symbol, const std::string &category);
+
+    void setRequestParameters(boost::urls::url &url, const OrderQuery &request, const std::string &category);
+
     void handleUserStreamMessage(const std::string &msg);
 
     void handleWalletUpdate(const bybit::StreamMessageDto &message);
@@ -122,7 +130,7 @@ class BybitDealService : public DealService
 
     void syncTime();
 
-    long long getTimestamp();
+    long long getServerTimestamp();
 
     void refreshBalancesFromRest(const std::string &accountType,
                                  const std::optional<std::string> &coinFilter = std::nullopt);

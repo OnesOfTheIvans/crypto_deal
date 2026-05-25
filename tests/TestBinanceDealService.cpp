@@ -51,6 +51,11 @@ namespace {
         }]
     })";
     }
+
+    void setBinanceServerTimeResponse()
+    {
+        MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
+    }
 } // namespace
 
 TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
@@ -75,6 +80,7 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
         "selfTradePreventionMode": "NONE"
     })";
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/order/test", "{}");
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
@@ -133,6 +139,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
         "selfTradePreventionMode": "EXPIRE_MAKER"
     })";
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
@@ -180,6 +187,7 @@ TEST_F(BinanceDealServiceTest, CancelOrder_Success)
         "side": "SELL"
     })";
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
 
     OrderQuery query;
@@ -319,6 +327,7 @@ TEST_F(BinanceDealServiceTest, GetOrder_ParsesDetailedResponse)
 {
     auto service = createService();
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/order", R"({
         "symbol": "BTCUSDT",
         "orderId": 12345,
@@ -440,6 +449,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
 {
     auto service = createService();
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/orderList/oco", R"({
         "orderListId": 777,
@@ -538,6 +548,7 @@ TEST_F(BinanceDealServiceTest, CancelOco_Success)
 {
     auto service = createService();
 
+    setBinanceServerTimeResponse();
     MockNetwork::instance().setResponse("/api/v3/orderList", R"({
         "orderListId": 777,
         "listClientOrderId": "oco-list-id",

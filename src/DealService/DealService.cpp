@@ -28,6 +28,14 @@ string DealService::hmac_sha256(const string &key, const string &data) const
     return oss.str();
 }
 
+void DealService::setUrlParameters(boost::urls::url &url, const map<string, string> &params) const
+{
+    for (const auto &[key, value] : params)
+    {
+        url.params().append({key, value});
+    }
+}
+
 ExchangerType DealService::getExchangerType() const
 {
     return exchangerType;

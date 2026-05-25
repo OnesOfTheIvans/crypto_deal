@@ -15,6 +15,7 @@ target_include_directories(DealLib
 target_link_libraries(DealLib
     PUBLIC
         Boost::json
+        Boost::url
         OpenSSL::SSL
         OpenSSL::Crypto
         Threads::Threads

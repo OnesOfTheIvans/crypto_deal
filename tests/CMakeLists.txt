@@ -22,6 +22,7 @@ target_link_libraries(DealServiceTests PRIVATE
     GTest::GTest
     GTest::Main
     Boost::json
+    Boost::url
     OpenSSL::SSL
     OpenSSL::Crypto
     Threads::Threads

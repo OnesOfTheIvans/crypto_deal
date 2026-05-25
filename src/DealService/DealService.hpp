@@ -2,6 +2,7 @@
 #define DEAL_SERVICE_H
 
 #include "ExchangerType.hpp"
+#include "common/StreamStatus.hpp"
 #include "common/domain/AssetBalance.hpp"
 #include "common/domain/OcoInfo.hpp"
 #include "common/domain/OrderInfo.hpp"
@@ -15,9 +16,12 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/container/flat_map.hpp>
+#include <boost/url.hpp>
 
 #include <atomic>
+#include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,6 +43,21 @@ class DealService
     std::thread runner;
 
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
+
+    void setUrlParameters(boost::urls::url &url, const std::map<std::string, std::string> &params) const;
+
+    template <typename T>
+    void setParameterIfPresent(std::map<std::string, std::string> &parameterMap,
+                               const std::string &key,
+                               const std::optional<T> &parameter) const
+    {
+        if (parameter.has_value())
+        {
+            std::ostringstream valueStream;
+            valueStream << parameter.value();
+            parameterMap[key] = valueStream.str();
+        }
+    }
 
   public:
     DealService(std::string host,
@@ -65,13 +84,6 @@ class DealService
 
     virtual void stopUserStream() = 0;
 
-    enum class StreamStatus
-    {
-        STOPPED,
-        CONNECTING,
-        CONNECTED,
-        ERROR
-    };
     virtual StreamStatus getUserStreamStatus() const = 0;
 
     virtual std::string getUserStreamLastError() const = 0;
