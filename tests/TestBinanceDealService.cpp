@@ -56,6 +56,18 @@ namespace {
     {
         MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
     }
+
+    void expectMarketOrderRequest(const MockNetwork::RecordedRequest &request, const std::string &side)
+    {
+        EXPECT_EQ(request.method, "POST");
+        EXPECT_NE(request.target.find("/api/v3/order?"), std::string::npos);
+        EXPECT_NE(request.target.find("symbol=BTCUSDT"), std::string::npos);
+        EXPECT_NE(request.target.find("side=" + side), std::string::npos);
+        EXPECT_NE(request.target.find("type=MARKET"), std::string::npos);
+        EXPECT_NE(request.target.find("quantity=0.0002"), std::string::npos);
+        EXPECT_NE(request.target.find("newOrderRespType=RESULT"), std::string::npos);
+        EXPECT_NE(request.headers.find("X-MBX-APIKEY"), request.headers.end());
+    }
 } // namespace
 
 TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
@@ -152,6 +164,48 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
     EXPECT_EQ(info.side, "BUY");
     EXPECT_EQ(info.type, "MARKET");
     EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0002"));
+
+    expectMarketOrderRequest(MockNetwork::instance().lastRequest(), "BUY");
+}
+
+TEST_F(BinanceDealServiceTest, MarketSellOrder_Success)
+{
+    auto service = createService();
+
+    std::string tickerResponse = R"({
+        "symbol": "BTCUSDT",
+        "price": "78253.54000000"
+    })";
+
+    std::string responseJson = R"({
+        "symbol": "BTCUSDT",
+        "orderId": 4458119,
+        "clientOrderId": "sell-client-id",
+        "transactTime": 1779052073333,
+        "price": "0.00000000",
+        "origQty": "0.00020000",
+        "executedQty": "0.00020000",
+        "cummulativeQuoteQty": "15.65070800",
+        "status": "FILLED",
+        "type": "MARKET",
+        "side": "SELL"
+    })";
+
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
+    MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+
+    OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0002"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "4458119");
+    EXPECT_EQ(info.status, "FILLED");
+    EXPECT_EQ(info.side, "SELL");
+    EXPECT_EQ(info.type, "MARKET");
+    EXPECT_EQ(info.executedQty, DecimalConverter::parseDecimal("0.0002"));
+
+    expectMarketOrderRequest(MockNetwork::instance().lastRequest(), "SELL");
 }
 
 TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsBelowMinNotional)

@@ -71,25 +71,6 @@ namespace {
 } // namespace
 
 void BinanceDealService::setRequestParameters(boost::urls::url &url,
-                                              const string &baseAsset,
-                                              const string &quoteAsset,
-                                              const OrderOperation &operation,
-                                              const OrderType &type,
-                                              Decimal quantity,
-                                              Decimal stepSize)
-{
-    map<string, string> parameterMap;
-    parameterMap["quantity"] = DecimalConverter::formatByStep(quantity, stepSize);
-    parameterMap["recvWindow"] = to_string(recvWindow);
-    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(operation);
-    parameterMap["symbol"] = baseAsset + quoteAsset;
-    parameterMap["timestamp"] = to_string(getServerTimestamp());
-    parameterMap["type"] = EnumStringConverter<OrderType>::toString(type);
-
-    setUrlParameters(url, parameterMap);
-}
-
-void BinanceDealService::setRequestParameters(boost::urls::url &url,
                                               const PlaceOrderRequest &request,
                                               const SymbolInfo &info)
 {
@@ -212,33 +193,6 @@ flat_map<string, string> BinanceDealService::createHeaders(const string &apiKey)
     return {{"X-MBX-APIKEY", apiKey}};
 }
 
-optional<string> BinanceDealService::isResponseStatusOk(const string &response)
-{
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    if (errorCode)
-    {
-        return "JSON parse error: " + errorCode.message();
-    }
-    if (!jsonValue.is_object())
-    {
-        return "Response is not a JSON object";
-    }
-
-    if (hasErrorResponse(jsonValue))
-    {
-        return getErrorMessage(json::value_to<ErrorDto>(jsonValue));
-    }
-
-    const OrderDto order = json::value_to<OrderDto>(jsonValue);
-    if (order.orderId.has_value() && order.status.has_value())
-    {
-        return nullopt;
-    }
-
-    return "Unexpected response structure (missing orderId/status)";
-}
-
 json::value BinanceDealService::parseAndValidate(const string &response)
 {
     beast::error_code errorCode;
@@ -270,22 +224,6 @@ void BinanceDealService::checkCancelAllOpenOrdersResult(const string &response)
     }
 
     throwIf(!jsonValue.is_array(), "Binance cancelAllOpenOrders: Unexpected response type");
-}
-
-std::string BinanceDealService::sendOrder(const boost::urls::url &url, const flat_map<string, string> &headers)
-{
-    string target = getTarget(url);
-    HttpRequestContext context(ioc, ctx, host, target);
-    context.prepareRequest(http::verb::post);
-    context.setRequestHeaders(headers);
-
-    cout << "Sending order..." << endl;
-    string response = httpsPost(context);
-    cout << "Order response: " << response << endl;
-
-    optional<string> errorOutput = isResponseStatusOk(response);
-    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
-    return response;
 }
 
 string BinanceDealService::buildUserStreamSubscribeRequestJson()
@@ -706,60 +644,24 @@ optional<string> BinanceDealService::validateQuantity(Decimal quantity, Decimal 
 
 OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
-    string symbol = baseAsset + quoteAsset;
-    SymbolInfo info = getSymbolInfo(symbol);
+    PlaceOrderRequest request;
+    request.symbol = baseAsset + quoteAsset;
+    request.side = OrderOperation::BUY;
+    request.type = OrderType::MARKET;
+    request.quantity = quantity;
 
-    Decimal price = getTickerPrice(symbol);
-    optional<string> quantityError = validateQuantity(quantity, price, info);
-    throwIf(quantityError.has_value(), "Binance buyCrypto: " + quantityError.value_or(""));
-
-    boost::urls::url requestUrl;
-    requestUrl.set_path("/api/v3/order");
-    setRequestParameters(requestUrl,
-                         baseAsset,
-                         quoteAsset,
-                         OrderOperation::BUY,
-                         OrderType::MARKET,
-                         quantity,
-                         info.stepSize);
-    signUrl(requestUrl);
-    flat_map<string, string> headers = createHeaders(apiKey);
-
-    string response = sendOrder(requestUrl, headers);
-
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse buyCrypto response");
-    return createOrderInfo(json::value_to<OrderDto>(jsonValue));
+    return placeOrder(request);
 }
 
 OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
-    string symbol = baseAsset + quoteAsset;
-    SymbolInfo info = getSymbolInfo(symbol);
+    PlaceOrderRequest request;
+    request.symbol = baseAsset + quoteAsset;
+    request.side = OrderOperation::SELL;
+    request.type = OrderType::MARKET;
+    request.quantity = quantity;
 
-    Decimal price = getTickerPrice(symbol);
-    optional<string> quantityError = validateQuantity(quantity, price, info);
-    throwIf(quantityError.has_value(), "Binance sellCrypto: " + quantityError.value_or(""));
-
-    boost::urls::url requestUrl;
-    requestUrl.set_path("/api/v3/order");
-    setRequestParameters(requestUrl,
-                         baseAsset,
-                         quoteAsset,
-                         OrderOperation::SELL,
-                         OrderType::MARKET,
-                         quantity,
-                         info.stepSize);
-    signUrl(requestUrl);
-    flat_map<string, string> headers = createHeaders(apiKey);
-
-    string response = sendOrder(requestUrl, headers);
-
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse sellCrypto response");
-    return createOrderInfo(json::value_to<OrderDto>(jsonValue));
+    return placeOrder(request);
 }
 
 void BinanceDealService::validatePlaceOrderRequest(const PlaceOrderRequest &request) const
@@ -794,7 +696,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     string response = httpsPost(context);
 
@@ -812,7 +714,7 @@ OrderInfo BinanceDealService::cancelOrder(const OrderQuery &request)
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     string response = httpsPost(context);
 
@@ -830,7 +732,7 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     string response = httpsPost(context);
 
@@ -902,7 +804,7 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::post);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     string response = httpsPost(context);
 
@@ -925,7 +827,7 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     string response = httpsPost(context);
 
@@ -1084,7 +986,7 @@ void BinanceDealService::cancelAllOpenOrders(const string &symbol, const string 
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::delete_);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     const string response = httpsPost(context);
 
@@ -1101,7 +1003,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
-    context.setRequestHeaders({{"X-MBX-APIKEY", apiKey}});
+    context.setRequestHeaders(createHeaders(apiKey));
 
     const string response = httpsPost(context);
 

@@ -56,14 +56,6 @@ class BinanceDealService : public DealService
     std::atomic<long long> lastSyncMonoMs{0};
     std::mutex timeSyncMutex;
 
-    void setRequestParameters(boost::urls::url &url,
-                              const std::string &baseAsset,
-                              const std::string &quoteAsset,
-                              const OrderOperation &operation,
-                              const OrderType &type,
-                              Decimal quantity,
-                              Decimal stepSize = Decimal{});
-
     void setRequestParameters(boost::urls::url &url, const PlaceOrderRequest &request, const SymbolInfo &info);
 
     void setRequestParameters(boost::urls::url &url, const OrderQuery &request);
@@ -87,10 +79,6 @@ class BinanceDealService : public DealService
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
-
-    std::string sendOrder(const boost::urls::url &url, const flat_map<std::string, std::string> &headers);
-
-    std::optional<std::string> isResponseStatusOk(const std::string &response);
 
     json::value parseAndValidate(const std::string &response);
 
