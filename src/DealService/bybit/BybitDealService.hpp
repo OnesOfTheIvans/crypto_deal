@@ -118,6 +118,10 @@ class BybitDealService : public DealService
 
     void handleUserStreamMessage(const std::string &msg);
 
+    void prepareUserStreamThread();
+
+    std::shared_ptr<WebsocketStream> prepareUserWebsocketStream();
+
     void handleWalletUpdate(const bybit::StreamMessageDto &message);
 
     void handleOrderUpdate(const bybit::StreamOrderMessageDto &message);

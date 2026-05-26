@@ -474,56 +474,46 @@ void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &w
     cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
 }
 
-void BinanceDealService::startUserStream()
+shared_ptr<BinanceDealService::WebsocketStream> BinanceDealService::prepareUserWebsocketStream()
 {
-    if (userStream)
+    const string ws_port = "443";
+    const string ws_target = "/ws-api/v3";
+
+    tcp::resolver resolver(ioc);
+    auto results = resolver.resolve(websocketHost, ws_port);
+
+    beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
+    beast::get_lowest_layer(tls).connect(results);
+
+    tls.handshake(ssl::stream_base::client);
+
+    auto sharedWebsocketStream = make_shared<WebsocketStream>(move(tls));
+    sharedWebsocketStream->set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
+    sharedWebsocketStream->handshake(websocketHost, ws_target);
+
     {
-        return;
+        lock_guard<mutex> lock(userWebsocketMutex);
+        userWebsocketStream = sharedWebsocketStream;
     }
 
-    try
-    {
-        getBalancesRest();
-    }
-    catch (const exception &e)
-    {
-        cerr << "Binance REST balances seed failed (continuing): " << e.what() << endl;
-    }
-
-    userStream = true;
     setStreamStatus(StreamStatus::CONNECTING);
 
+    const string sub = buildUserStreamSubscribeRequestJson();
+    sharedWebsocketStream->write(net::buffer(sub));
+
+    handleUserStreamSubscriptionResponse(*sharedWebsocketStream);
+
+    return sharedWebsocketStream;
+}
+
+void BinanceDealService::prepareUserStreamThread()
+{
     runner = thread(
         [this]()
         {
             try
             {
-                const string ws_port = "443";
-                const string ws_target = "/ws-api/v3";
-
-                tcp::resolver resolver(ioc);
-                auto results = resolver.resolve(websocketHost, ws_port);
-
-                beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
-                beast::get_lowest_layer(tls).connect(results);
-
-                tls.handshake(ssl::stream_base::client);
-
-                auto sharedWebsocketStream = make_shared<WebsocketStream>(move(tls));
-                sharedWebsocketStream->set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
-                sharedWebsocketStream->handshake(websocketHost, ws_target);
-
-                {
-                    lock_guard<mutex> lock(userWebsocketMutex);
-                    userWebsocketStream = sharedWebsocketStream;
-                }
-
-                setStreamStatus(StreamStatus::CONNECTING);
-
-                const string sub = buildUserStreamSubscribeRequestJson();
-                sharedWebsocketStream->write(net::buffer(sub));
-
-                handleUserStreamSubscriptionResponse(*sharedWebsocketStream);
+                auto sharedWebsocketStream = prepareUserWebsocketStream();
 
                 setStreamStatus(StreamStatus::CONNECTED);
 
@@ -579,6 +569,28 @@ void BinanceDealService::startUserStream()
                 setStreamStatus(StreamStatus::STOPPED);
             }
         });
+}
+
+void BinanceDealService::startUserStream()
+{
+    if (userStream)
+    {
+        return;
+    }
+
+    try
+    {
+        getBalancesRest();
+    }
+    catch (const exception &e)
+    {
+        cerr << "Binance REST balances seed failed (continuing): " << e.what() << endl;
+    }
+
+    userStream = true;
+    setStreamStatus(StreamStatus::CONNECTING);
+
+    prepareUserStreamThread();
 }
 
 void BinanceDealService::stopUserStream()

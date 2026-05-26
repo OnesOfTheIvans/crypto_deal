@@ -106,6 +106,10 @@ class BinanceDealService : public DealService
 
     std::string buildUserStreamSubscribeRequestJson();
 
+    void prepareUserStreamThread();
+
+    std::shared_ptr<WebsocketStream> prepareUserWebsocketStream();
+
     OrderInfo createOrderInfo(const binance::OrderDto &order);
 
     SymbolInfo createSymbolInfo(const binance::SymbolDto &symbol);

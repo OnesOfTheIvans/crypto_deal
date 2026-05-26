@@ -260,97 +260,87 @@ optional<string> BybitDealService::validateQuoteQuantity(Decimal quantity, const
     return nullopt;
 }
 
-void BybitDealService::startUserStream()
+shared_ptr<BybitDealService::WebsocketStream> BybitDealService::prepareUserWebsocketStream()
 {
-    if (userStream)
+    const string wsPort = "443";
+    const string wsTarget = "/v5/private";
+
+    tcp::resolver resolver(ioc);
+    auto results = resolver.resolve(websocketHost, wsPort);
+
+    beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
+
+    if (!SSL_set_tlsext_host_name(tls.native_handle(), websocketHost.c_str()))
     {
-        return;
+        throw beast::system_error(
+            beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()),
+            "Bybit SSL_set_tlsext_host_name");
     }
 
-    try
+    beast::get_lowest_layer(tls).connect(results);
+    tls.handshake(ssl::stream_base::client);
+
+    auto sharedWebsocketStream = make_shared<WebsocketStream>(move(tls));
+    sharedWebsocketStream->set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
+    sharedWebsocketStream->handshake(websocketHost, wsTarget);
+
     {
-        getBalancesRest();
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit REST balances seed failed (continuing): " << e.what() << endl;
+        lock_guard<mutex> lock(userWebsocketMutex);
+        userWebsocketStream = sharedWebsocketStream;
     }
 
-    userStream = true;
     setStreamStatus(StreamStatus::CONNECTING);
 
+    const long long expires = getServerTimestamp() + 5000;
+    const string payload = "GET/realtime" + to_string(expires);
+    const string sig = hmac_sha256(secretKey, payload);
+
+    json::object auth;
+    auth["op"] = "auth";
+    auth["args"] = json::array{apiKey, expires, sig};
+    sharedWebsocketStream->write(net::buffer(json::serialize(auth)));
+
+    {
+        beast::flat_buffer buffer;
+        sharedWebsocketStream->read(buffer);
+        string msg = beast::buffers_to_string(buffer.data());
+
+        beast::error_code ec;
+        json::value val = json::parse(msg, ec);
+        if (!ec && val.is_object())
+        {
+            const AuthResponseDto authResponse = json::value_to<AuthResponseDto>(val);
+            if (authResponse.op.has_value() && authResponse.op.value() == "auth")
+            {
+                throwIf(!authResponse.success.has_value() || !authResponse.success.value(),
+                        "Bybit stream: auth failed: " + msg);
+                cout << "Bybit stream authenticated successfully." << endl;
+            }
+        }
+    }
+
+    json::object sub;
+    sub["op"] = "subscribe";
+    sub["args"] = json::array{"wallet", "order"};
+    sharedWebsocketStream->write(net::buffer(json::serialize(sub)));
+    {
+        beast::flat_buffer buffer;
+        sharedWebsocketStream->read(buffer);
+        string msg = beast::buffers_to_string(buffer.data());
+        cout << "Bybit stream subscription response: " << msg << endl;
+    }
+
+    return sharedWebsocketStream;
+}
+
+void BybitDealService::prepareUserStreamThread()
+{
     runner = thread(
         [this]()
         {
             try
             {
-                const string wsPort = "443";
-                const string wsTarget = "/v5/private";
-
-                tcp::resolver resolver(ioc);
-                auto results = resolver.resolve(websocketHost, wsPort);
-
-                beast::ssl_stream<beast::tcp_stream> tls(ioc, ctx);
-
-                if (!SSL_set_tlsext_host_name(tls.native_handle(), websocketHost.c_str()))
-                {
-                    throw beast::system_error(
-                        beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category()),
-                        "Bybit SSL_set_tlsext_host_name");
-                }
-
-                beast::get_lowest_layer(tls).connect(results);
-                tls.handshake(ssl::stream_base::client);
-
-                auto sharedWebsocketStream = make_shared<WebsocketStream>(move(tls));
-                sharedWebsocketStream->set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
-                sharedWebsocketStream->handshake(websocketHost, wsTarget);
-
-                {
-                    lock_guard<mutex> lock(userWebsocketMutex);
-                    userWebsocketStream = sharedWebsocketStream;
-                }
-
-                setStreamStatus(StreamStatus::CONNECTING);
-
-                const long long expires = getServerTimestamp() + 5000;
-                const string payload = "GET/realtime" + to_string(expires);
-                const string sig = hmac_sha256(secretKey, payload);
-
-                json::object auth;
-                auth["op"] = "auth";
-                auth["args"] = json::array{apiKey, expires, sig};
-                sharedWebsocketStream->write(net::buffer(json::serialize(auth)));
-
-                {
-                    beast::flat_buffer buffer;
-                    sharedWebsocketStream->read(buffer);
-                    string msg = beast::buffers_to_string(buffer.data());
-
-                    beast::error_code ec;
-                    json::value val = json::parse(msg, ec);
-                    if (!ec && val.is_object())
-                    {
-                        const AuthResponseDto authResponse = json::value_to<AuthResponseDto>(val);
-                        if (authResponse.op.has_value() && authResponse.op.value() == "auth")
-                        {
-                            throwIf(!authResponse.success.has_value() || !authResponse.success.value(),
-                                    "Bybit stream: auth failed: " + msg);
-                            cout << "Bybit stream authenticated successfully." << endl;
-                        }
-                    }
-                }
-
-                json::object sub;
-                sub["op"] = "subscribe";
-                sub["args"] = json::array{"wallet", "order"};
-                sharedWebsocketStream->write(net::buffer(json::serialize(sub)));
-                {
-                    beast::flat_buffer buffer;
-                    sharedWebsocketStream->read(buffer);
-                    string msg = beast::buffers_to_string(buffer.data());
-                    cout << "Bybit stream subscription response: " << msg << endl;
-                }
+                auto websocketStreamCopy = prepareUserWebsocketStream();
 
                 setStreamStatus(StreamStatus::CONNECTED);
                 try
@@ -360,12 +350,6 @@ void BybitDealService::startUserStream()
                 catch (const exception &exception)
                 {
                     cerr << "Bybit: initial balance refresh failed: " << exception.what() << endl;
-                }
-
-                shared_ptr<WebsocketStream> websocketStreamCopy;
-                {
-                    lock_guard<mutex> lock(userWebsocketMutex);
-                    websocketStreamCopy = userWebsocketStream;
                 }
 
                 while (userStream)
@@ -409,6 +393,28 @@ void BybitDealService::startUserStream()
                 setStreamStatus(StreamStatus::STOPPED);
             }
         });
+}
+
+void BybitDealService::startUserStream()
+{
+    if (userStream)
+    {
+        return;
+    }
+
+    try
+    {
+        getBalancesRest();
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit REST balances seed failed (continuing): " << e.what() << endl;
+    }
+
+    userStream = true;
+    setStreamStatus(StreamStatus::CONNECTING);
+
+    prepareUserStreamThread();
 }
 
 string BybitDealService::createBody(const string &baseAsset,
