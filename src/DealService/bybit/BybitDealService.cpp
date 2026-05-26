@@ -127,7 +127,7 @@ long long BybitDealService::getServerTimestamp()
     return localTime + serverTimeOffset;
 }
 
-void BybitDealService::refreshBalancesFromRest(const string &accountType, const optional<string> &coinFilter)
+void BybitDealService::refreshBalancesCache(const string &accountType, const optional<string> &coinFilter)
 {
     boost::urls::url requestUrl;
     requestUrl.set_path("/v5/account/wallet-balance");
@@ -153,6 +153,11 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
     throwIf(jsonError || !parsedValue.is_object(), "Bybit wallet-balance JSON parse error");
 
     const WalletBalanceResponseDto responseDto = parseResponseToDto<WalletBalanceResponseDto>(parsedValue);
+    processCoins(responseDto);
+}
+
+void BybitDealService::processCoins(const WalletBalanceResponseDto &responseDto)
+{
     if (!responseDto.result.has_value() || !responseDto.result.value().list.has_value())
     {
         return;
@@ -160,12 +165,7 @@ void BybitDealService::refreshBalancesFromRest(const string &accountType, const 
 
     for (const WalletAccountDto &account : responseDto.result.value().list.value())
     {
-        if (!account.coin.has_value())
-        {
-            continue;
-        }
-
-        for (const CoinBalanceDto &coin : account.coin.value())
+        for (const CoinBalanceDto &coin : account.coin.value_or(vector<CoinBalanceDto>{}))
         {
             const Decimal walletBalance = parseToDecimal(coin.walletBalance);
 
@@ -1725,7 +1725,7 @@ flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
 {
     try
     {
-        refreshBalancesFromRest("UNIFIED", nullopt);
+        refreshBalancesCache("UNIFIED", nullopt);
     }
     catch (const exception &e)
     {
@@ -1734,7 +1734,7 @@ flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
 
     try
     {
-        refreshBalancesFromRest("SPOT", nullopt);
+        refreshBalancesCache("SPOT", nullopt);
     }
     catch (const exception &e)
     {

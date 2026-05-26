@@ -37,6 +37,10 @@ using msec = std::chrono::milliseconds::rep;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 namespace json = boost::json;
 
+namespace bybit {
+    struct WalletBalanceResponseDto;
+}
+
 class BybitDealService : public DealService
 {
   private:
@@ -136,8 +140,10 @@ class BybitDealService : public DealService
 
     long long getServerTimestamp();
 
-    void refreshBalancesFromRest(const std::string &accountType,
-                                 const std::optional<std::string> &coinFilter = std::nullopt);
+    void refreshBalancesCache(const std::string &accountType,
+                              const std::optional<std::string> &coinFilter = std::nullopt);
+
+    void processCoins(const bybit::WalletBalanceResponseDto &responseDto);
 
     bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
 
