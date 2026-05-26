@@ -3,6 +3,9 @@
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 #include "domain/AuthResponseDto.hpp"
+#include "domain/CancelAllOpenOrdersRequestDto.hpp"
+#include "domain/CancelOrderRequestDto.hpp"
+#include "domain/CreateOrderRequestDto.hpp"
 #include "domain/InstrumentInfoResponseDto.hpp"
 #include "domain/OrderResponseDto.hpp"
 #include "domain/RealtimeOrderResponseDto.hpp"
@@ -417,22 +420,19 @@ string BybitDealService::createBody(const string &baseAsset,
                                     Decimal stepSize)
 {
     const string qtyStr = DecimalConverter::formatByStep(quantity, stepSize);
-
-    ostringstream body;
-    body << "{" << "\"category\":\"" << EnumStringConverter<OrderCategory>::toString(category) << "\","
-         << "\"symbol\":\"" << baseAsset << quoteAsset << "\"," << "\"side\":\""
-         << EnumStringConverter<OrderOperation>::toString(operation) << "\"," << "\"orderType\":\""
-         << EnumStringConverter<OrderType>::toString(type) << "\",";
+    CreateOrderRequestDto request{EnumStringConverter<OrderCategory>::toString(category),
+                                  baseAsset + quoteAsset,
+                                  EnumStringConverter<OrderOperation>::toString(operation),
+                                  EnumStringConverter<OrderType>::toString(type),
+                                  qtyStr};
 
     // IMPORTANT: For spot MARKET BUY, force qty to be interpreted as baseCoin amount
     if (type == OrderType::MARKET && operation == OrderOperation::BUY)
     {
-        body << "\"marketUnit\":\"baseCoin\",";
+        request.marketUnit = "baseCoin";
     }
 
-    body << "\"qty\":\"" << qtyStr << "\"" << "}";
-
-    return body.str();
+    return json::serialize(json::value_from(request));
 }
 
 flat_map<string, string>
@@ -865,40 +865,29 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
         throw runtime_error(string("Bybit placeOrder: ") + exception.what());
     }
 
-    json::object body;
-    body["category"] = category;
-    body["symbol"] = request.symbol;
-    body["side"] = side;
-    body["orderType"] = type;
-
     // Use formatByStep for qty and price to avoid scientific notation and ensure correct precision
-    body["qty"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
+    const string qty = DecimalConverter::formatByStep(request.quantity, info.stepSize);
 
+    optional<string> price;
+    optional<string> timeInForce;
     if (requestType == OrderType::LIMIT)
     {
-        body["price"] = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
-        body["timeInForce"] = request.timeInForce.value();
+        price = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
+        timeInForce = request.timeInForce.value();
     }
 
-    if (request.clientOrderId.has_value() && !request.clientOrderId->empty())
-    {
-        body["orderLinkId"] = request.clientOrderId.value();
-    }
-
-    if (request.triggerPrice.has_value() && !request.triggerPrice->empty())
-    {
-        body["triggerPrice"] = request.triggerPrice.value();
-    }
-    if (request.orderFilter.has_value() && !request.orderFilter->empty())
-    {
-        body["orderFilter"] = request.orderFilter.value();
-    }
-    if (request.marketUnit.has_value() && !request.marketUnit->empty())
-    {
-        body["marketUnit"] = request.marketUnit.value();
-    }
-
-    string bodyStr = json::serialize(body);
+    const CreateOrderRequestDto body{category,
+                                     request.symbol,
+                                     side,
+                                     type,
+                                     qty,
+                                     price,
+                                     timeInForce,
+                                     request.clientOrderId,
+                                     request.triggerPrice,
+                                     request.orderFilter,
+                                     request.marketUnit};
+    string bodyStr = json::serialize(json::value_from(body));
 
     msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
@@ -936,20 +925,8 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
         category = "spot";
     }
 
-    json::object body;
-    body["category"] = category;
-    body["symbol"] = request.symbol;
-
-    if (request.orderId.has_value())
-    {
-        body["orderId"] = request.orderId.value();
-    }
-    if (request.clientOrderId.has_value())
-    {
-        body["orderLinkId"] = request.clientOrderId.value();
-    }
-
-    string bodyStr = json::serialize(body);
+    const CancelOrderRequestDto body{category, request.symbol, request.orderId, request.clientOrderId};
+    string bodyStr = json::serialize(json::value_from(body));
 
     msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
@@ -1713,15 +1690,8 @@ void BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
 {
     const string effectiveCategory = category.empty() ? "spot" : category;
 
-    json::object body;
-    body["category"] = effectiveCategory;
-
-    if (!symbol.empty())
-    {
-        body["symbol"] = symbol;
-    }
-
-    const string bodyStr = json::serialize(body);
+    const CancelAllOpenOrdersRequestDto request{effectiveCategory, symbol};
+    const string bodyStr = json::serialize(json::value_from(request));
 
     const msec timestamp = getServerTimestamp();
     const string signature = getSignature(bodyStr, timestamp);

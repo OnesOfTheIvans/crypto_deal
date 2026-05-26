@@ -10,6 +10,7 @@
 #include "domain/SubscriptionResponseDto.hpp"
 #include "domain/TickerPriceDto.hpp"
 #include "domain/UserStreamMessageDto.hpp"
+#include "domain/UserStreamSubscribeRequestDto.hpp"
 
 #include <chrono>
 #include <sstream>
@@ -290,23 +291,15 @@ std::string BinanceDealService::sendOrder(const boost::urls::url &url, const fla
 string BinanceDealService::buildUserStreamSubscribeRequestJson()
 {
 
-    auto ts = getServerTimestamp();
+    auto timestamp = getServerTimestamp();
+    string payload = "apiKey=" + apiKey + "&timestamp=" + to_string(timestamp);
+    string signature = hmac_sha256(secretKey, payload);
 
-    string payload = "apiKey=" + apiKey + "&timestamp=" + to_string(ts);
+    const UserStreamSubscribeRequestDto request{"user_stream_subscribe_1",
+                                                "userDataStream.subscribe.signature",
+                                                {apiKey, timestamp, move(signature)}};
 
-    string sig = hmac_sha256(secretKey, payload);
-
-    json::object params;
-    params["apiKey"] = apiKey;
-    params["timestamp"] = ts;
-    params["signature"] = move(sig);
-
-    json::object req;
-    req["id"] = "user_stream_subscribe_1";
-    req["method"] = "userDataStream.subscribe.signature";
-    req["params"] = move(params);
-
-    return json::serialize(req);
+    return json::serialize(json::value_from(request));
 }
 
 void BinanceDealService::updateBalanceCache(const string &asset, Decimal free, Decimal locked)
@@ -370,12 +363,7 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
     const OutboundAccountPositionEventDto &event = message.event.value();
     throwIf(!event.e.has_value(), "User stream message missing or invalid 'e' (event type) field");
 
-    if (event.e.value() != "outboundAccountPosition")
-    {
-        return;
-    }
-
-    if (!event.B.has_value())
+    if (event.e.value() != "outboundAccountPosition" || !event.B.has_value())
     {
         return;
     }
@@ -834,12 +822,7 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance getOrder: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     return createOrderInfo(json::value_to<OrderDto>(jsonValue));
 }
@@ -866,10 +849,7 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance getSymbolInfo: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+    json::value jsonValue = parseAndValidate(response);
 
     ExchangeInfoDto exchangeInfo = json::value_to<ExchangeInfoDto>(jsonValue);
 
@@ -1113,12 +1093,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
 
     const string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Binance getBalancesRest: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Binance getBalancesRest: Response is not a JSON object");
-
-    throwIf(hasErrorResponse(jsonValue), getErrorMessage(json::value_to<ErrorDto>(jsonValue)));
+    json::value jsonValue = parseAndValidate(response);
 
     const AccountDto account = json::value_to<AccountDto>(jsonValue);
 

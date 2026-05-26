@@ -138,6 +138,55 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.5"));
     EXPECT_EQ(info.price, DecimalConverter::parseDecimal("45000.0"));
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
+
+    const std::string &body = MockNetwork::instance().lastRequest().body;
+    EXPECT_NE(body.find(R"("price":)"), std::string::npos);
+    EXPECT_NE(body.find(R"("timeInForce":"GTC")"), std::string::npos);
+    EXPECT_EQ(body.find("null"), std::string::npos);
+    EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
+}
+
+TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "MARKET_ID"
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "50000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::MARKET;
+    req.quantity = DecimalConverter::parseDecimal("0.001");
+    req.clientOrderId = "";
+    req.triggerPrice = "";
+    req.orderFilter = "";
+    req.marketUnit = "";
+
+    OrderInfo info = service.placeOrder(req);
+
+    EXPECT_EQ(info.orderId, "MARKET_ID");
+
+    const std::string &body = MockNetwork::instance().lastRequest().body;
+    EXPECT_EQ(body.find("null"), std::string::npos);
+    EXPECT_EQ(body.find("price"), std::string::npos);
+    EXPECT_EQ(body.find("timeInForce"), std::string::npos);
+    EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
+    EXPECT_EQ(body.find("triggerPrice"), std::string::npos);
+    EXPECT_EQ(body.find("orderFilter"), std::string::npos);
+    EXPECT_EQ(body.find("marketUnit"), std::string::npos);
 }
 
 TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
@@ -181,6 +230,11 @@ TEST_F(BybitDealServiceTest, CancelOrder_Success)
     EXPECT_EQ(info.symbol, "BTCUSDT");
     EXPECT_EQ(info.orderId, "132141");
     EXPECT_EQ(info.status, "Cancelled");
+
+    const std::string &body = MockNetwork::instance().lastRequest().body;
+    EXPECT_NE(body.find(R"("orderId":"132141")"), std::string::npos);
+    EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
+    EXPECT_EQ(body.find("null"), std::string::npos);
 }
 
 TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
@@ -666,6 +720,7 @@ TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
     EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"));
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "POST");
     EXPECT_NE(MockNetwork::instance().lastRequest().body.find(R"("symbol":"BTCUSDT")"), std::string::npos);
+    EXPECT_EQ(MockNetwork::instance().lastRequest().body.find("null"), std::string::npos);
 
     EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"), std::runtime_error);
 }
