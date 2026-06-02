@@ -21,6 +21,7 @@ namespace ws = boost::beast::websocket;
 using msec = std::chrono::milliseconds::rep;
 using tcp = net::ip::tcp;
 using Decimal = boost::decimal::decimal128_t;
+using WebsocketStream = ws::stream<beast::ssl_stream<beast::tcp_stream>>;
 
 namespace json = boost::json;
 

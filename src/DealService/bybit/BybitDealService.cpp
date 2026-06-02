@@ -2,6 +2,7 @@
 #include "EnumStringConverter.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
+#include "domain/AuthRequestDto.hpp"
 #include "domain/AuthResponseDto.hpp"
 #include "domain/CancelAllOpenOrdersRequestDto.hpp"
 #include "domain/CancelOrderRequestDto.hpp"
@@ -11,6 +12,7 @@
 #include "domain/RealtimeOrderResponseDto.hpp"
 #include "domain/ResponseDto.hpp"
 #include "domain/ServerTimeResponseDto.hpp"
+#include "domain/SubscribeRequestDto.hpp"
 #include "domain/TickerResponseDto.hpp"
 #include "domain/WalletBalanceResponseDto.hpp"
 #include <cstdlib>
@@ -260,7 +262,7 @@ optional<string> BybitDealService::validateQuoteQuantity(Decimal quantity, const
     return nullopt;
 }
 
-shared_ptr<BybitDealService::WebsocketStream> BybitDealService::prepareUserWebsocketStream()
+shared_ptr<WebsocketStream> BybitDealService::prepareUserWebsocketStream()
 {
     const string wsPort = "443";
     const string wsTarget = "/v5/private";
@@ -295,10 +297,8 @@ shared_ptr<BybitDealService::WebsocketStream> BybitDealService::prepareUserWebso
     const string payload = "GET/realtime" + to_string(expires);
     const string sig = hmac_sha256(secretKey, payload);
 
-    json::object auth;
-    auth["op"] = "auth";
-    auth["args"] = json::array{apiKey, expires, sig};
-    sharedWebsocketStream->write(net::buffer(json::serialize(auth)));
+    const AuthRequestDto authRequest{"auth", apiKey, expires, sig};
+    sharedWebsocketStream->write(net::buffer(json::serialize(json::value_from(authRequest))));
 
     {
         beast::flat_buffer buffer;
@@ -319,10 +319,8 @@ shared_ptr<BybitDealService::WebsocketStream> BybitDealService::prepareUserWebso
         }
     }
 
-    json::object sub;
-    sub["op"] = "subscribe";
-    sub["args"] = json::array{"wallet", "order"};
-    sharedWebsocketStream->write(net::buffer(json::serialize(sub)));
+    const SubscribeRequestDto subscribeRequest{"subscribe", {"wallet", "order"}};
+    sharedWebsocketStream->write(net::buffer(json::serialize(json::value_from(subscribeRequest))));
     {
         beast::flat_buffer buffer;
         sharedWebsocketStream->read(buffer);
@@ -359,19 +357,19 @@ void BybitDealService::prepareUserStreamThread()
 
                     websocketStreamCopy->read(readBuffer, errorCode);
 
-                    if (errorCode)
+                    if (!errorCode)
+                    {
+                        const string message = beast::buffers_to_string(readBuffer.data());
+                        handleUserStreamMessage(message);
+                    }
+                    else
                     {
                         if (!userStream || errorCode == net::error::operation_aborted || errorCode == net::error::eof ||
                             errorCode == ssl::error::stream_truncated || errorCode == ws::error::closed)
                         {
                             break;
                         }
-
-                        continue;
                     }
-
-                    const string message = beast::buffers_to_string(readBuffer.data());
-                    handleUserStreamMessage(message);
                 }
             }
             catch (const exception &e)

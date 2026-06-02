@@ -2,10 +2,13 @@
 #define PLACE_OCO_REQUEST_H
 
 #include "OrderOperation.hpp"
-#include "common/type_aliasing.hpp"
+
+#include <boost/decimal.hpp>
 
 #include <optional>
 #include <string>
+
+using Decimal = boost::decimal::decimal128_t;
 
 struct PlaceOcoRequest
 {

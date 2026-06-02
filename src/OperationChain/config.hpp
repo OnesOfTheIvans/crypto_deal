@@ -4,11 +4,14 @@
 #include "ExchangerType.hpp"
 #include "common/domain/OrderOperation.hpp"
 #include "common/domain/OrderType.hpp"
-#include "common/type_aliasing.hpp"
+
+#include <boost/decimal.hpp>
 
 #include <optional>
 #include <string>
 #include <variant>
+
+using Decimal = boost::decimal::decimal128_t;
 
 struct BaseConfig
 {

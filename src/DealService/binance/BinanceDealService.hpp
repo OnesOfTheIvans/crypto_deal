@@ -34,6 +34,7 @@
 
 namespace json = boost::json;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
+using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
 
 class BinanceDealService : public DealService
 {
@@ -44,7 +45,6 @@ class BinanceDealService : public DealService
     std::map<std::string, SymbolInfo> symbolInfoCache;
     std::mutex symbolInfoMutex;
 
-    using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
     std::mutex userWebsocketMutex;
     std::shared_ptr<WebsocketStream> userWebsocketStream;
 

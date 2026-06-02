@@ -412,7 +412,7 @@ void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &w
     cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
 }
 
-shared_ptr<BinanceDealService::WebsocketStream> BinanceDealService::prepareUserWebsocketStream()
+shared_ptr<WebsocketStream> BinanceDealService::prepareUserWebsocketStream()
 {
     const string ws_port = "443";
     const string ws_target = "/ws-api/v3";
