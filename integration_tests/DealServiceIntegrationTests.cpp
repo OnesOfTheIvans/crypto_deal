@@ -228,7 +228,7 @@ namespace {
 
             try
             {
-                svc->cancelAllOpenOrders(symbol, category);
+                svc->cancelAllOpenOrders(symbol, OrderCategory::SPOT);
             }
             catch (const exception &e)
             {
@@ -279,7 +279,7 @@ namespace {
         {
             SCOPED_TRACE("Step: getSymbolInfo");
             SymbolInfo info;
-            ASSERT_NO_THROW(info = svc->getSymbolInfo(symbol, category));
+            ASSERT_NO_THROW(info = svc->getSymbolInfo(symbol, OrderCategory::SPOT));
             EXPECT_EQ(info.symbol, symbol);
             EXPECT_GT(info.tickSize, Decimal{0});
             EXPECT_GT(info.stepSize, Decimal{0});
@@ -325,7 +325,7 @@ namespace {
             SCOPED_TRACE("Step: place/get/cancel limit");
             PlaceOrderRequest req;
             req.symbol = symbol;
-            req.category = category;
+            req.category = OrderCategory::SPOT;
             req.side = OrderOperation::BUY;
             req.type = OrderType::LIMIT;
             req.quantity = DecimalConverter::parseDecimal("0.0002");
@@ -340,7 +340,7 @@ namespace {
 
             OrderQuery q;
             q.symbol = symbol;
-            q.category = category;
+            q.category = OrderCategory::SPOT;
             if (!placed.orderId.empty())
             {
                 q.orderId = placed.orderId;
@@ -427,7 +427,7 @@ namespace {
             SCOPED_TRACE("Step: cancelOco");
             OrderListQuery q;
             q.symbol = symbol;
-            q.category = category;
+            q.category = OrderCategory::SPOT;
             q.listClientOrderId = placed.listClientOrderId;
 
             try

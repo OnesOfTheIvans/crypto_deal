@@ -78,12 +78,12 @@ void BinanceDealService::setRequestParameters(boost::urls::url &url,
     parameterMap["newOrderRespType"] = "RESULT";
     parameterMap["quantity"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
     parameterMap["recvWindow"] = to_string(recvWindow);
-    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side.value());
+    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side);
     parameterMap["symbol"] = request.symbol;
     parameterMap["timestamp"] = to_string(getServerTimestamp());
-    parameterMap["type"] = EnumStringConverter<OrderType>::toString(request.type.value());
+    parameterMap["type"] = EnumStringConverter<OrderType>::toString(request.type);
 
-    if (request.type.value() == OrderType::LIMIT)
+    if (request.type == OrderType::LIMIT)
     {
         parameterMap["price"] = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
         parameterMap["timeInForce"] = request.timeInForce.value();
@@ -116,7 +116,6 @@ void BinanceDealService::setRequestParameters(boost::urls::url &url, const Order
 void BinanceDealService::setRequestParameters(boost::urls::url &url, const PlaceOcoRequest &request)
 {
     throwIf(request.symbol.empty(), "Binance placeOco: symbol cannot be empty");
-    throwIf(!request.side.has_value(), "Binance placeOco: side is required");
     throwIf(request.quantity <= 0, "Binance placeOco: quantity must be > 0");
     throwIf(request.price <= 0, "Binance placeOco: price must be > 0");
     throwIf(request.stopPrice <= 0, "Binance placeOco: stopPrice must be > 0");
@@ -139,7 +138,7 @@ void BinanceDealService::setRequestParameters(boost::urls::url &url, const Place
     parameterMap["belowType"] = "STOP_LOSS_LIMIT";
     parameterMap["quantity"] = DecimalConverter::formatByStep(request.quantity, info.stepSize);
     parameterMap["recvWindow"] = to_string(recvWindow);
-    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side.value());
+    parameterMap["side"] = EnumStringConverter<OrderOperation>::toString(request.side);
     parameterMap["symbol"] = request.symbol;
     parameterMap["timestamp"] = to_string(getServerTimestamp());
     setParameterIfPresent(parameterMap, "listClientOrderId", request.listClientOrderId);
@@ -667,10 +666,8 @@ OrderInfo BinanceDealService::sellCrypto(const string &baseAsset, const string &
 void BinanceDealService::validatePlaceOrderRequest(const PlaceOrderRequest &request) const
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.side.has_value(), "Side is required");
-    throwIf(!request.type.has_value(), "Type is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
-    if (request.type.value() == OrderType::LIMIT)
+    if (request.type == OrderType::LIMIT)
     {
         throwIf(!request.price.has_value() || request.price.value() <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
@@ -683,7 +680,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     validatePlaceOrderRequest(request);
 
     SymbolInfo info = getSymbolInfo(request.symbol);
-    const Decimal validationPrice = request.type.value() == OrderType::LIMIT && request.price.has_value()
+    const Decimal validationPrice = request.type == OrderType::LIMIT && request.price.has_value()
                                         ? request.price.value()
                                         : getTickerPrice(request.symbol);
     optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
@@ -741,7 +738,7 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
     return createOrderInfo(json::value_to<OrderDto>(jsonValue));
 }
 
-SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string &category)
+SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, OrderCategory)
 {
     throwIf(symbol.empty(), "Symbol cannot be empty");
 
@@ -777,9 +774,9 @@ SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, const string 
     return info;
 }
 
-Decimal BinanceDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, const string &category)
+Decimal BinanceDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory)
 {
-    const SymbolInfo info = getSymbolInfo(symbol, category);
+    const SymbolInfo info = getSymbolInfo(symbol);
     return DecimalConverter::ceilToStep(quantity, info.stepSize);
 }
 
@@ -974,7 +971,7 @@ flat_map<string, AssetBalance> BinanceDealService::getBalances() const
     return balances;
 }
 
-void BinanceDealService::cancelAllOpenOrders(const string &symbol, const string &)
+void BinanceDealService::cancelAllOpenOrders(const string &symbol, OrderCategory)
 {
     throwIf(symbol.empty(), "Binance cancelAllOpenOrders: symbol cannot be empty");
 

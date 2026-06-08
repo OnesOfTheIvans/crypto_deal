@@ -94,16 +94,16 @@ class DealService
 
     virtual OrderInfo getOrder(const OrderQuery &request) = 0;
 
-    virtual SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") = 0;
+    virtual SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) = 0;
 
     virtual Decimal
-    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") = 0;
+    ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory category = OrderCategory::SPOT) = 0;
 
     virtual OcoInfo placeOco(const PlaceOcoRequest &request) = 0;
 
     virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
 
-    virtual void cancelAllOpenOrders(const std::string &symbol, const std::string &category) = 0;
+    virtual void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalancesRest() = 0;
 

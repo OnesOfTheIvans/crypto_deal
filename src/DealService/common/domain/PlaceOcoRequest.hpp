@@ -12,8 +12,8 @@ using Decimal = boost::decimal::decimal128_t;
 
 struct PlaceOcoRequest
 {
-    std::string symbol;                 // "WLDUSDT"
-    std::optional<OrderOperation> side; // BUY or SELL
+    std::string symbol;  // "WLDUSDT"
+    OrderOperation side; // BUY or SELL
     Decimal quantity{};
 
     Decimal price{};     // LIMIT leg price

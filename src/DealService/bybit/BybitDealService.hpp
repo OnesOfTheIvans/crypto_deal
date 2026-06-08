@@ -3,7 +3,6 @@
 
 #include "DealService.hpp"
 #include "ExchangerType.hpp"
-#include "OrderCategory.hpp"
 #include "common/domain/OcoInfo.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderOperation.hpp"
@@ -13,6 +12,7 @@
 #include "domain/CoinBalanceDto.hpp"
 #include "domain/InstrumentDto.hpp"
 #include "domain/OrderDto.hpp"
+#include "domain/OrderResponseDto.hpp"
 #include "domain/OrderResultDto.hpp"
 #include "domain/StreamMessageDto.hpp"
 #include "domain/StreamOrderMessageDto.hpp"
@@ -80,25 +80,13 @@ class BybitDealService : public DealService
 
     void updateBalanceCache(const std::string &asset, Decimal free, Decimal locked);
 
-    std::string createBody(const std::string &baseAsset,
-                           const std::string &quoteAsset,
-                           const bybit::OrderCategory &category,
-                           const OrderOperation &operation,
-                           const OrderType &type,
-                           Decimal quantity,
-                           Decimal stepSize = Decimal{});
-
-    OrderInfo createOrderInfo(const bybit::OrderResultDto &result,
-                              const PlaceOrderRequest &request,
-                              const std::string &side,
-                              const std::string &type,
-                              msec timestamp);
+    OrderInfo createOrderInfo(const bybit::OrderResultDto &result, const PlaceOrderRequest &request, msec timestamp);
 
     OrderInfo createOrderInfo(const bybit::OrderResultDto &result, const OrderQuery &request, msec timestamp);
 
     OrderInfo createDetailedOrderInfo(const bybit::OrderDto &order,
                                       const OrderQuery &request,
-                                      const std::string &category,
+                                      OrderCategory category,
                                       msec timestamp);
 
     SymbolInfo createSymbolInfo(const bybit::InstrumentDto &instrument, const std::string &symbol);
@@ -108,19 +96,27 @@ class BybitDealService : public DealService
 
     std::string getSignature(const std::string &query, const msec &timestamp);
 
-    std::string sendOrder(const std::string &query, const flat_map<std::string, std::string> &headers);
-
     std::optional<std::string> isResponseStatusOk(const std::string &response);
+
+    json::value parseAndValidate(const std::string &response) const;
+
+    void checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info);
+
+    std::string createPlaceOrderBody(const PlaceOrderRequest &request, const SymbolInfo &info) const;
 
     void setRequestParameters(boost::urls::url &url,
                               const std::string &accountType,
                               const std::optional<std::string> &coinFilter);
 
-    void setRequestParameters(boost::urls::url &url, const std::string &symbol, const std::string &category);
+    void setRequestParameters(boost::urls::url &url, const std::string &symbol, OrderCategory category);
 
-    void setRequestParameters(boost::urls::url &url, const OrderQuery &request, const std::string &category);
+    void setRequestParameters(boost::urls::url &url, const OrderQuery &request, OrderCategory category);
 
     void handleUserStreamMessage(const std::string &msg);
+
+    void authenticateUserWebsocketStream(WebsocketStream &websocketStream);
+
+    void subscribeUserWebsocketStream(WebsocketStream &websocketStream);
 
     void prepareUserStreamThread();
 
@@ -147,10 +143,9 @@ class BybitDealService : public DealService
 
     bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
 
-    std::optional<std::string>
-    validateBaseQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const;
+    std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const;
 
-    std::optional<std::string> validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const;
+    std::optional<std::string> validateNotional(Decimal notional, const SymbolInfo &symbolInfo) const;
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
@@ -177,10 +172,11 @@ class BybitDealService : public DealService
 
     OrderInfo getOrder(const OrderQuery &request) override;
 
-    SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") override;
+    SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) override;
 
-    Decimal
-    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") override;
+    Decimal ceilQuantityToStep(const std::string &symbol,
+                               Decimal quantity,
+                               OrderCategory category = OrderCategory::SPOT) override;
 
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
@@ -198,7 +194,7 @@ class BybitDealService : public DealService
 
     std::string getUserStreamLastError() const override;
 
-    void cancelAllOpenOrders(const std::string &symbol, const std::string &category) override;
+    void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
 };

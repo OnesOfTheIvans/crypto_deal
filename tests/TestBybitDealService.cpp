@@ -189,6 +189,80 @@ TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
     EXPECT_EQ(body.find("marketUnit"), std::string::npos);
 }
 
+TEST_F(BybitDealServiceTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "BUY_ID"
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "50000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.001"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "BUY_ID");
+    EXPECT_EQ(info.status, "New");
+    EXPECT_EQ(info.side, "Buy");
+    EXPECT_EQ(info.type, "Market");
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.001"));
+    EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
+
+    const std::string &body = MockNetwork::instance().lastRequest().body;
+    EXPECT_NE(body.find(R"("side":"Buy")"), std::string::npos);
+    EXPECT_NE(body.find(R"("orderType":"Market")"), std::string::npos);
+    EXPECT_NE(body.find(R"("marketUnit":"baseCoin")"), std::string::npos);
+    EXPECT_EQ(body.find("price"), std::string::npos);
+    EXPECT_EQ(body.find("timeInForce"), std::string::npos);
+}
+
+TEST_F(BybitDealServiceTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "orderId": "SELL_ID"
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "50000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.001"));
+
+    EXPECT_EQ(info.symbol, "BTCUSDT");
+    EXPECT_EQ(info.orderId, "SELL_ID");
+    EXPECT_EQ(info.status, "New");
+    EXPECT_EQ(info.side, "Sell");
+    EXPECT_EQ(info.type, "Market");
+    EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.001"));
+    EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
+
+    const std::string &body = MockNetwork::instance().lastRequest().body;
+    EXPECT_NE(body.find(R"("side":"Sell")"), std::string::npos);
+    EXPECT_NE(body.find(R"("orderType":"Market")"), std::string::npos);
+    EXPECT_EQ(body.find("marketUnit"), std::string::npos);
+    EXPECT_EQ(body.find("price"), std::string::npos);
+    EXPECT_EQ(body.find("timeInForce"), std::string::npos);
+}
+
 TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
 {
     auto service = createService();
@@ -717,12 +791,12 @@ TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
         "retMsg": "Params Error"
     })");
 
-    EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"));
+    EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", OrderCategory::SPOT));
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "POST");
     EXPECT_NE(MockNetwork::instance().lastRequest().body.find(R"("symbol":"BTCUSDT")"), std::string::npos);
     EXPECT_EQ(MockNetwork::instance().lastRequest().body.find("null"), std::string::npos);
 
-    EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"), std::runtime_error);
+    EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", OrderCategory::SPOT), std::runtime_error);
 }
 
 TEST_F(BybitDealServiceTest, CancelOco_Success)

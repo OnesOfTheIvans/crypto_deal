@@ -28,8 +28,8 @@ struct SendToConfig
 struct PlaceOrderConfig
 {
     std::string outAsset;
-    std::optional<OrderOperation> side;
-    std::optional<OrderType> type;
+    OrderOperation side;
+    OrderType type;
     Decimal price{};
     std::optional<std::string> timeInForce;
     std::optional<std::string> triggerPrice;
@@ -40,7 +40,7 @@ struct PlaceOrderConfig
 struct PlaceOcoConfig
 {
     std::string outAsset;
-    std::optional<OrderOperation> side;
+    OrderOperation side;
     Decimal price{};
     Decimal stopPrice{};
     std::optional<Decimal> stopLimitPrice;

@@ -147,10 +147,10 @@ class BinanceDealService : public DealService
 
     OrderInfo getOrder(const OrderQuery &request) override;
 
-    SymbolInfo getSymbolInfo(const std::string &symbol, const std::string &category = "spot") override;
+    SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory = OrderCategory::SPOT) override;
 
     Decimal
-    ceilQuantityToStep(const std::string &symbol, Decimal quantity, const std::string &category = "spot") override;
+    ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory = OrderCategory::SPOT) override;
 
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
@@ -162,7 +162,7 @@ class BinanceDealService : public DealService
 
     std::string getUserStreamLastError() const override;
 
-    void cancelAllOpenOrders(const std::string &symbol, const std::string &) override;
+    void cancelAllOpenOrders(const std::string &symbol, OrderCategory) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
 };

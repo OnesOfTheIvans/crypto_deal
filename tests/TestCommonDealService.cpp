@@ -53,11 +53,11 @@ namespace {
         {
             return {};
         }
-        SymbolInfo getSymbolInfo(const std::string &, const std::string & = "spot") override
+        SymbolInfo getSymbolInfo(const std::string &, OrderCategory = OrderCategory::SPOT) override
         {
             return {};
         }
-        Decimal ceilQuantityToStep(const std::string &, Decimal quantity, const std::string & = "spot") override
+        Decimal ceilQuantityToStep(const std::string &, Decimal quantity, OrderCategory = OrderCategory::SPOT) override
         {
             return quantity;
         }
@@ -69,7 +69,7 @@ namespace {
         {
             return {};
         }
-        void cancelAllOpenOrders(const std::string &, const std::string &) override {}
+        void cancelAllOpenOrders(const std::string &, OrderCategory) override {}
         flat_map<std::string, AssetBalance> getBalancesRest() override
         {
             return {};

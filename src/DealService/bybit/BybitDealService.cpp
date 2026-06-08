@@ -204,8 +204,7 @@ bool BybitDealService::isQuantityStepValid(Decimal quantity, Decimal stepSize) c
     return units == boost::decimal::floor(units);
 }
 
-optional<string>
-BybitDealService::validateBaseQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const
+optional<string> BybitDealService::validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const
 {
     if (!isQuantityStepValid(quantity, symbolInfo.stepSize))
     {
@@ -231,35 +230,66 @@ BybitDealService::validateBaseQuantity(Decimal quantity, Decimal price, const Sy
     if (price > 0)
     {
         const Decimal notional = quantity * price;
-        if (symbolInfo.minNotional > 0 && notional < symbolInfo.minNotional)
-        {
-            return "notional " + DecimalConverter::formatDecimal(notional) + " is below minOrderAmt " +
-                   DecimalConverter::formatDecimal(symbolInfo.minNotional);
-        }
-        if (symbolInfo.maxNotional > 0 && notional > symbolInfo.maxNotional)
-        {
-            return "notional " + DecimalConverter::formatDecimal(notional) + " is above maxOrderAmt " +
-                   DecimalConverter::formatDecimal(symbolInfo.maxNotional);
-        }
+        return validateNotional(notional, symbolInfo);
     }
 
     return nullopt;
 }
 
-optional<string> BybitDealService::validateQuoteQuantity(Decimal quantity, const SymbolInfo &symbolInfo) const
+optional<string> BybitDealService::validateNotional(Decimal notional, const SymbolInfo &symbolInfo) const
 {
-    if (symbolInfo.minNotional > 0 && quantity < symbolInfo.minNotional)
+    if (symbolInfo.minNotional > 0 && notional < symbolInfo.minNotional)
     {
-        return "quote quantity " + DecimalConverter::formatDecimal(quantity) + " is below minOrderAmt " +
+        return DecimalConverter::formatDecimal(notional) + " is below minOrderAmt " +
                DecimalConverter::formatDecimal(symbolInfo.minNotional);
     }
-    if (symbolInfo.maxNotional > 0 && quantity > symbolInfo.maxNotional)
+    if (symbolInfo.maxNotional > 0 && notional > symbolInfo.maxNotional)
     {
-        return "quote quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxOrderAmt " +
+        return DecimalConverter::formatDecimal(notional) + " is above maxOrderAmt " +
                DecimalConverter::formatDecimal(symbolInfo.maxNotional);
     }
 
     return nullopt;
+}
+
+void BybitDealService::authenticateUserWebsocketStream(WebsocketStream &websocketStream)
+{
+    const long long expires = getServerTimestamp() + 5000;
+    const string payload = "GET/realtime" + to_string(expires);
+    const string sig = hmac_sha256(secretKey, payload);
+
+    const AuthRequestDto authRequest{"auth", apiKey, expires, sig};
+    const string auth = json::serialize(json::value_from(authRequest));
+    websocketStream.write(net::buffer(auth));
+
+    beast::flat_buffer buffer;
+    websocketStream.read(buffer);
+    string msg = beast::buffers_to_string(buffer.data());
+
+    beast::error_code ec;
+    json::value val = json::parse(msg, ec);
+    if (!ec && val.is_object())
+    {
+        const AuthResponseDto authResponse = json::value_to<AuthResponseDto>(val);
+        if (authResponse.op.has_value() && authResponse.op.value() == "auth")
+        {
+            throwIf(!authResponse.success.has_value() || !authResponse.success.value(),
+                    "Bybit stream: auth failed: " + msg);
+            cout << "Bybit stream authenticated successfully." << endl;
+        }
+    }
+}
+
+void BybitDealService::subscribeUserWebsocketStream(WebsocketStream &websocketStream)
+{
+    const SubscribeRequestDto subscribeRequest{"subscribe", {"wallet", "order"}};
+    const string sub = json::serialize(json::value_from(subscribeRequest));
+    websocketStream.write(net::buffer(sub));
+
+    beast::flat_buffer buffer;
+    websocketStream.read(buffer);
+    string msg = beast::buffers_to_string(buffer.data());
+    cout << "Bybit stream subscription response: " << msg << endl;
 }
 
 shared_ptr<WebsocketStream> BybitDealService::prepareUserWebsocketStream()
@@ -293,40 +323,8 @@ shared_ptr<WebsocketStream> BybitDealService::prepareUserWebsocketStream()
 
     setStreamStatus(StreamStatus::CONNECTING);
 
-    const long long expires = getServerTimestamp() + 5000;
-    const string payload = "GET/realtime" + to_string(expires);
-    const string sig = hmac_sha256(secretKey, payload);
-
-    const AuthRequestDto authRequest{"auth", apiKey, expires, sig};
-    sharedWebsocketStream->write(net::buffer(json::serialize(json::value_from(authRequest))));
-
-    {
-        beast::flat_buffer buffer;
-        sharedWebsocketStream->read(buffer);
-        string msg = beast::buffers_to_string(buffer.data());
-
-        beast::error_code ec;
-        json::value val = json::parse(msg, ec);
-        if (!ec && val.is_object())
-        {
-            const AuthResponseDto authResponse = json::value_to<AuthResponseDto>(val);
-            if (authResponse.op.has_value() && authResponse.op.value() == "auth")
-            {
-                throwIf(!authResponse.success.has_value() || !authResponse.success.value(),
-                        "Bybit stream: auth failed: " + msg);
-                cout << "Bybit stream authenticated successfully." << endl;
-            }
-        }
-    }
-
-    const SubscribeRequestDto subscribeRequest{"subscribe", {"wallet", "order"}};
-    sharedWebsocketStream->write(net::buffer(json::serialize(json::value_from(subscribeRequest))));
-    {
-        beast::flat_buffer buffer;
-        sharedWebsocketStream->read(buffer);
-        string msg = beast::buffers_to_string(buffer.data());
-        cout << "Bybit stream subscription response: " << msg << endl;
-    }
+    authenticateUserWebsocketStream(*sharedWebsocketStream);
+    subscribeUserWebsocketStream(*sharedWebsocketStream);
 
     return sharedWebsocketStream;
 }
@@ -413,30 +411,6 @@ void BybitDealService::startUserStream()
     setStreamStatus(StreamStatus::CONNECTING);
 
     prepareUserStreamThread();
-}
-
-string BybitDealService::createBody(const string &baseAsset,
-                                    const string &quoteAsset,
-                                    const OrderCategory &category,
-                                    const OrderOperation &operation,
-                                    const OrderType &type,
-                                    Decimal quantity,
-                                    Decimal stepSize)
-{
-    const string qtyStr = DecimalConverter::formatByStep(quantity, stepSize);
-    CreateOrderRequestDto request{EnumStringConverter<OrderCategory>::toString(category),
-                                  baseAsset + quoteAsset,
-                                  EnumStringConverter<OrderOperation>::toString(operation),
-                                  EnumStringConverter<OrderType>::toString(type),
-                                  qtyStr};
-
-    // IMPORTANT: For spot MARKET BUY, force qty to be interpreted as baseCoin amount
-    if (type == OrderType::MARKET && operation == OrderOperation::BUY)
-    {
-        request.marketUnit = "baseCoin";
-    }
-
-    return json::serialize(json::value_from(request));
 }
 
 flat_map<string, string>
@@ -551,6 +525,16 @@ optional<string> BybitDealService::isResponseStatusOk(const string &response)
     return nullopt;
 }
 
+json::value BybitDealService::parseAndValidate(const string &response) const
+{
+    boost::system::error_code errorCode;
+    json::value jsonValue = json::parse(response, errorCode);
+    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
+    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+
+    return jsonValue;
+}
+
 void BybitDealService::setRequestParameters(boost::urls::url &url,
                                             const string &accountType,
                                             const optional<string> &coinFilter)
@@ -564,47 +548,29 @@ void BybitDealService::setRequestParameters(boost::urls::url &url,
     setUrlParameters(url, parameterMap);
 }
 
-void BybitDealService::setRequestParameters(boost::urls::url &url, const string &symbol, const string &category)
+void BybitDealService::setRequestParameters(boost::urls::url &url, const string &symbol, OrderCategory category)
 {
     map<string, string> parameterMap;
-    parameterMap["category"] = category;
+    parameterMap["category"] = EnumStringConverter<OrderCategory>::toString(category);
     parameterMap["symbol"] = symbol;
     setUrlParameters(url, parameterMap);
 }
 
-void BybitDealService::setRequestParameters(boost::urls::url &url, const OrderQuery &request, const string &category)
+void BybitDealService::setRequestParameters(boost::urls::url &url, const OrderQuery &request, OrderCategory category)
 {
     map<string, string> parameterMap;
-    parameterMap["category"] = category;
+    parameterMap["category"] = EnumStringConverter<OrderCategory>::toString(category);
     parameterMap["symbol"] = request.symbol;
     setParameterIfPresent(parameterMap, "orderId", request.orderId);
     setParameterIfPresent(parameterMap, "orderLinkId", request.clientOrderId);
     setUrlParameters(url, parameterMap);
 }
 
-string BybitDealService::sendOrder(const string &body, const flat_map<string, string> &headers)
-{
-    cout << "Sending order..." << endl;
-    boost::urls::url requestUrl;
-    requestUrl.set_path("/v5/order/create");
-    string target = getTarget(requestUrl);
-    HttpRequestContext context(ioc, ctx, host, target);
-    context.prepareRequest(http::verb::post);
-    context.setRequestHeaders(headers);
-    context.setRequestBody(body);
-    string response = httpsPost(context);
-    cout << "Order response: " << response << endl;
-
-    optional<string> errorOutput = isResponseStatusOk(response);
-    throwIf(errorOutput.has_value(), "Order failed: " + errorOutput.value_or(""));
-    return response;
-}
-
 Decimal BybitDealService::getTickerPrice(const string &symbol)
 {
     boost::urls::url requestUrl;
     requestUrl.set_path("/v5/market/tickers");
-    setRequestParameters(requestUrl, symbol, string("spot"));
+    setRequestParameters(requestUrl, symbol, OrderCategory::SPOT);
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
@@ -626,147 +592,32 @@ Decimal BybitDealService::getTickerPrice(const string &symbol)
 
 OrderInfo BybitDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
-    const string symbol = baseAsset + quoteAsset;
+    PlaceOrderRequest request;
+    request.symbol = baseAsset + quoteAsset;
+    request.side = OrderOperation::BUY;
+    request.type = OrderType::MARKET;
+    request.quantity = quantity;
+    request.marketUnit = "baseCoin";
 
-    SymbolInfo symbolInfo = getSymbolInfo(symbol);
-    const Decimal lastPrice = getTickerPrice(symbol);
-    optional<string> quantityError = validateBaseQuantity(quantity, lastPrice, symbolInfo);
-    throwIf(quantityError.has_value(), "Bybit buyCrypto: " + quantityError.value_or(""));
-
-    try
-    {
-        const auto quoteBalance = getBalance(quoteAsset);
-        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
-        const Decimal requiredQuoteAmount = quantity * lastPrice;
-        throwIf(quoteFree < requiredQuoteAmount,
-                "Bybit BUY aborted: insufficient balance: need " +
-                    DecimalConverter::formatDecimal(requiredQuoteAmount) + " " + quoteAsset + ", have " +
-                    DecimalConverter::formatDecimal(quoteFree));
-    }
-    catch (const exception &exception)
-    {
-        throw runtime_error(string("Bybit buyCrypto: ") + exception.what());
-    }
-
-    cout << "Bybit Requested Qty: " << DecimalConverter::formatByStep(quantity, symbolInfo.stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity)
-         << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
-         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
-         << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
-
-    const msec timestamp = getServerTimestamp();
-    const string body = createBody(baseAsset,
-                                   quoteAsset,
-                                   OrderCategory::SPOT,
-                                   OrderOperation::BUY,
-                                   OrderType::MARKET,
-                                   quantity,
-                                   symbolInfo.stepSize);
-
-    const string signature = getSignature(body, timestamp);
-    const flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
-
-    string response = sendOrder(body, headers);
-
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse buyCrypto response");
-
-    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
-    throwIf(!responseDto.result.has_value(), "Missing result in buyCrypto response");
-
-    OrderInfo info;
-    info.symbol = symbol;
-    info.category = "spot";
-    info.side = "Buy";
-    info.type = "Market";
-    info.status = "New";
-    info.origQty = quantity;
-    info.leavesQty = quantity;
-
-    info.orderId = responseDto.result.value().orderId.value_or("");
-    info.clientOrderId = responseDto.result.value().orderLinkId.value_or("");
-
-    info.createdTimeMs = timestamp;
-    info.updatedTimeMs = timestamp;
-
-    return info;
+    return placeOrder(request);
 }
 
 OrderInfo BybitDealService::sellCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
 {
-    const string symbol = baseAsset + quoteAsset;
+    PlaceOrderRequest request;
+    request.symbol = baseAsset + quoteAsset;
+    request.side = OrderOperation::SELL;
+    request.type = OrderType::MARKET;
+    request.quantity = quantity;
 
-    SymbolInfo symbolInfo = getSymbolInfo(symbol);
-    const Decimal lastPrice = getTickerPrice(symbol);
-    optional<string> quantityError = validateBaseQuantity(quantity, lastPrice, symbolInfo);
-    throwIf(quantityError.has_value(), "Bybit sellCrypto: " + quantityError.value_or(""));
-
-    try
-    {
-        const auto baseBalance = getBalance(baseAsset);
-        const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
-        throwIf(baseFree < quantity,
-                "Bybit SELL aborted: insufficient balance: need " + DecimalConverter::formatDecimal(quantity) + " " +
-                    baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
-    }
-    catch (const exception &exception)
-    {
-        throw runtime_error(string("Bybit sellCrypto: ") + exception.what());
-    }
-
-    cout << "Bybit Requested Qty: " << DecimalConverter::formatByStep(quantity, symbolInfo.stepSize)
-         << " (Req: " << DecimalConverter::formatDecimal(quantity)
-         << ", Price: " << DecimalConverter::formatDecimal(lastPrice)
-         << ", MinOrderAmt: " << DecimalConverter::formatDecimal(symbolInfo.minNotional)
-         << ", Step: " << DecimalConverter::formatDecimal(symbolInfo.stepSize) << ")" << endl;
-
-    const msec timestamp = getServerTimestamp();
-    const string body = createBody(baseAsset,
-                                   quoteAsset,
-                                   OrderCategory::SPOT,
-                                   OrderOperation::SELL,
-                                   OrderType::MARKET,
-                                   quantity,
-                                   symbolInfo.stepSize);
-
-    const string signature = getSignature(body, timestamp);
-    const flat_map<string, string> headers = createHeaders(apiKey, signature, timestamp);
-
-    string response = sendOrder(body, headers);
-
-    beast::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode || !jsonValue.is_object(), "Failed to parse sellCrypto response");
-
-    const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
-    throwIf(!responseDto.result.has_value(), "Missing result in sellCrypto response");
-
-    OrderInfo info;
-    info.symbol = symbol;
-    info.category = "spot";
-    info.side = "Sell";
-    info.type = "Market";
-    info.status = "New";
-    info.origQty = quantity;
-    info.leavesQty = quantity;
-
-    info.orderId = responseDto.result.value().orderId.value_or("");
-    info.clientOrderId = responseDto.result.value().orderLinkId.value_or("");
-
-    info.createdTimeMs = timestamp;
-    info.updatedTimeMs = timestamp;
-
-    return info;
+    return placeOrder(request);
 }
 
 void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &request) const
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.side.has_value(), "Side is required");
-    throwIf(!request.type.has_value(), "Type is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
-    if (request.type.value() == OrderType::LIMIT)
+    if (request.type == OrderType::LIMIT)
     {
         throwIf(!request.price.has_value() || request.price.value() <= 0, "Price must be > 0 for LIMIT orders");
         throwIf(!request.timeInForce.has_value() || request.timeInForce->empty(),
@@ -774,107 +625,68 @@ void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &reques
     }
 }
 
-OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
+void BybitDealService::checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info)
 {
-    validatePlaceOrderRequest(request);
+    const string &baseAsset = info.baseAsset;
+    const string &quoteAsset = info.quoteAsset;
 
-    const OrderOperation requestSide = request.side.value();
-    const OrderType requestType = request.type.value();
-    string side = EnumStringConverter<OrderOperation>::toString(requestSide);
-    string type = EnumStringConverter<OrderType>::toString(requestType);
-    string category = request.category;
-    if (category.empty())
+    if (request.side == OrderOperation::BUY)
     {
-        category = "spot";
-    }
+        const auto quoteBalance = getBalance(quoteAsset);
+        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
 
-    // Fetch symbol info for precision
-    SymbolInfo info = getSymbolInfo(request.symbol, category);
-    const bool isQuoteMarketBuy = requestType == OrderType::MARKET && requestSide == OrderOperation::BUY &&
-                                  request.marketUnit.has_value() && request.marketUnit.value() == "quoteCoin";
-    Decimal marketLastPrice{};
-    if (requestType == OrderType::LIMIT && request.price.has_value())
-    {
-        optional<string> quantityError = validateBaseQuantity(request.quantity, request.price.value(), info);
-        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
-    }
-    else if (isQuoteMarketBuy)
-    {
-        optional<string> quantityError = validateQuoteQuantity(request.quantity, info);
-        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
-    }
-    else
-    {
-        marketLastPrice = getTickerPrice(request.symbol);
-        optional<string> quantityError = validateBaseQuantity(request.quantity, marketLastPrice, info);
-        throwIf(quantityError.has_value(), "Bybit placeOrder: " + quantityError.value_or(""));
-    }
+        Decimal requiredQuoteAmount{};
 
-    try
-    {
-        const bool isBuyOrder = requestSide == OrderOperation::BUY;
-        const string &baseAsset = info.baseAsset;
-        const string &quoteAsset = info.quoteAsset;
-
-        if (isBuyOrder)
+        if (request.type == OrderType::LIMIT && request.price.has_value())
         {
-            const auto quoteBalance = getBalance(quoteAsset);
-            const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
-
-            Decimal requiredQuoteAmount{};
-
-            if (requestType == OrderType::LIMIT && request.price.has_value())
-            {
-                requiredQuoteAmount = request.quantity * request.price.value();
-            }
-            else
-            {
-                if (isQuoteMarketBuy)
-                {
-                    requiredQuoteAmount = request.quantity;
-                }
-                else
-                {
-                    if (marketLastPrice > 0)
-                    {
-                        requiredQuoteAmount = request.quantity * marketLastPrice;
-                    }
-                }
-            }
-
-            if (requiredQuoteAmount > 0)
-            {
-                requiredQuoteAmount *= DecimalConverter::parseDecimal("1.01");
-                throwIf(quoteFree < requiredQuoteAmount,
-                        "Insufficient balance: need ~" + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
-                            quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
-            }
-            else
-            {
-                throwIf(quoteFree <= 0, "Insufficient balance: no free " + quoteAsset);
-            }
+            optional<string> quantityError = validateQuantity(request.quantity, request.price.value(), info);
+            throwIf(quantityError.has_value(), "Bybit placeOrder: notional " + quantityError.value_or(""));
+            requiredQuoteAmount = request.quantity * request.price.value();
+        }
+        else if (request.type == OrderType::MARKET && request.side == OrderOperation::BUY &&
+                 request.marketUnit.has_value() && request.marketUnit.value() == "quoteCoin")
+        {
+            optional<string> quantityError = validateNotional(request.quantity, info);
+            throwIf(quantityError.has_value(), "Bybit placeOrder: quote quantity " + quantityError.value_or(""));
+            requiredQuoteAmount = request.quantity;
         }
         else
         {
-            const auto baseBalance = getBalance(baseAsset);
-            const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
-
-            throwIf(baseFree < request.quantity,
-                    "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " +
-                        baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
+            Decimal marketLastPrice = getTickerPrice(request.symbol);
+            optional<string> quantityError = validateQuantity(request.quantity, marketLastPrice, info);
+            throwIf(quantityError.has_value(), "Bybit placeOrder: notional " + quantityError.value_or(""));
+            if (marketLastPrice > 0)
+            {
+                requiredQuoteAmount = request.quantity * marketLastPrice;
+            }
         }
-    }
-    catch (const exception &exception)
-    {
-        throw runtime_error(string("Bybit placeOrder: ") + exception.what());
-    }
 
-    // Use formatByStep for qty and price to avoid scientific notation and ensure correct precision
+        throwIf(requiredQuoteAmount > 0 && quoteFree < requiredQuoteAmount,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
+                    quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
+        throwIf(quoteFree <= 0, "Insufficient balance: no free " + quoteAsset);
+    }
+    else
+    {
+        const auto baseBalance = getBalance(baseAsset);
+        const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
+
+        throwIf(baseFree < request.quantity,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " + baseAsset +
+                    ", have " + DecimalConverter::formatDecimal(baseFree));
+    }
+}
+
+string BybitDealService::createPlaceOrderBody(const PlaceOrderRequest &request, const SymbolInfo &info) const
+{
+    const string category = EnumStringConverter<OrderCategory>::toString(request.category);
+    const string side = EnumStringConverter<OrderOperation>::toString(request.side);
+    const string type = EnumStringConverter<OrderType>::toString(request.type);
     const string qty = DecimalConverter::formatByStep(request.quantity, info.stepSize);
 
     optional<string> price;
     optional<string> timeInForce;
-    if (requestType == OrderType::LIMIT)
+    if (request.type == OrderType::LIMIT)
     {
         price = DecimalConverter::formatByStep(request.price.value(), info.tickSize);
         timeInForce = request.timeInForce.value();
@@ -891,7 +703,18 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
                                      request.triggerPrice,
                                      request.orderFilter,
                                      request.marketUnit};
-    string bodyStr = json::serialize(json::value_from(body));
+
+    return json::serialize(json::value_from(body));
+}
+
+OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
+{
+    validatePlaceOrderRequest(request);
+
+    SymbolInfo info = getSymbolInfo(request.symbol, request.category);
+    checkBalance(request, info);
+
+    string bodyStr = createPlaceOrderBody(request, info);
 
     msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
@@ -906,15 +729,11 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
-
+    const json::value jsonValue = parseAndValidate(response);
     const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
     throwIf(!responseDto.result.has_value(), "Missing result object in response");
 
-    return createOrderInfo(responseDto.result.value(), request, side, type, timestamp);
+    return createOrderInfo(responseDto.result.value(), request, timestamp);
 }
 
 OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
@@ -923,11 +742,7 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
     throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
             "Either orderId or clientOrderId must be provided");
 
-    string category = request.category;
-    if (category.empty())
-    {
-        category = "spot";
-    }
+    string category = EnumStringConverter<OrderCategory>::toString(request.category);
 
     const CancelOrderRequestDto body{category, request.symbol, request.orderId, request.clientOrderId};
     string bodyStr = json::serialize(json::value_from(body));
@@ -946,10 +761,7 @@ OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Bybit cancelOrder: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+    const json::value jsonValue = parseAndValidate(response);
 
     const OrderResponseDto responseDto = parseResponseToDto<OrderResponseDto>(jsonValue);
     throwIf(!responseDto.result.has_value(), "Missing result object in response");
@@ -963,15 +775,9 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
     throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
             "Either orderId or clientOrderId must be provided");
 
-    string category = request.category;
-    if (category.empty())
-    {
-        category = "spot";
-    }
-
     boost::urls::url requestUrl;
     requestUrl.set_path("/v5/order/realtime");
-    setRequestParameters(requestUrl, request, category);
+    setRequestParameters(requestUrl, request, request.category);
     string queryString = getQuery(requestUrl);
     msec timestamp = getServerTimestamp();
 
@@ -986,24 +792,21 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Bybit getOrder: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+    const json::value jsonValue = parseAndValidate(response);
 
     const RealtimeOrderResponseDto responseDto = parseResponseToDto<RealtimeOrderResponseDto>(jsonValue);
     throwIf(!responseDto.result.has_value(), "Missing result object in response");
 
     throwIf(responseDto.result.value().list.empty(), "Order not found (empty list)");
 
-    return createDetailedOrderInfo(responseDto.result.value().list[0], request, category, timestamp);
+    return createDetailedOrderInfo(responseDto.result.value().list[0], request, request.category, timestamp);
 }
 
 OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const OrderQuery &request, msec timestamp)
 {
     OrderInfo info;
     info.symbol = request.symbol;
-    info.category = request.category;
+    info.category = EnumStringConverter<OrderCategory>::toString(request.category);
     info.status = "Cancelled";
     info.updatedTimeMs = timestamp;
 
@@ -1034,30 +837,20 @@ OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const 
     return info;
 }
 
-OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result,
-                                            const PlaceOrderRequest &request,
-                                            const string &side,
-                                            const string &type,
-                                            msec timestamp)
+OrderInfo
+BybitDealService::createOrderInfo(const OrderResultDto &result, const PlaceOrderRequest &request, msec timestamp)
 {
     OrderInfo info;
     info.symbol = request.symbol;
 
-    if (request.category.empty())
-    {
-        info.category = "spot";
-    }
-    else
-    {
-        info.category = request.category;
-    }
+    info.category = EnumStringConverter<OrderCategory>::toString(request.category);
 
     throwIf(!result.orderId.has_value(), "Missing required string field: orderId");
     info.orderId = result.orderId.value();
     info.clientOrderId = result.orderLinkId.value_or("");
 
-    info.side = side;
-    info.type = type;
+    info.side = EnumStringConverter<OrderOperation>::toString(request.side);
+    info.type = EnumStringConverter<OrderType>::toString(request.type);
 
     info.status = "New";
 
@@ -1084,11 +877,9 @@ OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result,
     return info;
 }
 
-SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &category)
+SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, OrderCategory category)
 {
     throwIf(symbol.empty(), "Symbol cannot be empty");
-
-    string effectiveCategory = category.empty() ? "spot" : category;
 
     {
         lock_guard<mutex> lock(symbolInfoMutex);
@@ -1101,17 +892,14 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
 
     boost::urls::url requestUrl;
     requestUrl.set_path("/v5/market/instruments-info");
-    setRequestParameters(requestUrl, symbol, effectiveCategory);
+    setRequestParameters(requestUrl, symbol, category);
     string target = getTarget(requestUrl);
     HttpRequestContext context(ioc, ctx, host, target);
     context.prepareRequest(http::verb::get);
 
     string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Bybit getSymbolInfo: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Response is not a JSON object");
+    const json::value jsonValue = parseAndValidate(response);
 
     const InstrumentInfoResponseDto responseDto = parseResponseToDto<InstrumentInfoResponseDto>(jsonValue);
     throwIf(!responseDto.result.has_value(), "Missing result object");
@@ -1126,7 +914,7 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, const string &c
     return info;
 }
 
-Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, const string &category)
+Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory category)
 {
     const SymbolInfo info = getSymbolInfo(symbol, category);
     return DecimalConverter::ceilToStep(quantity, info.stepSize);
@@ -1134,7 +922,7 @@ Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quant
 
 OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
                                                     const OrderQuery &request,
-                                                    const string &category,
+                                                    OrderCategory category,
                                                     msec timestamp)
 {
     OrderInfo info;
@@ -1144,7 +932,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
         info.symbol = request.symbol;
     }
 
-    info.category = category;
+    info.category = EnumStringConverter<OrderCategory>::toString(category);
 
     if (order.orderId.has_value())
     {
@@ -1240,7 +1028,6 @@ namespace {
 OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.side.has_value(), "Side is required");
     throwIf(request.quantity <= 0, "Quantity must be greater than 0");
     throwIf(request.price <= 0, "Price must be greater than 0");
     throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
@@ -1278,7 +1065,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     takeProfitRequest.price = request.price;
     takeProfitRequest.timeInForce = "GTC";
     takeProfitRequest.clientOrderId = takeProfitOrderLinkId;
-    takeProfitRequest.category = "spot";
+    takeProfitRequest.category = OrderCategory::SPOT;
 
     OrderInfo takeProfitOrderInfo;
     try
@@ -1293,7 +1080,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     PlaceOrderRequest stopLossRequest;
     stopLossRequest.symbol = request.symbol;
     stopLossRequest.side = request.side;
-    stopLossRequest.category = "spot";
+    stopLossRequest.category = OrderCategory::SPOT;
     stopLossRequest.clientOrderId = stopLossOrderLinkId;
     stopLossRequest.quantity = request.quantity;
 
@@ -1344,12 +1131,12 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
         group.takeProfit.symbol = request.symbol;
         group.takeProfit.orderId = takeProfitOrderInfo.orderId;
         group.takeProfit.clientOrderId = takeProfitOrderLinkId;
-        group.takeProfit.category = "spot";
+        group.takeProfit.category = OrderCategory::SPOT;
 
         group.stopLeg.symbol = request.symbol;
         group.stopLeg.orderId = stopLossOrderInfo.orderId;
         group.stopLeg.clientOrderId = stopLossOrderLinkId;
-        group.stopLeg.category = "spot";
+        group.stopLeg.category = OrderCategory::SPOT;
 
         group.tpOrderLinkId = takeProfitOrderLinkId;
         group.slOrderLinkId = stopLossOrderLinkId;
@@ -1690,11 +1477,9 @@ void BybitDealService::processOcoUpdate(const string &orderLinkId)
     }
 }
 
-void BybitDealService::cancelAllOpenOrders(const string &symbol, const string &category)
+void BybitDealService::cancelAllOpenOrders(const string &symbol, OrderCategory category)
 {
-    const string effectiveCategory = category.empty() ? "spot" : category;
-
-    const CancelAllOpenOrdersRequestDto request{effectiveCategory, symbol};
+    const CancelAllOpenOrdersRequestDto request{EnumStringConverter<OrderCategory>::toString(category), symbol};
     const string bodyStr = json::serialize(json::value_from(request));
 
     const msec timestamp = getServerTimestamp();
@@ -1711,10 +1496,7 @@ void BybitDealService::cancelAllOpenOrders(const string &symbol, const string &c
 
     const string response = httpsPost(context);
 
-    boost::system::error_code errorCode;
-    json::value jsonValue = json::parse(response, errorCode);
-    throwIf(errorCode.failed(), "Bybit cancelAllOpenOrders: JSON parse error: " + errorCode.message());
-    throwIf(!jsonValue.is_object(), "Bybit cancelAllOpenOrders: Response is not a JSON object");
+    const json::value jsonValue = parseAndValidate(response);
 
     parseResponseToDto<ResponseDto>(jsonValue);
 }
@@ -1757,7 +1539,7 @@ void BybitDealService::waitUntilOrderFilled(const std::string &symbol, const std
             OrderQuery orderQuery;
             orderQuery.symbol = symbol;
             orderQuery.orderId = orderId;
-            orderQuery.category = "spot"; // default
+            orderQuery.category = OrderCategory::SPOT;
 
             OrderInfo orderInfo = getOrder(orderQuery);
             if (orderInfo.status == "Filled" || orderInfo.status == "Cancelled" || orderInfo.status == "Rejected" ||

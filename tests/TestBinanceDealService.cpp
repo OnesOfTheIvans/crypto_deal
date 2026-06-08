@@ -495,7 +495,7 @@ TEST_F(BinanceDealServiceTest, CancelAllOpenOrders_IgnoresAlreadyGoneErrors)
         "msg": "Unknown order sent."
     })");
 
-    EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", "spot"));
+    EXPECT_NO_THROW(service.cancelAllOpenOrders("BTCUSDT", OrderCategory::SPOT));
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "DELETE");
 }
 

@@ -83,12 +83,10 @@ OperationFactory::OperationFactory()
                           return [preset](OperationContext &context) -> OperationContext &
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              throwIf(!preset.side.has_value(), "Side is required for PLACE_ORDER");
-                              throwIf(!preset.type.has_value(), "Type is required for PLACE_ORDER");
 
                               PlaceOrderRequest request;
 
-                              if (preset.side.value() == OrderOperation::BUY)
+                              if (preset.side == OrderOperation::BUY)
                               {
                                   request.symbol = preset.outAsset + context.inAsset;
                               }
@@ -101,7 +99,7 @@ OperationFactory::OperationFactory()
                               request.type = preset.type;
                               request.timeInForce = preset.timeInForce;
                               request.clientOrderId = context.orderId;
-                              request.category = "spot";
+                              request.category = OrderCategory::SPOT;
                               request.triggerPrice = preset.triggerPrice;
                               request.orderFilter = preset.orderFilter;
                               request.marketUnit = preset.marketUnit;
@@ -124,7 +122,7 @@ OperationFactory::OperationFactory()
 
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = preset.side.value();
+                              context.side = preset.side;
 
                               return context;
                           };
@@ -167,11 +165,10 @@ OperationFactory::OperationFactory()
             return [preset](OperationContext &context) -> OperationContext &
             {
                 auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                throwIf(!preset.side.has_value(), "Side is required for PLACE_OCO");
 
                 PlaceOcoRequest request;
 
-                if (preset.side.value() == OrderOperation::BUY)
+                if (preset.side == OrderOperation::BUY)
                 {
                     request.symbol = preset.outAsset + context.inAsset;
                 }
@@ -194,7 +191,7 @@ OperationFactory::OperationFactory()
                 context.orderId = ocoInfo.listClientOrderId.empty() ? ocoInfo.orderListId : ocoInfo.listClientOrderId;
                 context.previousInAsset = context.inAsset;
                 context.inAsset = preset.outAsset;
-                context.side = preset.side.value();
+                context.side = preset.side;
 
                 // Polling loop to wait for execution
                 cout << "Waiting for OCO execution (" << context.orderId.value_or("unknown") << ")..." << endl;
