@@ -329,7 +329,7 @@ namespace {
             req.side = OrderOperation::BUY;
             req.type = OrderType::LIMIT;
             req.quantity = DecimalConverter::parseDecimal("0.0002");
-            req.price = DecimalConverter::parseDecimal("65000.0");
+            req.price = DecimalConverter::parseDecimal("50000.0");
             req.timeInForce = string("GTC");
             req.clientOrderId = string("IT_ORDER_") + to_string(time(nullptr));
 
@@ -401,9 +401,9 @@ namespace {
         oco.quantity = DecimalConverter::parseDecimal("0.00010");
 
         oco.price = DecimalConverter::parseDecimal("90000.0");
-        oco.stopPrice = DecimalConverter::parseDecimal("60000.0");
+        oco.stopPrice = DecimalConverter::parseDecimal("62000.0");
 
-        oco.stopLimitPrice = DecimalConverter::parseDecimal("59000.0");
+        oco.stopLimitPrice = DecimalConverter::parseDecimal("61000.0");
         oco.stopLimitTimeInForce = string("GTC");
 
         oco.listClientOrderId = string("IT_OCO_") + to_string(time(nullptr));

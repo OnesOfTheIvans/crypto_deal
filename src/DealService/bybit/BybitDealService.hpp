@@ -12,6 +12,7 @@
 #include "domain/CoinBalanceDto.hpp"
 #include "domain/InstrumentDto.hpp"
 #include "domain/OrderDto.hpp"
+#include "domain/OrderPriceLimitDto.hpp"
 #include "domain/OrderResponseDto.hpp"
 #include "domain/OrderResultDto.hpp"
 #include "domain/StreamMessageDto.hpp"
@@ -84,12 +85,33 @@ class BybitDealService : public DealService
 
     OrderInfo createOrderInfo(const bybit::OrderResultDto &result, const OrderQuery &request, msec timestamp);
 
-    OrderInfo createDetailedOrderInfo(const bybit::OrderDto &order,
-                                      const OrderQuery &request,
-                                      OrderCategory category,
-                                      msec timestamp);
+    OrderInfo createOrderInfo(const bybit::OrderDto &order, const OrderQuery &request, msec timestamp);
 
     SymbolInfo createSymbolInfo(const bybit::InstrumentDto &instrument, const std::string &symbol);
+
+    OrderInfo createTakeProfitOcoRequest(const PlaceOcoRequest &request, const std::string &takeProfitOrderLinkId);
+
+    OrderInfo createStopLossOcoRequest(const PlaceOcoRequest &request,
+                                       const std::string &stopLossOrderLinkId,
+                                       const std::string &takeProfitOrderLinkId);
+
+    std::optional<std::string> rollbackOcoRequests(const PlaceOcoRequest &request,
+                                                   const std::string &takeProfitOrderLinkId);
+
+    void createOcoGroup(const PlaceOcoRequest &request,
+                        const std::string &groupId,
+                        const std::string &takeProfitOrderLinkId,
+                        const std::string &stopLossOrderLinkId,
+                        const OrderInfo &takeProfitOrderInfo,
+                        const OrderInfo &stopLossOrderInfo);
+
+    OcoInfo createOcoInfo(const std::string &groupId,
+                          const OrderInfo &takeProfitOrderInfo,
+                          const OrderInfo &stopLossOrderInfo) const;
+
+    std::optional<std::string> cancelOcoGroupOrder(const OrderQuery &order, OrderInfo &cancelInfo);
+
+    std::optional<std::string> cancelOcoOtherLegFromUpdate(const OrderQuery &order);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -100,9 +122,15 @@ class BybitDealService : public DealService
 
     json::value parseAndValidate(const std::string &response) const;
 
+    bybit::OrderPriceLimitDto getOrderPriceLimit(const std::string &symbol, OrderCategory category);
+
+    void validateOrderPriceLimit(const PlaceOrderRequest &request);
+
     void checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info);
 
-    std::string createPlaceOrderBody(const PlaceOrderRequest &request, const SymbolInfo &info) const;
+    std::string createRequestBody(const PlaceOrderRequest &request, const SymbolInfo &info) const;
+
+    std::string createRequestBody(const OrderQuery &request) const;
 
     void setRequestParameters(boost::urls::url &url,
                               const std::string &accountType,
@@ -139,6 +167,9 @@ class BybitDealService : public DealService
     void refreshBalancesCache(const std::string &accountType,
                               const std::optional<std::string> &coinFilter = std::nullopt);
 
+    void tryRefreshBalancesCache(const std::string &accountType,
+                                 const std::optional<std::string> &coinFilter = std::nullopt);
+
     void processCoins(const bybit::WalletBalanceResponseDto &responseDto);
 
     bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
@@ -148,6 +179,8 @@ class BybitDealService : public DealService
     std::optional<std::string> validateNotional(Decimal notional, const SymbolInfo &symbolInfo) const;
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
+
+    void validatePlaceOcoRequest(const PlaceOcoRequest &request) const;
 
   public:
     BybitDealService(const std::string &host,

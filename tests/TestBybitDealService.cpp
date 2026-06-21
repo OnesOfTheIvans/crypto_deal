@@ -3,6 +3,9 @@
 #include "../src/DealService/common/domain/OrderInfo.hpp"
 #include "MockHttpRequest.hpp"
 #include "PrivateAccess.hpp"
+#include <algorithm>
+#include <boost/json.hpp>
+#include <cctype>
 #include <gtest/gtest.h>
 
 class BybitDealServiceTest : public ::testing::Test
@@ -27,6 +30,10 @@ class BybitDealServiceTest : public ::testing::Test
 };
 
 namespace {
+    namespace json = boost::json;
+
+    constexpr std::size_t BYBIT_ORDER_LINK_ID_MAX_LENGTH = 36;
+
     std::string bybitSymbolInfoResponse()
     {
         return R"({
@@ -80,6 +87,24 @@ namespace {
     })";
     }
 
+    std::string bybitOrderPriceLimitResponse(const std::string &buyLmt = "100000", const std::string &sellLmt = "10000")
+    {
+        return R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "symbol": "BTCUSDT",
+            "buyLmt": ")" +
+               buyLmt +
+               R"(",
+            "sellLmt": ")" +
+               sellLmt +
+               R"(",
+            "ts": "1776977716000"
+        }
+    })";
+    }
+
     std::string bybitWalletStreamMessage(const std::string &usdtWallet = "100000",
                                          const std::string &usdtLocked = "0",
                                          const std::string &btcWallet = "1",
@@ -119,6 +144,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
 
     MockNetwork::instance().setResponse("/v5/order/create", responseJson);
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
     test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
 
     PlaceOrderRequest req;
@@ -137,6 +163,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.side, "Buy");
     EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("0.5"));
     EXPECT_EQ(info.price, DecimalConverter::parseDecimal("45000.0"));
+    EXPECT_EQ(countRequestsContaining("/v5/market/price-limit"), 1u);
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 
     const std::string &body = MockNetwork::instance().lastRequest().body;
@@ -268,6 +295,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
     auto service = createService();
 
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
@@ -278,6 +306,42 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
     req.timeInForce = "GTC";
 
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+}
+
+TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse("44000", "10000"));
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("45000.0");
+    req.timeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
+}
+
+TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse("100000", "40000"));
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::SELL;
+    req.type = OrderType::LIMIT;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("39000.0");
+    req.timeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
 }
 
 TEST_F(BybitDealServiceTest, CancelOrder_Success)
@@ -447,6 +511,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
 
     MockNetwork::instance().setResponse("/v5/order/create", responseJson);
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
     test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
 
     PlaceOcoRequest req;
@@ -460,6 +525,29 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
     OcoInfo info = service.placeOco(req);
 
     EXPECT_EQ(info.orders.size(), 2);
+    ASSERT_EQ(info.listClientOrderId.size(), 33u);
+    EXPECT_EQ(info.listClientOrderId[0], 'O');
+    EXPECT_TRUE(std::all_of(info.listClientOrderId.begin() + 1,
+                            info.listClientOrderId.end(),
+                            [](unsigned char c) { return std::islower(c) || std::isdigit(c); }));
+
+    std::vector<std::string> orderLinkIds;
+    for (const auto &recordedRequest : MockNetwork::instance().getRequests())
+    {
+        if (recordedRequest.target.find("/v5/order/create") == std::string::npos)
+        {
+            continue;
+        }
+
+        const json::object body = json::parse(recordedRequest.body).as_object();
+        orderLinkIds.push_back(json::value_to<std::string>(body.at("orderLinkId")));
+    }
+
+    ASSERT_EQ(orderLinkIds.size(), 2u);
+    EXPECT_EQ(orderLinkIds[0], info.listClientOrderId + "_TP");
+    EXPECT_EQ(orderLinkIds[1], info.listClientOrderId + "_SL");
+    EXPECT_EQ(orderLinkIds[0].size(), BYBIT_ORDER_LINK_ID_MAX_LENGTH);
+    EXPECT_EQ(orderLinkIds[1].size(), BYBIT_ORDER_LINK_ID_MAX_LENGTH);
 }
 
 TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
@@ -549,6 +637,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
     MockNetwork::instance().setResponse("/v5/order/create", slFailure);       // SL
     MockNetwork::instance().setResponse("/v5/order/cancel", rollbackSuccess); // Rollback
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
     test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
 
     PlaceOcoRequest req;
@@ -606,6 +695,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
     auto service = createService();
 
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
     req.side = OrderOperation::BUY;
@@ -824,6 +914,7 @@ TEST_F(BybitDealServiceTest, CancelOco_Success)
         "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
     })");
     MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
     MockNetwork::instance().setResponse("/v5/market/tickers", R"({
         "retCode": 0,
         "retMsg": "OK",

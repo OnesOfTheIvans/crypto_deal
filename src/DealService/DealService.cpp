@@ -1,7 +1,11 @@
 #include "DealService.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
+
+#include <boost/uuid/random_generator.hpp>
+#include <boost/uuid/uuid_io.hpp>
 
 #include <openssl/hmac.h>
 
@@ -39,4 +43,13 @@ void DealService::setUrlParameters(boost::urls::url &url, const map<string, stri
 ExchangerType DealService::getExchangerType() const
 {
     return exchangerType;
+}
+
+string DealService::generateUniqueOcoId() const
+{
+    boost::uuids::random_generator generator;
+    string uuid = boost::uuids::to_string(generator());
+    uuid.erase(remove(uuid.begin(), uuid.end(), '-'), uuid.end());
+
+    return "O" + uuid;
 }

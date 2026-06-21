@@ -8,6 +8,7 @@
 #include "domain/CancelOrderRequestDto.hpp"
 #include "domain/CreateOrderRequestDto.hpp"
 #include "domain/InstrumentInfoResponseDto.hpp"
+#include "domain/OrderPriceLimitResponseDto.hpp"
 #include "domain/OrderResponseDto.hpp"
 #include "domain/RealtimeOrderResponseDto.hpp"
 #include "domain/ResponseDto.hpp"
@@ -15,7 +16,6 @@
 #include "domain/SubscribeRequestDto.hpp"
 #include "domain/TickerResponseDto.hpp"
 #include "domain/WalletBalanceResponseDto.hpp"
-#include <cstdlib>
 
 #include <algorithm>
 #include <sstream>
@@ -30,6 +30,8 @@ using namespace bybit;
 using namespace exception_handling;
 
 namespace {
+    constexpr size_t BYBIT_OCO_GROUP_ID_MAX_LENGTH = 33;
+
     template <typename ResponseDtoType> string getErrorMessage(const ResponseDtoType &response)
     {
         return "Bybit Error " + to_string(response.retCode) + ": " + response.retMsg.value_or("Unknown Error");
@@ -66,6 +68,12 @@ namespace {
     string getQuery(const boost::urls::url &url)
     {
         return toString(url.encoded_query());
+    }
+
+    bool isTerminalStatus(const string &status)
+    {
+        return status == "Filled" || status == "Cancelled" || status == "Rejected" || status == "Deactivated" ||
+               status == "Triggered";
     }
 } // namespace
 
@@ -156,6 +164,18 @@ void BybitDealService::refreshBalancesCache(const string &accountType, const opt
 
     const WalletBalanceResponseDto responseDto = parseResponseToDto<WalletBalanceResponseDto>(parsedValue);
     processCoins(responseDto);
+}
+
+void BybitDealService::tryRefreshBalancesCache(const string &accountType, const optional<string> &coinFilter)
+{
+    try
+    {
+        refreshBalancesCache(accountType, coinFilter);
+    }
+    catch (const exception &e)
+    {
+        cerr << "Bybit balance REST refresh (" << accountType << ") failed: " << e.what() << endl;
+    }
 }
 
 void BybitDealService::processCoins(const WalletBalanceResponseDto &responseDto)
@@ -566,6 +586,25 @@ void BybitDealService::setRequestParameters(boost::urls::url &url, const OrderQu
     setUrlParameters(url, parameterMap);
 }
 
+OrderPriceLimitDto BybitDealService::getOrderPriceLimit(const string &symbol, OrderCategory category)
+{
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/price-limit");
+    setRequestParameters(requestUrl, symbol, category);
+    string target = getTarget(requestUrl);
+
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+
+    string response = httpsPost(context);
+
+    const json::value jsonValue = parseAndValidate(response);
+    const OrderPriceLimitResponseDto responseDto = parseResponseToDto<OrderPriceLimitResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object in response");
+
+    return responseDto.result.value();
+}
+
 Decimal BybitDealService::getTickerPrice(const string &symbol)
 {
     boost::urls::url requestUrl;
@@ -625,6 +664,48 @@ void BybitDealService::validatePlaceOrderRequest(const PlaceOrderRequest &reques
     }
 }
 
+void BybitDealService::validatePlaceOcoRequest(const PlaceOcoRequest &request) const
+{
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be greater than 0");
+    throwIf(request.price <= 0, "Price must be greater than 0");
+    throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
+    throwIf(request.stopLimitPrice.has_value() && request.stopLimitPrice.value() <= 0,
+            "StopLimitPrice must be greater than 0 if set");
+}
+
+void BybitDealService::validateOrderPriceLimit(const PlaceOrderRequest &request)
+{
+    if (request.type != OrderType::LIMIT)
+    {
+        return;
+    }
+
+    const OrderPriceLimitDto priceLimit = getOrderPriceLimit(request.symbol, request.category);
+    const Decimal price = request.price.value();
+
+    if (request.side == OrderOperation::BUY)
+    {
+        throwIf(!priceLimit.buyLmt.has_value() || priceLimit.buyLmt->empty(),
+                "Bybit placeOrder: missing buyLmt in price limit response");
+
+        const Decimal buyLimit = DecimalConverter::parseDecimal(priceLimit.buyLmt.value());
+        throwIf(price > buyLimit,
+                "Bybit placeOrder: price " + DecimalConverter::formatDecimal(price) + " is above buyLmt " +
+                    DecimalConverter::formatDecimal(buyLimit));
+    }
+    else
+    {
+        throwIf(!priceLimit.sellLmt.has_value() || priceLimit.sellLmt->empty(),
+                "Bybit placeOrder: missing sellLmt in price limit response");
+
+        const Decimal sellLimit = DecimalConverter::parseDecimal(priceLimit.sellLmt.value());
+        throwIf(price < sellLimit,
+                "Bybit placeOrder: price " + DecimalConverter::formatDecimal(price) + " is below sellLmt " +
+                    DecimalConverter::formatDecimal(sellLimit));
+    }
+}
+
 void BybitDealService::checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info)
 {
     const string &baseAsset = info.baseAsset;
@@ -677,7 +758,7 @@ void BybitDealService::checkBalance(const PlaceOrderRequest &request, const Symb
     }
 }
 
-string BybitDealService::createPlaceOrderBody(const PlaceOrderRequest &request, const SymbolInfo &info) const
+string BybitDealService::createRequestBody(const PlaceOrderRequest &request, const SymbolInfo &info) const
 {
     const string category = EnumStringConverter<OrderCategory>::toString(request.category);
     const string side = EnumStringConverter<OrderOperation>::toString(request.side);
@@ -707,14 +788,27 @@ string BybitDealService::createPlaceOrderBody(const PlaceOrderRequest &request, 
     return json::serialize(json::value_from(body));
 }
 
+string BybitDealService::createRequestBody(const OrderQuery &request) const
+{
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
+            "Either orderId or clientOrderId must be provided");
+
+    string category = EnumStringConverter<OrderCategory>::toString(request.category);
+
+    const CancelOrderRequestDto body{category, request.symbol, request.orderId, request.clientOrderId};
+    return json::serialize(json::value_from(body));
+}
+
 OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 {
     validatePlaceOrderRequest(request);
+    validateOrderPriceLimit(request);
 
     SymbolInfo info = getSymbolInfo(request.symbol, request.category);
     checkBalance(request, info);
 
-    string bodyStr = createPlaceOrderBody(request, info);
+    string bodyStr = createRequestBody(request, info);
 
     msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
@@ -738,14 +832,7 @@ OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 
 OrderInfo BybitDealService::cancelOrder(const OrderQuery &request)
 {
-    throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(!request.orderId.has_value() && !request.clientOrderId.has_value(),
-            "Either orderId or clientOrderId must be provided");
-
-    string category = EnumStringConverter<OrderCategory>::toString(request.category);
-
-    const CancelOrderRequestDto body{category, request.symbol, request.orderId, request.clientOrderId};
-    string bodyStr = json::serialize(json::value_from(body));
+    string bodyStr = createRequestBody(request);
 
     msec timestamp = getServerTimestamp();
     string signature = getSignature(bodyStr, timestamp);
@@ -796,10 +883,9 @@ OrderInfo BybitDealService::getOrder(const OrderQuery &request)
 
     const RealtimeOrderResponseDto responseDto = parseResponseToDto<RealtimeOrderResponseDto>(jsonValue);
     throwIf(!responseDto.result.has_value(), "Missing result object in response");
-
     throwIf(responseDto.result.value().list.empty(), "Order not found (empty list)");
 
-    return createDetailedOrderInfo(responseDto.result.value().list[0], request, request.category, timestamp);
+    return createOrderInfo(responseDto.result.value().list[0], request, timestamp);
 }
 
 OrderInfo BybitDealService::createOrderInfo(const OrderResultDto &result, const OrderQuery &request, msec timestamp)
@@ -877,53 +963,7 @@ BybitDealService::createOrderInfo(const OrderResultDto &result, const PlaceOrder
     return info;
 }
 
-SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, OrderCategory category)
-{
-    throwIf(symbol.empty(), "Symbol cannot be empty");
-
-    {
-        lock_guard<mutex> lock(symbolInfoMutex);
-        auto it = symbolInfoCache.find(symbol);
-        if (it != symbolInfoCache.end())
-        {
-            return it->second;
-        }
-    }
-
-    boost::urls::url requestUrl;
-    requestUrl.set_path("/v5/market/instruments-info");
-    setRequestParameters(requestUrl, symbol, category);
-    string target = getTarget(requestUrl);
-    HttpRequestContext context(ioc, ctx, host, target);
-    context.prepareRequest(http::verb::get);
-
-    string response = httpsPost(context);
-
-    const json::value jsonValue = parseAndValidate(response);
-
-    const InstrumentInfoResponseDto responseDto = parseResponseToDto<InstrumentInfoResponseDto>(jsonValue);
-    throwIf(!responseDto.result.has_value(), "Missing result object");
-
-    throwIf(responseDto.result.value().list.empty(), "Symbol not found: " + symbol);
-
-    SymbolInfo info = createSymbolInfo(responseDto.result.value().list[0], symbol);
-    {
-        lock_guard<mutex> lock(symbolInfoMutex);
-        symbolInfoCache[symbol] = info;
-    }
-    return info;
-}
-
-Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory category)
-{
-    const SymbolInfo info = getSymbolInfo(symbol, category);
-    return DecimalConverter::ceilToStep(quantity, info.stepSize);
-}
-
-OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
-                                                    const OrderQuery &request,
-                                                    OrderCategory category,
-                                                    msec timestamp)
+OrderInfo BybitDealService::createOrderInfo(const OrderDto &order, const OrderQuery &request, msec timestamp)
 {
     OrderInfo info;
     info.symbol = order.symbol.value_or("");
@@ -932,7 +972,7 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
         info.symbol = request.symbol;
     }
 
-    info.category = EnumStringConverter<OrderCategory>::toString(category);
+    info.category = EnumStringConverter<OrderCategory>::toString(request.category);
 
     if (order.orderId.has_value())
     {
@@ -971,6 +1011,48 @@ OrderInfo BybitDealService::createDetailedOrderInfo(const OrderDto &order,
     }
 
     return info;
+}
+
+SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, OrderCategory category)
+{
+    throwIf(symbol.empty(), "Symbol cannot be empty");
+
+    {
+        lock_guard<mutex> lock(symbolInfoMutex);
+        auto it = symbolInfoCache.find(symbol);
+        if (it != symbolInfoCache.end())
+        {
+            return it->second;
+        }
+    }
+
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/instruments-info");
+    setRequestParameters(requestUrl, symbol, category);
+    string target = getTarget(requestUrl);
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+
+    string response = httpsPost(context);
+
+    const json::value jsonValue = parseAndValidate(response);
+
+    const InstrumentInfoResponseDto responseDto = parseResponseToDto<InstrumentInfoResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object");
+    throwIf(responseDto.result.value().list.empty(), "Symbol not found: " + symbol);
+
+    SymbolInfo info = createSymbolInfo(responseDto.result.value().list[0], symbol);
+    {
+        lock_guard<mutex> lock(symbolInfoMutex);
+        symbolInfoCache[symbol] = info;
+    }
+    return info;
+}
+
+Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory category)
+{
+    const SymbolInfo info = getSymbolInfo(symbol, category);
+    return DecimalConverter::ceilToStep(quantity, info.stepSize);
 }
 
 SymbolInfo BybitDealService::createSymbolInfo(const InstrumentDto &instrument, const string &symbol)
@@ -1017,46 +1099,9 @@ SymbolInfo BybitDealService::createSymbolInfo(const InstrumentDto &instrument, c
     return info;
 }
 
-namespace {
-    bool isTerminalStatus(const string &status)
-    {
-        return status == "Filled" || status == "Cancelled" || status == "Rejected" || status == "Deactivated" ||
-               status == "Triggered";
-    }
-}
-
-OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
+OrderInfo BybitDealService::createTakeProfitOcoRequest(const PlaceOcoRequest &request,
+                                                       const string &takeProfitOrderLinkId)
 {
-    throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(request.quantity <= 0, "Quantity must be greater than 0");
-    throwIf(request.price <= 0, "Price must be greater than 0");
-    throwIf(request.stopPrice <= 0, "StopPrice must be greater than 0");
-    throwIf(request.stopLimitPrice.has_value() && request.stopLimitPrice.value() <= 0,
-            "StopLimitPrice must be greater than 0 if set");
-
-    string groupId;
-    if (request.listClientOrderId.has_value() && !request.listClientOrderId->empty())
-    {
-        groupId = request.listClientOrderId.value();
-    }
-    else
-    {
-        msec now = getServerTimestamp();
-        int randomSuffix = rand() % 10000;
-        groupId = "OCO_" + to_string(now) + "_" + to_string(randomSuffix);
-    }
-
-    string takeProfitOrderLinkId = groupId + "_TP";
-    string stopLossOrderLinkId = groupId + "_SL";
-    if (takeProfitOrderLinkId.length() > 36)
-    {
-        takeProfitOrderLinkId = takeProfitOrderLinkId.substr(0, 36);
-    }
-    if (stopLossOrderLinkId.length() > 36)
-    {
-        stopLossOrderLinkId = stopLossOrderLinkId.substr(0, 36);
-    }
-
     PlaceOrderRequest takeProfitRequest;
     takeProfitRequest.symbol = request.symbol;
     takeProfitRequest.side = request.side;
@@ -1077,6 +1122,13 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
         throw runtime_error("Bybit placeOco: failed to place TP leg: " + string(e.what()));
     }
 
+    return takeProfitOrderInfo;
+}
+
+OrderInfo BybitDealService::createStopLossOcoRequest(const PlaceOcoRequest &request,
+                                                     const string &stopLossOrderLinkId,
+                                                     const string &takeProfitOrderLinkId)
+{
     PlaceOrderRequest stopLossRequest;
     stopLossRequest.symbol = request.symbol;
     stopLossRequest.side = request.side;
@@ -1107,45 +1159,63 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     }
     catch (const exception &e)
     {
-        string rollbackError;
-        try
-        {
-            OrderQuery rollbackQuery;
-            rollbackQuery.symbol = request.symbol;
-            rollbackQuery.clientOrderId = takeProfitOrderLinkId;
-            cancelOrder(rollbackQuery);
-        }
-        catch (const exception &rollbackEx)
-        {
-            rollbackError = "; Rollback failed: " + string(rollbackEx.what());
-        }
-        throw runtime_error("Bybit placeOco: failed to place SL leg: " + string(e.what()) + rollbackError);
+        const optional<string> rollbackError = rollbackOcoRequests(request, takeProfitOrderLinkId);
+        throw runtime_error("Bybit placeOco: failed to place SL leg: " + string(e.what()) + rollbackError.value_or(""));
     }
 
+    return stopLossOrderInfo;
+}
+
+optional<string> BybitDealService::rollbackOcoRequests(const PlaceOcoRequest &request,
+                                                       const string &takeProfitOrderLinkId)
+{
+    try
     {
-        lock_guard<mutex> lock(ocoMutex);
-
-        BybitOcoGroup group;
-        group.groupId = groupId;
-
-        group.takeProfit.symbol = request.symbol;
-        group.takeProfit.orderId = takeProfitOrderInfo.orderId;
-        group.takeProfit.clientOrderId = takeProfitOrderLinkId;
-        group.takeProfit.category = OrderCategory::SPOT;
-
-        group.stopLeg.symbol = request.symbol;
-        group.stopLeg.orderId = stopLossOrderInfo.orderId;
-        group.stopLeg.clientOrderId = stopLossOrderLinkId;
-        group.stopLeg.category = OrderCategory::SPOT;
-
-        group.tpOrderLinkId = takeProfitOrderLinkId;
-        group.slOrderLinkId = stopLossOrderLinkId;
-
-        ocoGroups[groupId] = group;
-        ocoLegToGroup[takeProfitOrderLinkId] = groupId;
-        ocoLegToGroup[stopLossOrderLinkId] = groupId;
+        OrderQuery rollbackQuery;
+        rollbackQuery.symbol = request.symbol;
+        rollbackQuery.clientOrderId = takeProfitOrderLinkId;
+        cancelOrder(rollbackQuery);
+    }
+    catch (const exception &rollbackEx)
+    {
+        return "; Rollback failed: " + string(rollbackEx.what());
     }
 
+    return nullopt;
+}
+
+void BybitDealService::createOcoGroup(const PlaceOcoRequest &request,
+                                      const string &groupId,
+                                      const string &takeProfitOrderLinkId,
+                                      const string &stopLossOrderLinkId,
+                                      const OrderInfo &takeProfitOrderInfo,
+                                      const OrderInfo &stopLossOrderInfo)
+{
+    BybitOcoGroup group;
+    group.groupId = groupId;
+
+    group.takeProfit.symbol = request.symbol;
+    group.takeProfit.orderId = takeProfitOrderInfo.orderId;
+    group.takeProfit.clientOrderId = takeProfitOrderLinkId;
+    group.takeProfit.category = OrderCategory::SPOT;
+
+    group.stopLeg.symbol = request.symbol;
+    group.stopLeg.orderId = stopLossOrderInfo.orderId;
+    group.stopLeg.clientOrderId = stopLossOrderLinkId;
+    group.stopLeg.category = OrderCategory::SPOT;
+
+    group.tpOrderLinkId = takeProfitOrderLinkId;
+    group.slOrderLinkId = stopLossOrderLinkId;
+
+    ocoGroups[groupId] = group;
+    ocoLegToGroup[takeProfitOrderLinkId] = groupId;
+    ocoLegToGroup[stopLossOrderLinkId] = groupId;
+}
+
+OcoInfo BybitDealService::createOcoInfo(const string &groupId,
+                                        const OrderInfo &takeProfitOrderInfo,
+                                        const OrderInfo &stopLossOrderInfo) const
+{
     OcoInfo ocoInfo;
     ocoInfo.orderListId = groupId;
     ocoInfo.listClientOrderId = groupId;
@@ -1156,115 +1226,134 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
     return ocoInfo;
 }
 
-OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
+optional<string> BybitDealService::cancelOcoGroupOrder(const OrderQuery &order, OrderInfo &cancelInfo)
 {
-    string groupId;
-    if (request.orderListId.has_value())
+    try
     {
-        groupId = request.orderListId.value();
+        cancelInfo = cancelOrder(order);
+        return nullopt;
     }
-    else if (request.listClientOrderId.has_value())
+    catch (const exception &e)
     {
-        groupId = request.listClientOrderId.value();
+        const string cancelError = e.what();
+        const string orderId = order.orderId.value();
+
+        try
+        {
+            OrderInfo check = getOrder(order);
+            cancelInfo = check;
+            if (isTerminalStatus(check.status))
+            {
+                return nullopt;
+            }
+        }
+        catch (...)
+        {
+            cancelInfo.status = "ERROR";
+            cancelInfo.symbol = order.symbol;
+            if (order.orderId.has_value())
+            {
+                cancelInfo.orderId = orderId;
+            }
+
+            return orderId + "order cancel failed and status check failed: " + cancelError + "; ";
+        }
+
+        cancelInfo.status = "ERROR";
+        cancelInfo.symbol = order.symbol;
+        if (order.orderId.has_value())
+        {
+            cancelInfo.orderId = orderId;
+        }
+
+        return orderId + "order cancel failed and not terminal: " + cancelError + "; ";
     }
-    else
+}
+
+optional<string> BybitDealService::cancelOcoOtherLegFromUpdate(const OrderQuery &order)
+{
+    string cancelError;
+
+    try
     {
-        throw runtime_error("Bybit cancelOco: missing orderListId or listClientOrderId");
+        cancelOrder(order);
+        return nullopt;
+    }
+    catch (const exception &e)
+    {
+        cancelError = e.what();
+        try
+        {
+            OrderInfo info = getOrder(order);
+            if (isTerminalStatus(info.status))
+            {
+                return nullopt;
+            }
+        }
+        catch (const exception &statusEx)
+        {
+            cancelError += "; Status check failed: " + string(statusEx.what());
+        }
+        catch (...)
+        {
+            cancelError += "; Status check failed: Unknown error";
+        }
     }
 
-    BybitOcoGroup ocoGroup;
-    bool found = false;
+    return cancelError;
+}
+
+OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
+{
+    validatePlaceOcoRequest(request);
+
+    string groupId = request.listClientOrderId.value_or("");
+    if (groupId.empty())
+    {
+        groupId = generateUniqueOcoId();
+    }
+    throwIf(groupId.size() > BYBIT_OCO_GROUP_ID_MAX_LENGTH,
+            "Bybit placeOco: listClientOrderId must be at most " + to_string(BYBIT_OCO_GROUP_ID_MAX_LENGTH) +
+                " characters");
+
+    string takeProfitOrderLinkId = groupId + "_TP";
+    string stopLossOrderLinkId = groupId + "_SL";
+    const OrderInfo takeProfitOrderInfo = createTakeProfitOcoRequest(request, takeProfitOrderLinkId);
+    const OrderInfo stopLossOrderInfo = createStopLossOcoRequest(request, stopLossOrderLinkId, takeProfitOrderLinkId);
 
     {
         lock_guard<mutex> lock(ocoMutex);
-        auto it = ocoGroups.find(groupId);
-        if (it != ocoGroups.end())
-        {
-            ocoGroup = it->second;
-            found = true;
-        }
+        createOcoGroup(request,
+                       groupId,
+                       takeProfitOrderLinkId,
+                       stopLossOrderLinkId,
+                       takeProfitOrderInfo,
+                       stopLossOrderInfo);
     }
 
-    throwIf(!found, "Bybit cancelOco: unknown group params");
+    return createOcoInfo(groupId, takeProfitOrderInfo, stopLossOrderInfo);
+}
+
+OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
+{
+    string groupId = request.orderListId.has_value() ? request.orderListId.value() : request.listClientOrderId.value();
+    throwIf(groupId == "", "Bybit cancelOco: missing orderListId or listClientOrderId");
+
+    BybitOcoGroup ocoGroup;
+    {
+        lock_guard<mutex> lock(ocoMutex);
+        auto it = ocoGroups.find(groupId);
+        throwIf(it == ocoGroups.end(), "Bybit cancelOco: unknown group params");
+        ocoGroup = it->second;
+    }
 
     OrderInfo takeProfitCancelInfo, stopLossCancelInfo;
-    bool tpTerminal = false;
-    bool slTerminal = false;
-    string errorMsg;
+    const optional<string> takeProfitError = cancelOcoGroupOrder(ocoGroup.takeProfit, takeProfitCancelInfo);
+    const optional<string> stopLossError = cancelOcoGroupOrder(ocoGroup.stopLeg, stopLossCancelInfo);
 
-    try
-    {
-        takeProfitCancelInfo = cancelOrder(ocoGroup.takeProfit);
-        tpTerminal = true;
-    }
-    catch (const exception &e)
-    {
-        try
-        {
-            OrderInfo check = getOrder(ocoGroup.takeProfit);
-            takeProfitCancelInfo = check;
-            if (isTerminalStatus(check.status))
-            {
-                tpTerminal = true;
-            }
-            else
-            {
-                errorMsg += "TP cancel failed and not terminal: " + string(e.what()) + "; ";
-            }
-        }
-        catch (...)
-        {
-            errorMsg += "TP cancel failed and status check failed: " + string(e.what()) + "; ";
-        }
+    throwIf(takeProfitError.has_value() || stopLossError.has_value(),
+            "Bybit cancelOco incomplete: " + takeProfitError.value_or("") + stopLossError.value_or(""));
 
-        if (!tpTerminal)
-        {
-            takeProfitCancelInfo.status = "ERROR";
-            takeProfitCancelInfo.symbol = ocoGroup.takeProfit.symbol;
-            if (ocoGroup.takeProfit.orderId)
-            {
-                takeProfitCancelInfo.orderId = ocoGroup.takeProfit.orderId.value();
-            }
-        }
-    }
-
-    try
-    {
-        stopLossCancelInfo = cancelOrder(ocoGroup.stopLeg);
-        slTerminal = true;
-    }
-    catch (const exception &e)
-    {
-        try
-        {
-            OrderInfo check = getOrder(ocoGroup.stopLeg);
-            stopLossCancelInfo = check;
-            if (isTerminalStatus(check.status))
-            {
-                slTerminal = true;
-            }
-            else
-            {
-                errorMsg += "SL cancel failed and not terminal: " + string(e.what()) + "; ";
-            }
-        }
-        catch (...)
-        {
-            errorMsg += "SL cancel failed and status check failed: " + string(e.what()) + "; ";
-        }
-
-        if (!slTerminal)
-        {
-            stopLossCancelInfo.status = "ERROR";
-            stopLossCancelInfo.symbol = ocoGroup.stopLeg.symbol;
-            if (ocoGroup.stopLeg.orderId)
-            {
-                stopLossCancelInfo.orderId = ocoGroup.stopLeg.orderId.value();
-            }
-        }
-    }
-
-    if (tpTerminal && slTerminal)
     {
         lock_guard<mutex> lock(ocoMutex);
         auto it = ocoGroups.find(groupId);
@@ -1275,18 +1364,7 @@ OcoInfo BybitDealService::cancelOco(const OrderListQuery &request)
             ocoGroups.erase(it);
         }
     }
-    else
-    {
-        throw runtime_error("Bybit cancelOco incomplete: " + errorMsg);
-    }
-
-    OcoInfo ocoCancelResult;
-    ocoCancelResult.orderListId = groupId;
-    ocoCancelResult.listClientOrderId = groupId;
-    ocoCancelResult.orders.push_back(takeProfitCancelInfo);
-    ocoCancelResult.orders.push_back(stopLossCancelInfo);
-
-    return ocoCancelResult;
+    return createOcoInfo(groupId, takeProfitCancelInfo, stopLossCancelInfo);
 }
 
 flat_map<string, AssetBalance> BybitDealService::getBalances() const
@@ -1360,15 +1438,8 @@ void BybitDealService::handleWalletUpdate(const StreamMessageDto &message)
         {
             for (const CoinBalanceDto &coin : item.coin.value())
             {
-                try
-                {
-                    AssetBalance balance = parseBalance(coin);
-                    updateBalanceCache(balance.asset, balance.free, balance.locked);
-                }
-                catch (const exception &e)
-                {
-                    cerr << "Bybit stream wallet parsing error: " << e.what() << endl;
-                }
+                AssetBalance balance = parseBalance(coin);
+                updateBalanceCache(balance.asset, balance.free, balance.locked);
             }
         }
     }
@@ -1384,13 +1455,10 @@ void BybitDealService::handleOrderUpdate(const StreamOrderMessageDto &message)
     for (const StreamOrderDto &order : message.data.value())
     {
         const auto &status = order.orderStatus;
-        if (status.has_value() && status.value() == "Filled")
+        const auto &orderLinkId = order.orderLinkId;
+        if (status.has_value() && status.value() == "Filled" && orderLinkId.has_value())
         {
-            const auto &orderLinkId = order.orderLinkId;
-            if (orderLinkId.has_value())
-            {
-                processOcoUpdate(orderLinkId.value());
-            }
+            processOcoUpdate(orderLinkId.value());
         }
     }
 }
@@ -1399,80 +1467,59 @@ void BybitDealService::processOcoUpdate(const string &orderLinkId)
 {
     string groupId;
     OrderQuery otherLegQuery;
-    bool shouldCancel = false;
 
     {
         lock_guard<mutex> lock(ocoMutex);
         auto legIt = ocoLegToGroup.find(orderLinkId);
-        if (legIt != ocoLegToGroup.end())
+        if (legIt == ocoLegToGroup.end())
         {
-            groupId = legIt->second;
-            auto groupIt = ocoGroups.find(groupId);
-            if (groupIt != ocoGroups.end())
-            {
-                BybitOcoGroup &group = groupIt->second;
-                if (!group.closing)
-                {
-                    group.closing = true;
-                    shouldCancel = true;
-                    if (orderLinkId == group.tpOrderLinkId)
-                    {
-                        otherLegQuery = group.stopLeg;
-                    }
-                    else
-                    {
-                        otherLegQuery = group.takeProfit;
-                    }
-                }
-            }
+            return;
+        }
+
+        groupId = legIt->second;
+        auto groupIt = ocoGroups.find(groupId);
+        if (groupIt == ocoGroups.end())
+        {
+            return;
+        }
+
+        BybitOcoGroup &group = groupIt->second;
+        if (group.closing)
+        {
+            return;
+        }
+
+        group.closing = true;
+        if (orderLinkId == group.tpOrderLinkId)
+        {
+            otherLegQuery = group.stopLeg;
+        }
+        else
+        {
+            otherLegQuery = group.takeProfit;
         }
     }
 
-    if (shouldCancel)
-    {
-        bool cancellationSuccessfulOrTerminal = false;
-        string cancelError;
-        try
-        {
-            cancelOrder(otherLegQuery);
-            cancellationSuccessfulOrTerminal = true;
-        }
-        catch (const exception &e)
-        {
-            cancelError = e.what();
-            try
-            {
-                OrderInfo info = getOrder(otherLegQuery);
-                if (isTerminalStatus(info.status))
-                {
-                    cancellationSuccessfulOrTerminal = true;
-                }
-            }
-            catch (const exception &statusEx)
-            {
-                cancelError += "; Status check failed: " + string(statusEx.what());
-            }
-            catch (...)
-            {
-                cancelError += "; Status check failed: Unknown error";
-            }
-        }
+    const optional<string> cancelError = cancelOcoOtherLegFromUpdate(otherLegQuery);
 
+    {
         lock_guard<mutex> lock(ocoMutex);
         auto groupIt = ocoGroups.find(groupId);
-        if (groupIt != ocoGroups.end())
+        if (groupIt == ocoGroups.end())
         {
-            if (cancellationSuccessfulOrTerminal)
-            {
-                ocoLegToGroup.erase(groupIt->second.tpOrderLinkId);
-                ocoLegToGroup.erase(groupIt->second.slOrderLinkId);
-                ocoGroups.erase(groupIt);
-            }
-            else
-            {
-                groupIt->second.closing = false;
-                groupIt->second.lastError = cancelError;
-            }
+            return;
+        }
+
+        if (cancelError.has_value())
+        {
+            groupIt->second.closing = false;
+            groupIt->second.lastError = cancelError.value();
+        }
+        else
+        {
+            ocoLegToGroup.erase(groupIt->second.tpOrderLinkId);
+            ocoLegToGroup.erase(groupIt->second.slOrderLinkId);
+            ocoGroups.erase(groupIt);
         }
     }
 }
@@ -1503,23 +1550,8 @@ void BybitDealService::cancelAllOpenOrders(const string &symbol, OrderCategory c
 
 flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
 {
-    try
-    {
-        refreshBalancesCache("UNIFIED", nullopt);
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit balance REST refresh (UNIFIED) failed: " << e.what() << endl;
-    }
-
-    try
-    {
-        refreshBalancesCache("SPOT", nullopt);
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit balance REST refresh (SPOT) failed: " << e.what() << endl;
-    }
+    tryRefreshBalancesCache("UNIFIED", nullopt);
+    tryRefreshBalancesCache("SPOT", nullopt);
 
     return getBalances();
 }

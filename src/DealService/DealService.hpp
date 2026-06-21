@@ -109,6 +109,8 @@ class DealService
 
     ExchangerType getExchangerType() const;
 
+    std::string generateUniqueOcoId() const;
+
     virtual ~DealService() = default;
 };
 

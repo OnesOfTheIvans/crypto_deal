@@ -78,6 +78,8 @@ class BinanceDealService : public DealService
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
+    void validatePlaceOcoRequest(const PlaceOcoRequest &request) const;
+
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
     json::value parseAndValidate(const std::string &response);

@@ -1,6 +1,9 @@
 #include "../src/DealService/DealService.hpp"
 #include "../src/DealService/common/DecimalConverter.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 #include <gtest/gtest.h>
 
 namespace {
@@ -99,4 +102,19 @@ TEST(DealServiceHelpersTest, ComputesKnownHmacSha256)
 
     EXPECT_EQ(service.hmac("key", "The quick brown fox jumps over the lazy dog"),
               "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+}
+
+TEST(DealServiceHelpersTest, GeneratesUniqueOcoId)
+{
+    const DummyDealService service;
+
+    const std::string firstId = service.generateUniqueOcoId();
+    const std::string secondId = service.generateUniqueOcoId();
+
+    EXPECT_EQ(firstId.size(), 33u);
+    EXPECT_EQ(firstId[0], 'O');
+    EXPECT_TRUE(std::all_of(firstId.begin() + 1,
+                            firstId.end(),
+                            [](unsigned char c) { return std::islower(c) || std::isdigit(c); }));
+    EXPECT_NE(firstId, secondId);
 }

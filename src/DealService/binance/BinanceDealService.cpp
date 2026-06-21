@@ -675,6 +675,20 @@ void BinanceDealService::validatePlaceOrderRequest(const PlaceOrderRequest &requ
     }
 }
 
+void BinanceDealService::validatePlaceOcoRequest(const PlaceOcoRequest &request) const
+{
+    throwIf(request.symbol.empty(), "Symbol cannot be empty");
+    throwIf(request.quantity <= 0, "Quantity must be > 0");
+    throwIf(request.price <= 0, "Price must be > 0");
+    throwIf(request.stopPrice <= 0, "Stop Price must be > 0");
+
+    if (request.stopLimitPrice.has_value() && request.stopLimitPrice.value() > 0)
+    {
+        throwIf(!request.stopLimitTimeInForce.has_value() || request.stopLimitTimeInForce->empty(),
+                "stopLimitTimeInForce required if stopLimitPrice is set");
+    }
+}
+
 OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 {
     validatePlaceOrderRequest(request);
@@ -782,16 +796,7 @@ Decimal BinanceDealService::ceilQuantityToStep(const string &symbol, Decimal qua
 
 OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 {
-    throwIf(request.symbol.empty(), "Symbol cannot be empty");
-    throwIf(request.quantity <= 0, "Quantity must be > 0");
-    throwIf(request.price <= 0, "Price must be > 0");
-    throwIf(request.stopPrice <= 0, "Stop Price must be > 0");
-
-    if (request.stopLimitPrice.has_value() && request.stopLimitPrice.value() > 0)
-    {
-        throwIf(!request.stopLimitTimeInForce.has_value() || request.stopLimitTimeInForce->empty(),
-                "stopLimitTimeInForce required if stopLimitPrice is set");
-    }
+    validatePlaceOcoRequest(request);
 
     boost::urls::url requestUrl;
     requestUrl.set_path("/api/v3/orderList/oco");
