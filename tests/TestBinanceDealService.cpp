@@ -57,6 +57,40 @@ namespace {
         MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime": 1779052073334})");
     }
 
+    std::string binanceBalanceStreamMessage(const std::string &usdtFree = "100000",
+                                            const std::string &usdtLocked = "0",
+                                            const std::string &btcFree = "1",
+                                            const std::string &btcLocked = "0")
+    {
+        return "{\"event\":{\"e\":\"outboundAccountPosition\",\"B\":[{\"a\":\"USDT\",\"f\":\"" + usdtFree +
+               "\",\"l\":\"" + usdtLocked + "\"},{\"a\":\"BTC\",\"f\":\"" + btcFree + "\",\"l\":\"" + btcLocked +
+               "\"}]}}";
+    }
+
+    void seedBinanceBalances(BinanceDealService &service,
+                             const std::string &usdtFree = "100000",
+                             const std::string &usdtLocked = "0",
+                             const std::string &btcFree = "1",
+                             const std::string &btcLocked = "0")
+    {
+        test_private_access::dispatchBinanceUserStreamMessage(
+            service,
+            binanceBalanceStreamMessage(usdtFree, usdtLocked, btcFree, btcLocked));
+    }
+
+    std::size_t countRequestsContaining(const std::string &targetPart)
+    {
+        std::size_t count = 0;
+        for (const auto &request : MockNetwork::instance().getRequests())
+        {
+            if (request.target.find(targetPart) != std::string::npos)
+            {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     void expectMarketOrderRequest(const MockNetwork::RecordedRequest &request, const std::string &side)
     {
         EXPECT_EQ(request.method, "POST");
@@ -96,6 +130,7 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
     MockNetwork::instance().setResponse("/api/v3/order/test", "{}");
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+    seedBinanceBalances(service);
 
     PlaceOrderRequest req;
     req.symbol = "BTCUSDT";
@@ -155,6 +190,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+    seedBinanceBalances(service);
 
     OrderInfo info = service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0002"));
 
@@ -195,6 +231,7 @@ TEST_F(BinanceDealServiceTest, MarketSellOrder_Success)
     MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", tickerResponse);
     MockNetwork::instance().setResponse("/api/v3/order", responseJson);
+    seedBinanceBalances(service);
 
     OrderInfo info = service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0002"));
 
@@ -219,6 +256,55 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsBelowMinNotional)
     })");
 
     EXPECT_THROW(service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0001")), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceLimitOrder_RejectsInsufficientQuoteBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    seedBinanceBalances(service, "10", "0", "1", "0");
+
+    PlaceOrderRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::BUY;
+    req.type = OrderType::LIMIT;
+    req.quantity = DecimalConverter::parseDecimal("0.5");
+    req.price = DecimalConverter::parseDecimal("45000");
+    req.timeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOrder(req), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
+}
+
+TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", R"({
+        "symbol": "BTCUSDT",
+        "price": "50000.00000000"
+    })");
+    seedBinanceBalances(service, "10", "0", "1", "0");
+
+    EXPECT_THROW(service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.001")), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
+}
+
+TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/api/v3/ticker/price?symbol=BTCUSDT", R"({
+        "symbol": "BTCUSDT",
+        "price": "50000.00000000"
+    })");
+    seedBinanceBalances(service, "100000", "0", "0.0001", "0");
+
+    EXPECT_THROW(service.sellCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0002")), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
 }
 
 TEST_F(BinanceDealServiceTest, CancelOrder_Success)
@@ -332,10 +418,13 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
         "msg": "Mandatory parameter 'timeInForce' was not sent, was empty/null, or malformed."
     })";
 
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
     MockNetwork::instance().setResponse("/api/v3/order", errorJson);
+    seedBinanceBalances(service);
 
     PlaceOrderRequest req;
-    req.symbol = "ETHUSDT";
+    req.symbol = "BTCUSDT";
     req.side = OrderOperation::BUY;
     req.type = OrderType::LIMIT;
     req.quantity = DecimalConverter::parseDecimal("1.0");
@@ -540,6 +629,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
             }
         ]
     })");
+    seedBinanceBalances(service);
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
@@ -591,6 +681,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RequiresOrderReportCoreFields)
             }
         ]
     })");
+    seedBinanceBalances(service);
 
     PlaceOcoRequest req;
     req.symbol = "BTCUSDT";
@@ -620,6 +711,46 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
     req.stopLimitTimeInForce = "GTC";
 
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientBaseBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    seedBinanceBalances(service, "100000", "0", "0.0001", "0");
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::SELL;
+    req.quantity = DecimalConverter::parseDecimal("0.0002");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+    req.stopLimitTimeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/api/v3/orderList/oco"), 0u);
+}
+
+TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientQuoteBalance)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+    seedBinanceBalances(service, "10", "0", "1", "0");
+
+    PlaceOcoRequest req;
+    req.symbol = "BTCUSDT";
+    req.side = OrderOperation::BUY;
+    req.quantity = DecimalConverter::parseDecimal("0.0002");
+    req.price = DecimalConverter::parseDecimal("90000");
+    req.stopPrice = DecimalConverter::parseDecimal("60000");
+    req.stopLimitPrice = DecimalConverter::parseDecimal("59000");
+    req.stopLimitTimeInForce = "GTC";
+
+    EXPECT_THROW(service.placeOco(req), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("/api/v3/orderList/oco"), 0u);
 }
 
 TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)

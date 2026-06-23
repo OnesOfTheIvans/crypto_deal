@@ -689,6 +689,57 @@ void BinanceDealService::validatePlaceOcoRequest(const PlaceOcoRequest &request)
     }
 }
 
+void BinanceDealService::checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info, Decimal validationPrice)
+{
+    if (request.side == OrderOperation::BUY)
+    {
+        const auto quoteBalance = getBalance(info.quoteAsset);
+        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance.value().free : Decimal{0};
+        const Decimal requiredQuoteAmount = request.quantity * validationPrice;
+
+        throwIf(requiredQuoteAmount > 0 && quoteFree < requiredQuoteAmount,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
+                    info.quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
+        throwIf(quoteFree <= 0, "Insufficient balance: no free " + info.quoteAsset);
+    }
+    else
+    {
+        const auto baseBalance = getBalance(info.baseAsset);
+        const Decimal baseFree = baseBalance.has_value() ? baseBalance.value().free : Decimal{0};
+
+        throwIf(baseFree < request.quantity,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " +
+                    info.baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
+    }
+}
+
+void BinanceDealService::checkBalance(const PlaceOcoRequest &request, const SymbolInfo &info)
+{
+    if (request.side == OrderOperation::BUY)
+    {
+        const auto quoteBalance = getBalance(info.quoteAsset);
+        const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance.value().free : Decimal{0};
+        const Decimal belowPrice =
+            request.stopLimitPrice.has_value() ? request.stopLimitPrice.value() : request.stopPrice;
+        const Decimal requiredPrice = request.price > belowPrice ? request.price : belowPrice;
+        const Decimal requiredQuoteAmount = request.quantity * requiredPrice;
+
+        throwIf(requiredQuoteAmount > 0 && quoteFree < requiredQuoteAmount,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
+                    info.quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
+        throwIf(quoteFree <= 0, "Insufficient balance: no free " + info.quoteAsset);
+    }
+    else
+    {
+        const auto baseBalance = getBalance(info.baseAsset);
+        const Decimal baseFree = baseBalance.has_value() ? baseBalance.value().free : Decimal{0};
+
+        throwIf(baseFree < request.quantity,
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " +
+                    info.baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
+    }
+}
+
 OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
 {
     validatePlaceOrderRequest(request);
@@ -699,6 +750,7 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
                                         : getTickerPrice(request.symbol);
     optional<string> quantityError = validateQuantity(request.quantity, validationPrice, info);
     throwIf(quantityError.has_value(), "Binance placeOrder: " + quantityError.value_or(""));
+    checkBalance(request, info, validationPrice);
 
     boost::urls::url requestUrl;
     requestUrl.set_path("/api/v3/order");
@@ -797,6 +849,9 @@ Decimal BinanceDealService::ceilQuantityToStep(const string &symbol, Decimal qua
 OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
 {
     validatePlaceOcoRequest(request);
+
+    const SymbolInfo info = getSymbolInfo(request.symbol);
+    checkBalance(request, info);
 
     boost::urls::url requestUrl;
     requestUrl.set_path("/api/v3/orderList/oco");

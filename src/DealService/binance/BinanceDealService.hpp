@@ -80,6 +80,10 @@ class BinanceDealService : public DealService
 
     void validatePlaceOcoRequest(const PlaceOcoRequest &request) const;
 
+    void checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info, Decimal validationPrice);
+
+    void checkBalance(const PlaceOcoRequest &request, const SymbolInfo &info);
+
     flat_map<std::string, std::string> createHeaders(const std::string &apiKey);
 
     json::value parseAndValidate(const std::string &response);
