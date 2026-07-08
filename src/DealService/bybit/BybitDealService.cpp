@@ -102,8 +102,27 @@ void BybitDealService::setStreamError(const string &error)
     streamLastError = error;
 }
 
+bool BybitDealService::isTimeSyncRecent() const
+{
+    long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
+    long long lastMonoMs = lastSyncMonoMs.load();
+    return currentMonoMs - lastMonoMs < 10000;
+}
+
 void BybitDealService::syncTime()
 {
+    if (isTimeSyncRecent())
+    {
+        return;
+    }
+
+    lock_guard<mutex> lock(timeSyncMutex);
+
+    if (isTimeSyncRecent())
+    {
+        return;
+    }
+
     boost::urls::url requestUrl;
     requestUrl.set_path("/v5/market/time");
     string target = getTarget(requestUrl);
@@ -121,16 +140,14 @@ void BybitDealService::syncTime()
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
     serverTimeOffset = serverTime - localTime;
-    timeSynced = true;
+    long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
+    lastSyncMonoMs.store(currentMonoMs);
     cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
 }
 
 long long BybitDealService::getServerTimestamp()
 {
-    if (!timeSynced)
-    {
-        syncTime();
-    }
+    syncTime();
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
     return localTime + serverTimeOffset;

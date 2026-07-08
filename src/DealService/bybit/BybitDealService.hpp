@@ -29,8 +29,10 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -60,7 +62,8 @@ class BybitDealService : public DealService
     mutable std::mutex streamStatusMutex;
 
     long long serverTimeOffset = 0;
-    bool timeSynced = false;
+    std::atomic<long long> lastSyncMonoMs{0};
+    std::mutex timeSyncMutex;
 
     struct BybitOcoGroup
     {
@@ -159,6 +162,8 @@ class BybitDealService : public DealService
     void setStreamStatus(StreamStatus status);
 
     void setStreamError(const std::string &error);
+
+    bool isTimeSyncRecent() const;
 
     void syncTime();
 

@@ -4,6 +4,7 @@
 #include "../src/DealService/binance/BinanceDealService.hpp"
 #include "../src/DealService/bybit/BybitDealService.hpp"
 
+#include <atomic>
 #include <string>
 
 namespace test_private_access {
@@ -27,9 +28,16 @@ namespace test_private_access {
         friend type get(BybitHandleUserStreamMessageTag);
     };
 
+    struct BybitLastSyncMonoMsTag
+    {
+        using type = std::atomic<long long> BybitDealService::*;
+        friend type get(BybitLastSyncMonoMsTag);
+    };
+
     template struct PrivateMemberAccessor<BinanceHandleUserStreamMessageTag,
                                           &BinanceDealService::handleUserStreamMessage>;
     template struct PrivateMemberAccessor<BybitHandleUserStreamMessageTag, &BybitDealService::handleUserStreamMessage>;
+    template struct PrivateMemberAccessor<BybitLastSyncMonoMsTag, &BybitDealService::lastSyncMonoMs>;
 
     inline void dispatchBinanceUserStreamMessage(BinanceDealService &service, const std::string &message)
     {
@@ -39,6 +47,11 @@ namespace test_private_access {
     inline void dispatchBybitUserStreamMessage(BybitDealService &service, const std::string &message)
     {
         (service.*get(BybitHandleUserStreamMessageTag{}))(message);
+    }
+
+    inline void setBybitLastSyncMonoMs(BybitDealService &service, long long lastSyncMonoMs)
+    {
+        (service.*get(BybitLastSyncMonoMsTag{})).store(lastSyncMonoMs);
     }
 } // namespace test_private_access
 

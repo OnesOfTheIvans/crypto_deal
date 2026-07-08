@@ -173,6 +173,42 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
 }
 
+TEST_F(BybitDealServiceTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=UNIFIED", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "coin": [{
+                    "coin": "USDT",
+                    "walletBalance": "20",
+                    "availableToWithdraw": "18",
+                    "locked": "2"
+                }]
+            }]
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [] }
+    })");
+
+    service.getBalancesRest();
+    service.getBalancesRest();
+
+    EXPECT_EQ(countRequestsContaining("/v5/market/time"), 1u);
+
+    test_private_access::setBybitLastSyncMonoMs(service, 0);
+
+    service.getBalancesRest();
+
+    EXPECT_EQ(countRequestsContaining("/v5/market/time"), 2u);
+}
+
 TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
 {
     auto service = createService();
