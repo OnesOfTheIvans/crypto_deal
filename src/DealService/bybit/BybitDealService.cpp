@@ -113,17 +113,16 @@ void BybitDealService::syncTime()
 
     beast::error_code ec;
     json::value val = json::parse(response, ec);
-    if (!ec && val.is_object())
-    {
-        const ServerTimeResponseDto responseDto = parseResponseToDto<ServerTimeResponseDto>(val);
-        throwIf(!responseDto.result.has_value(), "Missing result object");
-        long long serverTime = stoll(responseDto.result.value().timeSecond) * 1000;
-        long long localTime =
-            chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-        serverTimeOffset = serverTime - localTime;
-        timeSynced = true;
-        cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
-    }
+    throwIf(ec || !val.is_object(), ec.what());
+
+    const ServerTimeResponseDto responseDto = parseResponseToDto<ServerTimeResponseDto>(val);
+    throwIf(!responseDto.result.has_value(), "Missing result object");
+    long long serverTime = stoll(responseDto.result.value().timeSecond) * 1000;
+    long long localTime =
+        chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
+    serverTimeOffset = serverTime - localTime;
+    timeSynced = true;
+    cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
 }
 
 long long BybitDealService::getServerTimestamp()
@@ -708,12 +707,9 @@ void BybitDealService::validateOrderPriceLimit(const PlaceOrderRequest &request)
 
 void BybitDealService::checkBalance(const PlaceOrderRequest &request, const SymbolInfo &info)
 {
-    const string &baseAsset = info.baseAsset;
-    const string &quoteAsset = info.quoteAsset;
-
     if (request.side == OrderOperation::BUY)
     {
-        const auto quoteBalance = getBalance(quoteAsset);
+        const auto quoteBalance = getBalance(info.quoteAsset);
         const Decimal quoteFree = quoteBalance.has_value() ? quoteBalance->free : Decimal{0};
 
         Decimal requiredQuoteAmount{};
@@ -744,17 +740,17 @@ void BybitDealService::checkBalance(const PlaceOrderRequest &request, const Symb
 
         throwIf(requiredQuoteAmount > 0 && quoteFree < requiredQuoteAmount,
                 "Insufficient balance: need " + DecimalConverter::formatDecimal(requiredQuoteAmount) + " " +
-                    quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
-        throwIf(quoteFree <= 0, "Insufficient balance: no free " + quoteAsset);
+                    info.quoteAsset + ", have " + DecimalConverter::formatDecimal(quoteFree));
+        throwIf(quoteFree <= 0, "Insufficient balance: no free " + info.quoteAsset);
     }
     else
     {
-        const auto baseBalance = getBalance(baseAsset);
+        const auto baseBalance = getBalance(info.baseAsset);
         const Decimal baseFree = baseBalance.has_value() ? baseBalance->free : Decimal{0};
 
         throwIf(baseFree < request.quantity,
-                "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " + baseAsset +
-                    ", have " + DecimalConverter::formatDecimal(baseFree));
+                "Insufficient balance: need " + DecimalConverter::formatDecimal(request.quantity) + " " +
+                    info.baseAsset + ", have " + DecimalConverter::formatDecimal(baseFree));
     }
 }
 

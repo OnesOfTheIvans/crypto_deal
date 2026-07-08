@@ -387,7 +387,8 @@ long long BinanceDealService::getServerTimestamp()
 {
     syncTime();
     auto now = chrono::system_clock::now();
-    return chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count() + serverTimeOffset;
+    long long localTime = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+    return localTime + serverTimeOffset;
 }
 
 void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream)
