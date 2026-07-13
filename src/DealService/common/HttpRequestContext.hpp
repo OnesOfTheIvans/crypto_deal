@@ -44,6 +44,11 @@ class HttpRequestContext
 
     beast::ssl_stream<beast::tcp_stream> &getStream();
 
+    std::string getTarget() const
+    {
+        return target;
+    }
+
     void setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers);
 
     void setRequestBody(const std::string &body);

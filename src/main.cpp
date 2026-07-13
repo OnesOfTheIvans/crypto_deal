@@ -6,80 +6,52 @@
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 
+#include <cctype>
+#include <chrono>
+#include <cmath>
 #include <iostream>
+#include <memory>
 #include <string>
+#include <thread>
 
-std::string binanceHost;
-std::string binanceApiKey;
-std::string binanceSecretKey;
-std::string bybitHost;
-std::string bybitApiKey;
-std::string bybitSecretKey;
+using namespace std;
+
+string binanceHost;
+string binanceApiKey;
+string binanceSecretKey;
+string binanceWebsocketHost;
+string bybitHost;
+string bybitApiKey;
+string bybitSecretKey;
+string bybitWebsocketHost;
 
 void initConfigVariables()
 {
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini(CONFIG_FILE, pt);
-    binanceHost = pt.get<std::string>("API.BINANCE_HOST");
-    binanceApiKey = pt.get<std::string>("API.BINANCE_API_KEY");
-    binanceSecretKey = pt.get<std::string>("API.BINANCE_SECRET_KEY");
-    bybitHost = pt.get<std::string>("API.BYBIT_HOST");
-    bybitApiKey = pt.get<std::string>("API.BYBIT_API_KEY");
-    bybitSecretKey = pt.get<std::string>("API.BYBIT_SECRET_KEY");
-}
 
-void testOperations(DealService *dealService, const std::string &title)
-{
-    std::cout << "<------------------------------------------------------\n"
-              << title << "\n------------------------------------------------------>" << std::endl;
-    std::cout << "-------------------------------------------------------\n"
-              << "BUY\n"
-              << "-------------------------------------------------------" << std::endl;
+    binanceHost = pt.get<string>("API.BINANCE_HOST");
+    binanceApiKey = pt.get<string>("API.BINANCE_API_KEY");
+    binanceSecretKey = pt.get<string>("API.BINANCE_SECRET_KEY");
+    binanceWebsocketHost = pt.get<string>("API.BINANCE_WEBSOCKET_HOST");
 
-    std::string baseAsset = "USDC";
-    std::string quoteAsset = "USDT";
-    int quantity = 100;
-    bool success = dealService->buyCrypto(baseAsset, quoteAsset, quantity);
-    if (success)
-    {
-        std::cout << "Order succeed" << std::endl;
-    }
-    else
-    {
-        std::cout << "Order failed" << std::endl;
-    }
-
-    std::cout << "-------------------------------------------------------\n"
-              << "SELL\n"
-              << "-------------------------------------------------------" << std::endl;
-
-    baseAsset = "USDC";
-    quoteAsset = "USDT";
-    quantity = 10;
-    success = dealService->sellCrypto(baseAsset, quoteAsset, quantity);
-    if (success)
-    {
-        std::cout << "Order succeed" << std::endl;
-    }
-    else
-    {
-        std::cout << "Order failed" << std::endl;
-    }
+    bybitHost = pt.get<string>("API.BYBIT_HOST");
+    bybitApiKey = pt.get<string>("API.BYBIT_API_KEY");
+    bybitSecretKey = pt.get<string>("API.BYBIT_SECRET_KEY");
+    bybitWebsocketHost = pt.get<string>("API.BYBIT_WEBSOCKET_HOST");
 }
 
 int main()
 {
-    initConfigVariables();
-    DealService *dealService;
-    dealService = new BinanceDealService(binanceHost, binanceApiKey, binanceSecretKey);
-    testOperations(dealService, "BINANCE");
-
-    delete dealService;
-
-    dealService = new BybitDealService(bybitHost, bybitApiKey, bybitSecretKey);
-    testOperations(dealService, "BYBIT");
-
-    delete dealService;
+    try
+    {
+        initConfigVariables();
+    }
+    catch (const exception &e)
+    {
+        cerr << "Unhandled exception in main: " << e.what() << endl;
+        return 1;
+    }
 
     return 0;
 }

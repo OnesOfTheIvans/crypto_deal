@@ -9,10 +9,8 @@ using namespace std;
 
 void HttpRequestContext::prepareRequest(const http::verb &type)
 {
-    cout << "[*] Resolving host: " << host << endl;
     auto const results = resolver.resolve(host, "https");
 
-    cout << "[*] Connecting..." << endl;
     beast::get_lowest_layer(stream).connect(results);
 
     if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
@@ -21,16 +19,14 @@ void HttpRequestContext::prepareRequest(const http::verb &type)
             beast::error_code(static_cast<int>(::ERR_get_error()), net::error::get_ssl_category())};
     }
 
-    cout << "[*] Performing SSL handshake..." << endl;
     stream.handshake(ssl::stream_base::client);
-    cout << "[*] SSL handshake done" << endl;
 
     request = {type, target, HTTP_PROTOCOL_VERSION};
     request.set(http::field::host, host);
     request.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 }
 
-void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std::string, std::string> &headers)
+void HttpRequestContext::setRequestHeaders(const flat_map<string, string> &headers)
 {
     for (auto header : headers)
     {
@@ -38,7 +34,7 @@ void HttpRequestContext::setRequestHeaders(const boost::container::flat_map<std:
     }
 }
 
-void HttpRequestContext::setRequestBody(const std::string &body)
+void HttpRequestContext::setRequestBody(const string &body)
 {
     request.body() = body;
     request.prepare_payload();
