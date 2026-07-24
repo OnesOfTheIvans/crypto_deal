@@ -86,13 +86,14 @@ OperationFactory::OperationFactory()
 
                               PlaceOrderRequest request;
 
-                              if (preset.side == OrderOperation::BUY)
+                              switch (preset.side)
                               {
+                              case OrderOperation::BUY:
                                   request.symbol = preset.outAsset + context.inAsset;
-                              }
-                              else // SELL
-                              {
+                                  break;
+                              case OrderOperation::SELL:
                                   request.symbol = context.inAsset + preset.outAsset;
+                                  break;
                               }
 
                               request.side = preset.side;
@@ -139,13 +140,14 @@ OperationFactory::OperationFactory()
 
                               throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_ORDER");
 
-                              if (context.side.value() == OrderOperation::BUY)
+                              switch (context.side.value())
                               {
+                              case OrderOperation::BUY:
                                   request.symbol = context.inAsset + context.previousInAsset;
-                              }
-                              else if (context.side.value() == OrderOperation::SELL)
-                              {
+                                  break;
+                              case OrderOperation::SELL:
                                   request.symbol = context.previousInAsset + context.inAsset;
+                                  break;
                               }
 
                               request.orderId = context.orderId;
@@ -168,13 +170,14 @@ OperationFactory::OperationFactory()
 
                 PlaceOcoRequest request;
 
-                if (preset.side == OrderOperation::BUY)
+                switch (preset.side)
                 {
+                case OrderOperation::BUY:
                     request.symbol = preset.outAsset + context.inAsset;
-                }
-                else // SELL
-                {
+                    break;
+                case OrderOperation::SELL:
                     request.symbol = context.inAsset + preset.outAsset;
+                    break;
                 }
 
                 request.side = preset.side;
@@ -261,13 +264,14 @@ OperationFactory::OperationFactory()
 
                               throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_OCO");
 
-                              if (context.side.value() == OrderOperation::BUY)
+                              switch (context.side.value())
                               {
+                              case OrderOperation::BUY:
                                   request.symbol = context.inAsset + context.previousInAsset;
-                              }
-                              else if (context.side.value() == OrderOperation::SELL)
-                              {
+                                  break;
+                              case OrderOperation::SELL:
                                   request.symbol = context.previousInAsset + context.inAsset;
+                                  break;
                               }
 
                               request.listClientOrderId = context.orderId;

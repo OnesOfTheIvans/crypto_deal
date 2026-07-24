@@ -1074,7 +1074,6 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
     return getBalances();
 }
 
-// add to the paper work like bad example of ai using
 void BinanceDealService::waitUntilOrderFilled(const std::string &symbol, const std::string &orderId)
 {
     cout << "Waiting for order " << orderId << " to be filled..." << endl;
