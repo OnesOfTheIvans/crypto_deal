@@ -379,15 +379,22 @@ namespace {
             callGetBalancesRestOrFail(*svc, GetParam());
         }
 
+        OrderInfo fundingOrder;
         {
             SCOPED_TRACE("Step: buy BTC to fund OCO SELL");
             const string base = "BTC";
             const string quote = "USDT";
             const Decimal qty = DecimalConverter::parseDecimal("0.00010");
 
-            OrderInfo buyOrder;
-            ASSERT_NO_THROW(buyOrder = svc->buyCrypto(base, quote, qty));
-            EXPECT_FALSE(buyOrder.orderId.empty()) << "buyCrypto did not create an order (needed to fund OCO SELL)";
+            ASSERT_NO_THROW(fundingOrder = svc->buyCrypto(base, quote, qty));
+            ASSERT_FALSE(fundingOrder.orderId.empty()) << "buyCrypto did not create an order (needed to fund OCO SELL)";
+            ASSERT_NO_THROW(svc->waitUntilOrderFilled(symbol, fundingOrder.orderId));
+
+            OrderQuery fundingQuery;
+            fundingQuery.symbol = symbol;
+            fundingQuery.category = OrderCategory::SPOT;
+            fundingQuery.orderId = fundingOrder.orderId;
+            ASSERT_NO_THROW(fundingOrder = svc->getOrder(fundingQuery));
         }
 
         {
@@ -395,15 +402,27 @@ namespace {
             callGetBalancesRestOrFail(*svc, GetParam());
         }
 
+        Decimal referencePrice = fundingOrder.avgPrice;
+        if (referencePrice <= 0 && fundingOrder.executedQty > 0)
+        {
+            referencePrice = fundingOrder.cumQuoteQty / fundingOrder.executedQty;
+        }
+        ASSERT_GT(referencePrice, Decimal{0}) << "Funding order did not provide an execution price";
+
+        SymbolInfo symbolInfo;
+        ASSERT_NO_THROW(symbolInfo = svc->getSymbolInfo(symbol, OrderCategory::SPOT));
+
         PlaceOcoRequest oco;
         oco.symbol = symbol;
         oco.side = OrderOperation::SELL;
         oco.quantity = DecimalConverter::parseDecimal("0.00010");
 
-        oco.price = DecimalConverter::parseDecimal("90000.0");
-        oco.stopPrice = DecimalConverter::parseDecimal("62000.0");
-
-        oco.stopLimitPrice = DecimalConverter::parseDecimal("61000.0");
+        oco.price =
+            DecimalConverter::ceilToStep(referencePrice * DecimalConverter::parseDecimal("1.10"), symbolInfo.tickSize);
+        oco.stopPrice =
+            DecimalConverter::floorToStep(referencePrice * DecimalConverter::parseDecimal("0.99"), symbolInfo.tickSize);
+        oco.stopLimitPrice =
+            DecimalConverter::floorToStep(referencePrice * DecimalConverter::parseDecimal("0.98"), symbolInfo.tickSize);
         oco.stopLimitTimeInForce = string("GTC");
 
         oco.listClientOrderId = string("IT_OCO_") + to_string(time(nullptr));
