@@ -1,10 +1,31 @@
 # crypto_deal
 
-# Integration tests
-cmake -S . -B build -DBUILD_INTEGRATION_TESTS=ON
-cmake --build build --target DealServiceIntegrationTests
-./build/integration_tests/DealServiceIntegrationTests --gtest_color=yes
+## Unit and integration tests
 
-or
+```bash
+cmake -S . -B build
+cmake --build build --target DealServiceUnitIntegrationTests
+./build/tests/DealServiceUnitIntegrationTests --gtest_color=yes
+```
 
-cmake --build build --target run_integration_tests
+The same suite can be run through CTest:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+## End-to-end tests
+
+End-to-end tests use real Binance and Bybit endpoints and require valid credentials in `config.ini`.
+
+```bash
+cmake -S . -B build -DBUILD_END_TO_END_TESTS=ON
+cmake --build build --target DealServiceEndToEndTests
+./build/end_to_end_tests/DealServiceEndToEndTests --gtest_color=yes
+```
+
+The project-provided runner can be used instead:
+
+```bash
+cmake --build build --target run_end_to_end_tests
+```

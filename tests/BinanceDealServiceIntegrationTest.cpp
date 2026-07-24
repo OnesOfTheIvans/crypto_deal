@@ -5,7 +5,7 @@
 #include "PrivateAccess.hpp"
 #include <gtest/gtest.h>
 
-class BinanceDealServiceTest : public ::testing::Test
+class BinanceDealServiceIntegrationTest : public ::testing::Test
 {
   protected:
     void SetUp() override
@@ -104,7 +104,7 @@ namespace {
     }
 } // namespace
 
-TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceLimitOrder_Success)
 {
     auto service = createService();
 
@@ -151,7 +151,7 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("1.0"));
 }
 
-TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
+TEST_F(BinanceDealServiceIntegrationTest, MarketBuyOrder_Success)
 {
     auto service = createService();
 
@@ -204,7 +204,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_Success)
     expectMarketOrderRequest(MockNetwork::instance().lastRequest(), "BUY");
 }
 
-TEST_F(BinanceDealServiceTest, MarketSellOrder_Success)
+TEST_F(BinanceDealServiceIntegrationTest, MarketSellOrder_Success)
 {
     auto service = createService();
 
@@ -245,7 +245,7 @@ TEST_F(BinanceDealServiceTest, MarketSellOrder_Success)
     expectMarketOrderRequest(MockNetwork::instance().lastRequest(), "SELL");
 }
 
-TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsBelowMinNotional)
+TEST_F(BinanceDealServiceIntegrationTest, MarketBuyOrder_RejectsBelowMinNotional)
 {
     auto service = createService();
 
@@ -258,7 +258,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsBelowMinNotional)
     EXPECT_THROW(service.buyCrypto("BTC", "USDT", DecimalConverter::parseDecimal("0.0001")), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceLimitOrder_RejectsInsufficientQuoteBalance)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceLimitOrder_RejectsInsufficientQuoteBalance)
 {
     auto service = createService();
 
@@ -277,7 +277,7 @@ TEST_F(BinanceDealServiceTest, PlaceLimitOrder_RejectsInsufficientQuoteBalance)
     EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
 }
 
-TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
+TEST_F(BinanceDealServiceIntegrationTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
 {
     auto service = createService();
 
@@ -292,7 +292,7 @@ TEST_F(BinanceDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
     EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
 }
 
-TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
+TEST_F(BinanceDealServiceIntegrationTest, MarketSellOrder_RejectsInsufficientBaseBalance)
 {
     auto service = createService();
 
@@ -307,7 +307,7 @@ TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
     EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
 }
 
-TEST_F(BinanceDealServiceTest, CancelOrder_Success)
+TEST_F(BinanceDealServiceIntegrationTest, CancelOrder_Success)
 {
     auto service = createService();
 
@@ -341,7 +341,7 @@ TEST_F(BinanceDealServiceTest, CancelOrder_Success)
     EXPECT_EQ(info.status, "CANCELED");
 }
 
-TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
+TEST_F(BinanceDealServiceIntegrationTest, GetSymbolInfo_Success)
 {
     auto service = createService();
 
@@ -387,7 +387,7 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("10.0"));
 }
 
-TEST_F(BinanceDealServiceTest, CeilQuantityToStep)
+TEST_F(BinanceDealServiceIntegrationTest, CeilQuantityToStep)
 {
     auto service = createService();
 
@@ -397,7 +397,7 @@ TEST_F(BinanceDealServiceTest, CeilQuantityToStep)
               DecimalConverter::parseDecimal("0.0002"));
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
     PlaceOrderRequest req;
@@ -410,7 +410,7 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_InvalidInput)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOrder_ApiError)
 {
     auto service = createService();
     std::string errorJson = R"({
@@ -434,7 +434,7 @@ TEST_F(BinanceDealServiceTest, PlaceOrder_ApiError)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
+TEST_F(BinanceDealServiceIntegrationTest, GetSymbolInfo_NotFound)
 {
     auto service = createService();
     std::string emptyResponse = "{}";
@@ -443,7 +443,7 @@ TEST_F(BinanceDealServiceTest, GetSymbolInfo_NotFound)
     EXPECT_THROW(service.getSymbolInfo("UNKNOWN"), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInvalidStep)
+TEST_F(BinanceDealServiceIntegrationTest, MarketSellOrder_RejectsInvalidStep)
 {
     auto service = createService();
 
@@ -466,7 +466,7 @@ TEST_F(BinanceDealServiceTest, MarketSellOrder_RejectsInvalidStep)
     }
 }
 
-TEST_F(BinanceDealServiceTest, GetOrder_ParsesDetailedResponse)
+TEST_F(BinanceDealServiceIntegrationTest, GetOrder_ParsesDetailedResponse)
 {
     auto service = createService();
 
@@ -499,7 +499,7 @@ TEST_F(BinanceDealServiceTest, GetOrder_ParsesDetailedResponse)
     EXPECT_EQ(info.avgPrice, DecimalConverter::parseDecimal("50000"));
 }
 
-TEST_F(BinanceDealServiceTest, GetBalancesRest_SeedsBalanceCache)
+TEST_F(BinanceDealServiceIntegrationTest, GetBalancesRest_SeedsBalanceCache)
 {
     auto service = createService();
 
@@ -520,7 +520,7 @@ TEST_F(BinanceDealServiceTest, GetBalancesRest_SeedsBalanceCache)
     EXPECT_EQ(service.getBalance("BTC")->free, DecimalConverter::parseDecimal("0.125"));
 }
 
-TEST_F(BinanceDealServiceTest, UserStreamAccountPositionUpdatesBalanceCache)
+TEST_F(BinanceDealServiceIntegrationTest, UserStreamAccountPositionUpdatesBalanceCache)
 {
     auto service = createService();
 
@@ -545,7 +545,7 @@ TEST_F(BinanceDealServiceTest, UserStreamAccountPositionUpdatesBalanceCache)
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
 }
 
-TEST_F(BinanceDealServiceTest, UserStreamIgnoresNonBalanceEvent)
+TEST_F(BinanceDealServiceIntegrationTest, UserStreamIgnoresNonBalanceEvent)
 {
     auto service = createService();
 
@@ -561,7 +561,7 @@ TEST_F(BinanceDealServiceTest, UserStreamIgnoresNonBalanceEvent)
     EXPECT_FALSE(service.getBalance("USDT").has_value());
 }
 
-TEST_F(BinanceDealServiceTest, GetBalancesRest_ApiError)
+TEST_F(BinanceDealServiceIntegrationTest, GetBalancesRest_ApiError)
 {
     auto service = createService();
 
@@ -574,7 +574,7 @@ TEST_F(BinanceDealServiceTest, GetBalancesRest_ApiError)
     EXPECT_THROW(service.getBalancesRest(), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, CancelAllOpenOrders_IgnoresAlreadyGoneErrors)
+TEST_F(BinanceDealServiceIntegrationTest, CancelAllOpenOrders_IgnoresAlreadyGoneErrors)
 {
     auto service = createService();
 
@@ -588,7 +588,7 @@ TEST_F(BinanceDealServiceTest, CancelAllOpenOrders_IgnoresAlreadyGoneErrors)
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "DELETE");
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_Success)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_Success)
 {
     auto service = createService();
 
@@ -655,7 +655,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_Success)
     EXPECT_NE(lastRequest.target.find("belowTimeInForce=GTC"), std::string::npos);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_RequiresOrderReportCoreFields)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_RequiresOrderReportCoreFields)
 {
     auto service = createService();
 
@@ -695,7 +695,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RequiresOrderReportCoreFields)
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_RejectsInvalidStep)
 {
     auto service = createService();
 
@@ -713,7 +713,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInvalidStep)
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientBaseBalance)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_RejectsInsufficientBaseBalance)
 {
     auto service = createService();
 
@@ -733,7 +733,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientBaseBalance)
     EXPECT_EQ(countRequestsContaining("/api/v3/orderList/oco"), 0u);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientQuoteBalance)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_RejectsInsufficientQuoteBalance)
 {
     auto service = createService();
 
@@ -753,7 +753,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RejectsInsufficientQuoteBalance)
     EXPECT_EQ(countRequestsContaining("/api/v3/orderList/oco"), 0u);
 }
 
-TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)
+TEST_F(BinanceDealServiceIntegrationTest, PlaceOco_RequiresStopLimitTimeInForce)
 {
     auto service = createService();
 
@@ -768,7 +768,7 @@ TEST_F(BinanceDealServiceTest, PlaceOco_RequiresStopLimitTimeInForce)
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
-TEST_F(BinanceDealServiceTest, CancelOco_Success)
+TEST_F(BinanceDealServiceIntegrationTest, CancelOco_Success)
 {
     auto service = createService();
 

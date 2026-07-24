@@ -6,4 +6,4 @@ test_binance.sh
 test_bybit.sh
 TODO.md
 AGENTS.md
-.codex/skills/run-crypto-deal-integration-tests/
+.codex/skills/run-crypto-deal-end-to-end-tests/

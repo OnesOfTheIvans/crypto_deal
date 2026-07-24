@@ -8,7 +8,7 @@
 #include <cctype>
 #include <gtest/gtest.h>
 
-class BybitDealServiceTest : public ::testing::Test
+class BybitDealServiceIntegrationTest : public ::testing::Test
 {
   protected:
     void SetUp() override
@@ -129,7 +129,7 @@ namespace {
     }
 } // namespace
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_Success)
 {
     auto service = createService();
 
@@ -173,7 +173,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
 {
     auto service = createService();
 
@@ -209,7 +209,7 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
     EXPECT_EQ(countRequestsContaining("/v5/market/time"), 2u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
+TEST_F(BybitDealServiceIntegrationTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
 {
     auto service = createService();
 
@@ -252,7 +252,7 @@ TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
     EXPECT_EQ(body.find("marketUnit"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
+TEST_F(BybitDealServiceIntegrationTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
 {
     auto service = createService();
 
@@ -289,7 +289,7 @@ TEST_F(BybitDealServiceTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
     EXPECT_EQ(body.find("timeInForce"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
+TEST_F(BybitDealServiceIntegrationTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
 {
     auto service = createService();
 
@@ -326,7 +326,7 @@ TEST_F(BybitDealServiceTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
     EXPECT_EQ(body.find("timeInForce"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsBelowMinNotional)
 {
     auto service = createService();
 
@@ -344,7 +344,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
 {
     auto service = createService();
 
@@ -362,7 +362,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
     EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
 {
     auto service = createService();
 
@@ -380,7 +380,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
     EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, CancelOrder_Success)
+TEST_F(BybitDealServiceIntegrationTest, CancelOrder_Success)
 {
     auto service = createService();
 
@@ -411,7 +411,7 @@ TEST_F(BybitDealServiceTest, CancelOrder_Success)
     EXPECT_EQ(body.find("null"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
+TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_Success)
 {
     auto service = createService();
 
@@ -449,7 +449,7 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.stepSize, DecimalConverter::parseDecimal("0.0001"));
 }
 
-TEST_F(BybitDealServiceTest, CeilQuantityToStep)
+TEST_F(BybitDealServiceIntegrationTest, CeilQuantityToStep)
 {
     auto service = createService();
 
@@ -459,7 +459,7 @@ TEST_F(BybitDealServiceTest, CeilQuantityToStep)
               DecimalConverter::parseDecimal("0.0002"));
 }
 
-TEST_F(BybitDealServiceTest, WalletStreamMessageUpdatesBalanceCache)
+TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageUpdatesBalanceCache)
 {
     auto service = createService();
 
@@ -476,7 +476,7 @@ TEST_F(BybitDealServiceTest, WalletStreamMessageUpdatesBalanceCache)
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.5"));
 }
 
-TEST_F(BybitDealServiceTest, WalletStreamMessageOverwritesCachedBalance)
+TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageOverwritesCachedBalance)
 {
     auto service = createService();
 
@@ -495,7 +495,7 @@ TEST_F(BybitDealServiceTest, WalletStreamMessageOverwritesCachedBalance)
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_BlankOptionalFields)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_BlankOptionalFields)
 {
     auto service = createService();
 
@@ -532,7 +532,7 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_BlankOptionalFields)
     EXPECT_EQ(balance->locked, DecimalConverter::parseDecimal("0.5"));
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_Success)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_Success)
 {
     auto service = createService();
 
@@ -586,7 +586,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
     EXPECT_EQ(orderLinkIds[1].size(), BYBIT_ORDER_LINK_ID_MAX_LENGTH);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
     PlaceOrderRequest req;
@@ -599,7 +599,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_ApiError)
 {
     auto service = createService();
     std::string errorJson = R"({
@@ -618,7 +618,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, CancelOrder_ApiError)
+TEST_F(BybitDealServiceIntegrationTest, CancelOrder_ApiError)
 {
     auto service = createService();
     std::string errorJson = R"({
@@ -633,7 +633,7 @@ TEST_F(BybitDealServiceTest, CancelOrder_ApiError)
     EXPECT_THROW(service.cancelOrder(q), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_ValidationError)
 {
     auto service = createService();
     PlaceOcoRequest req;
@@ -650,7 +650,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_PartialFailure_Rollback)
 {
     auto service = createService();
 
@@ -696,7 +696,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
     }
 }
 
-TEST_F(BybitDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
+TEST_F(BybitDealServiceIntegrationTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
 {
     auto service = createService();
 
@@ -711,7 +711,7 @@ TEST_F(BybitDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
+TEST_F(BybitDealServiceIntegrationTest, MarketSellOrder_RejectsInsufficientBaseBalance)
 {
     auto service = createService();
 
@@ -726,7 +726,7 @@ TEST_F(BybitDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_InsufficientBuyBalance)
 {
     auto service = createService();
 
@@ -744,7 +744,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, GetOrder_ParsesDetailedResponse)
+TEST_F(BybitDealServiceIntegrationTest, GetOrder_ParsesDetailedResponse)
 {
     auto service = createService();
 
@@ -787,7 +787,7 @@ TEST_F(BybitDealServiceTest, GetOrder_ParsesDetailedResponse)
     EXPECT_EQ(info.updatedTimeMs, 1779052073335LL);
 }
 
-TEST_F(BybitDealServiceTest, GetOrder_EmptyListThrows)
+TEST_F(BybitDealServiceIntegrationTest, GetOrder_EmptyListThrows)
 {
     auto service = createService();
 
@@ -804,7 +804,7 @@ TEST_F(BybitDealServiceTest, GetOrder_EmptyListThrows)
     EXPECT_THROW(service.getOrder(query), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
 {
     auto service = createService();
 
@@ -834,7 +834,7 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("5"));
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
 {
     auto service = createService();
 
@@ -867,7 +867,7 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 2u);
 }
 
-TEST_F(BybitDealServiceTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
+TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
 {
     auto service = createService();
 
@@ -903,7 +903,7 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
     EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("5"));
 }
 
-TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
+TEST_F(BybitDealServiceIntegrationTest, CancelAllOpenOrders_SuccessAndApiError)
 {
     auto service = createService();
 
@@ -925,7 +925,7 @@ TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
     EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", OrderCategory::SPOT), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, CancelOco_Success)
+TEST_F(BybitDealServiceIntegrationTest, CancelOco_Success)
 {
     auto service = createService();
 
@@ -980,7 +980,7 @@ TEST_F(BybitDealServiceTest, CancelOco_Success)
     EXPECT_EQ(cancelled.orders[1].status, "Cancelled");
 }
 
-TEST_F(BybitDealServiceTest, CancelOco_UnknownGroupThrows)
+TEST_F(BybitDealServiceIntegrationTest, CancelOco_UnknownGroupThrows)
 {
     auto service = createService();
 

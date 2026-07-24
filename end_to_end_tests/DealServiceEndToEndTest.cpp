@@ -208,7 +208,7 @@ namespace {
         ASSERT_NO_THROW(b->getBalancesRest());
     }
 
-    class DealServiceLiveIT : public ::testing::TestWithParam<Exchange>
+    class DealServiceEndToEndTest : public ::testing::TestWithParam<Exchange>
     {
       protected:
         Config cfg{};
@@ -254,7 +254,7 @@ namespace {
         }
     };
 
-    TEST_P(DealServiceLiveIT, RestBalancesSnapshot)
+    TEST_P(DealServiceEndToEndTest, RestBalancesSnapshot)
     {
         SCOPED_TRACE(string("Exchange=") + exchangeName(GetParam()));
 
@@ -271,7 +271,7 @@ namespace {
         EXPECT_TRUE(hasUSDT || hasBTC) << "Neither USDT nor BTC found in balance cache after REST snapshot.";
     }
 
-    TEST_P(DealServiceLiveIT, Smoke)
+    TEST_P(DealServiceEndToEndTest, Smoke)
     {
         SCOPED_TRACE(string("Exchange=") + exchangeName(GetParam()));
         ASSERT_TRUE(svc != nullptr);
@@ -331,7 +331,7 @@ namespace {
             req.quantity = DecimalConverter::parseDecimal("0.0002");
             req.price = DecimalConverter::parseDecimal("50000.0");
             req.timeInForce = string("GTC");
-            req.clientOrderId = string("IT_ORDER_") + to_string(time(nullptr));
+            req.clientOrderId = string("E2E_ORDER_") + to_string(time(nullptr));
 
             OrderInfo placed;
             ASSERT_NO_THROW(placed = svc->placeOrder(req));
@@ -369,7 +369,7 @@ namespace {
         }
     }
 
-    TEST_P(DealServiceLiveIT, OcoPlaceCancel)
+    TEST_P(DealServiceEndToEndTest, OcoPlaceCancel)
     {
         SCOPED_TRACE(string("Exchange=") + exchangeName(GetParam()));
         ASSERT_TRUE(svc != nullptr);
@@ -425,7 +425,7 @@ namespace {
             DecimalConverter::floorToStep(referencePrice * DecimalConverter::parseDecimal("0.98"), symbolInfo.tickSize);
         oco.stopLimitTimeInForce = string("GTC");
 
-        oco.listClientOrderId = string("IT_OCO_") + to_string(time(nullptr));
+        oco.listClientOrderId = string("E2E_OCO_") + to_string(time(nullptr));
 
         OcoInfo placed;
         {
@@ -472,6 +472,8 @@ namespace {
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(Live, DealServiceLiveIT, ::testing::Values(Exchange::BINANCE, Exchange::BYBIT));
+    INSTANTIATE_TEST_SUITE_P(EndToEnd,
+                             DealServiceEndToEndTest,
+                             ::testing::Values(Exchange::BINANCE, Exchange::BYBIT));
 
 }
