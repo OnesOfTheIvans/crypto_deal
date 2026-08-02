@@ -34,11 +34,24 @@ namespace test_private_access {
         friend type get(BybitLastSyncMonoMsTag);
     };
 
+    struct BinanceSetStreamStatusTag
+    {
+        using type = void (BinanceDealService::*)(StreamStatus);
+        friend type get(BinanceSetStreamStatusTag);
+    };
+
+    struct BybitSetStreamStatusTag
+    {
+        using type = void (BybitDealService::*)(StreamStatus);
+        friend type get(BybitSetStreamStatusTag);
+    };
+
     template struct PrivateMemberAccessor<BinanceHandleUserStreamMessageTag,
                                           &BinanceDealService::handleUserStreamMessage>;
     template struct PrivateMemberAccessor<BybitHandleUserStreamMessageTag, &BybitDealService::handleUserStreamMessage>;
     template struct PrivateMemberAccessor<BybitLastSyncMonoMsTag, &BybitDealService::lastSyncMonoMs>;
-
+    template struct PrivateMemberAccessor<BinanceSetStreamStatusTag, &BinanceDealService::setStreamStatus>;
+    template struct PrivateMemberAccessor<BybitSetStreamStatusTag, &BybitDealService::setStreamStatus>;
     inline void dispatchBinanceUserStreamMessage(BinanceDealService &service, const std::string &message)
     {
         (service.*get(BinanceHandleUserStreamMessageTag{}))(message);
@@ -53,6 +66,17 @@ namespace test_private_access {
     {
         (service.*get(BybitLastSyncMonoMsTag{})).store(lastSyncMonoMs);
     }
-} // namespace test_private_access
+
+    inline void setBinanceStreamStatus(BinanceDealService &service, StreamStatus status)
+    {
+        (service.*get(BinanceSetStreamStatusTag{}))(status);
+    }
+
+    inline void setBybitStreamStatus(BybitDealService &service, StreamStatus status)
+    {
+        (service.*get(BybitSetStreamStatusTag{}))(status);
+    }
+
+}
 
 #endif

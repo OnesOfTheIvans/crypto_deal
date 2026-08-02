@@ -388,13 +388,7 @@ namespace {
 
             ASSERT_NO_THROW(fundingOrder = svc->buyCrypto(base, quote, qty));
             ASSERT_FALSE(fundingOrder.orderId.empty()) << "buyCrypto did not create an order (needed to fund OCO SELL)";
-            ASSERT_NO_THROW(svc->waitUntilOrderFilled(symbol, fundingOrder.orderId));
-
-            OrderQuery fundingQuery;
-            fundingQuery.symbol = symbol;
-            fundingQuery.category = OrderCategory::SPOT;
-            fundingQuery.orderId = fundingOrder.orderId;
-            ASSERT_NO_THROW(fundingOrder = svc->getOrder(fundingQuery));
+            ASSERT_NO_THROW(fundingOrder = svc->waitUntilOrderFilled(symbol, fundingOrder.orderId));
         }
 
         {
@@ -451,8 +445,7 @@ namespace {
 
             try
             {
-                OcoInfo cancelled = svc->cancelOco(q);
-                EXPECT_GE(cancelled.orders.size(), 1u);
+                svc->cancelOco(q);
             }
             catch (const std::exception &e)
             {
@@ -472,8 +465,6 @@ namespace {
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(EndToEnd,
-                             DealServiceEndToEndTest,
-                             ::testing::Values(Exchange::BINANCE, Exchange::BYBIT));
+    INSTANTIATE_TEST_SUITE_P(EndToEnd, DealServiceEndToEndTest, ::testing::Values(Exchange::BINANCE, Exchange::BYBIT));
 
 }

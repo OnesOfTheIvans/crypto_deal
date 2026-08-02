@@ -24,7 +24,6 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <vector>
 
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
@@ -74,7 +73,9 @@ class DealService
 
     virtual OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) = 0;
 
-    virtual void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
+    virtual OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
+
+    virtual OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 
@@ -101,7 +102,7 @@ class DealService
 
     virtual OcoInfo placeOco(const PlaceOcoRequest &request) = 0;
 
-    virtual OcoInfo cancelOco(const OrderListQuery &request) = 0;
+    virtual void cancelOco(const OrderListQuery &request) = 0;
 
     virtual void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) = 0;
 
