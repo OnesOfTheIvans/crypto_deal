@@ -7,3 +7,4 @@ test_bybit.sh
 TODO.md
 AGENTS.md
 .codex/skills/run-crypto-deal-end-to-end-tests/
+cancel_operations.md

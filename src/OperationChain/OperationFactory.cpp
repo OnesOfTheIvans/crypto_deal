@@ -112,36 +112,6 @@ OperationFactory::OperationFactory()
                           };
                       });
 
-    factories.emplace(OperationType::CANCEL_ORDER,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderQuery request;
-
-                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_ORDER");
-
-                              switch (context.side.value())
-                              {
-                              case OrderOperation::BUY:
-                                  request.symbol = context.inAsset + context.previousInAsset;
-                                  break;
-                              case OrderOperation::SELL:
-                                  request.symbol = context.previousInAsset + context.inAsset;
-                                  break;
-                              }
-
-                              request.orderId = context.orderId;
-                              service->cancelOrder(request);
-
-                              context.side = std::nullopt;
-
-                              return context;
-                          };
-                      });
-
     factories.emplace(OperationType::PLACE_OCO,
                       [](const Config &config) -> operation
                       {
@@ -181,36 +151,6 @@ OperationFactory::OperationFactory()
                               context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
                               context.side = preset.side;
-
-                              return context;
-                          };
-                      });
-
-    factories.emplace(OperationType::CANCEL_OCO,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderListQuery request;
-
-                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_OCO");
-
-                              switch (context.side.value())
-                              {
-                              case OrderOperation::BUY:
-                                  request.symbol = context.inAsset + context.previousInAsset;
-                                  break;
-                              case OrderOperation::SELL:
-                                  request.symbol = context.previousInAsset + context.inAsset;
-                                  break;
-                              }
-
-                              request.listClientOrderId = context.orderId;
-                              service->cancelOco(request);
-
-                              context.side = std::nullopt;
 
                               return context;
                           };
