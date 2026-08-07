@@ -7,6 +7,8 @@ add_executable(DealServiceUnitIntegrationTests
     BinanceDealServiceIntegrationTest.cpp
     BybitDealServiceIntegrationTest.cpp
     OperationFactoryTest.cpp
+    OperationChainTest.cpp
+    OperationChainIntegrationTest.cpp
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
@@ -14,6 +16,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
     ../src/OperationChain/OperationFactory.cpp
+    ../src/OperationChain/OperationChain.cpp
 )
 
 target_include_directories(DealServiceUnitIntegrationTests PRIVATE

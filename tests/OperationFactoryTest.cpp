@@ -144,9 +144,54 @@ TEST(OperationFactoryTest, PlaceOrderUsesReturnedWebsocketOrderWithoutRestQuery)
 
     EXPECT_EQ(service->orderWaitCalls, 1);
     EXPECT_EQ(service->getOrderCalls, 0);
-    EXPECT_EQ(context.orderId, "client-filled");
     EXPECT_EQ(context.quantity, Decimal{2});
     EXPECT_EQ(context.inAsset, "BTC");
+}
+
+TEST(OperationFactoryTest, SellCryptoUsesCumulativeQuoteQuantity)
+{
+    auto service = std::make_shared<OperationDealService>();
+    service->placedOrder.symbol = "BTCUSDT";
+    service->placedOrder.orderId = "placed";
+    service->filledOrder = service->placedOrder;
+    service->filledOrder.executedQty = Decimal{2};
+    service->filledOrder.cumQuoteQty = Decimal{250};
+
+    OperationContext context = createContext(service);
+    context.inAsset = "BTC";
+    context.quantity = Decimal{2};
+    BaseConfig config;
+    config.outAsset = "USDT";
+
+    const OperationFactory factory;
+    factory.create(OperationType::SELL_CRYPTO, config)(context);
+
+    EXPECT_EQ(context.quantity, Decimal{250});
+    EXPECT_EQ(context.inAsset, "USDT");
+}
+
+TEST(OperationFactoryTest, PlaceSellOrderUsesCumulativeQuoteQuantity)
+{
+    auto service = std::make_shared<OperationDealService>();
+    service->placedOrder.symbol = "BTCUSDT";
+    service->placedOrder.orderId = "placed";
+    service->filledOrder = service->placedOrder;
+    service->filledOrder.executedQty = Decimal{2};
+    service->filledOrder.cumQuoteQty = Decimal{250};
+
+    OperationContext context = createContext(service);
+    context.inAsset = "BTC";
+    context.quantity = Decimal{2};
+    PlaceOrderConfig config;
+    config.outAsset = "USDT";
+    config.side = OrderOperation::SELL;
+    config.type = OrderType::MARKET;
+
+    const OperationFactory factory;
+    factory.create(OperationType::PLACE_ORDER, config)(context);
+
+    EXPECT_EQ(context.quantity, Decimal{250});
+    EXPECT_EQ(context.inAsset, "USDT");
 }
 
 TEST(OperationFactoryTest, PlaceOcoDelegatesToOcoWaitAndUsesFilledChild)
@@ -169,9 +214,33 @@ TEST(OperationFactoryTest, PlaceOcoDelegatesToOcoWaitAndUsesFilledChild)
 
     EXPECT_EQ(service->ocoWaitCalls, 1);
     EXPECT_EQ(service->getOrderCalls, 0);
-    EXPECT_EQ(context.orderId, "filled-child");
     EXPECT_EQ(context.quantity, Decimal{3});
     EXPECT_EQ(context.inAsset, "BTC");
+}
+
+TEST(OperationFactoryTest, PlaceSellOcoUsesCumulativeQuoteQuantity)
+{
+    auto service = std::make_shared<OperationDealService>();
+    service->placedOco.orderListId = "list";
+    service->filledOrder.symbol = "BTCUSDT";
+    service->filledOrder.orderId = "filled-child";
+    service->filledOrder.executedQty = Decimal{2};
+    service->filledOrder.cumQuoteQty = Decimal{250};
+
+    OperationContext context = createContext(service);
+    context.inAsset = "BTC";
+    context.quantity = Decimal{2};
+    PlaceOcoConfig config;
+    config.outAsset = "USDT";
+    config.side = OrderOperation::SELL;
+    config.price = Decimal{10};
+    config.stopPrice = Decimal{9};
+
+    const OperationFactory factory;
+    factory.create(OperationType::PLACE_OCO, config)(context);
+
+    EXPECT_EQ(context.quantity, Decimal{250});
+    EXPECT_EQ(context.inAsset, "USDT");
 }
 
 TEST(OperationFactoryTest, PlaceOcoWaitFailurePropagatesWithoutMutatingContext)
@@ -191,6 +260,5 @@ TEST(OperationFactoryTest, PlaceOcoWaitFailurePropagatesWithoutMutatingContext)
 
     EXPECT_THROW(operation(context), std::runtime_error);
     EXPECT_EQ(context.inAsset, "USDT");
-    EXPECT_FALSE(context.orderId.has_value());
-    EXPECT_FALSE(context.side.has_value());
+    EXPECT_EQ(context.quantity, Decimal{1});
 }

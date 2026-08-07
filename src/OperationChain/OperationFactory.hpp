@@ -9,7 +9,7 @@
 
 #include <functional>
 
-using operation = std::function<OperationContext &(OperationContext &)>;
+using operation = std::function<void(OperationContext &)>;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
 class OperationFactory

@@ -17,9 +17,6 @@ struct OperationContext
     ExchangerType exchangerType;
     const ExchangerPull exchangersPull;
     std::string inAsset;
-    std::string previousInAsset;
-    std::optional<OrderOperation> side;
-    std::optional<std::string> orderId;
     Decimal quantity{};
 
     OperationContext(const std::vector<Exchanger> &exchangers) : exchangersPull(exchangers) {}

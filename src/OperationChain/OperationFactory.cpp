@@ -13,61 +13,63 @@
 using namespace std;
 using namespace exception_handling;
 
+namespace {
+    Decimal getReceivedQuantity(const OrderInfo &orderInfo, OrderOperation side)
+    {
+        if (side == OrderOperation::SELL)
+        {
+            return orderInfo.cumQuoteQty;
+        }
+
+        return orderInfo.executedQty > 0 ? orderInfo.executedQty : orderInfo.origQty;
+    }
+}
+
 OperationFactory::OperationFactory()
 {
-    factories.emplace(
-        OperationType::BUY_CRYPTO,
-        [](const Config &config) -> operation
-        {
-            const auto preset = get<BaseConfig>(config);
-            return [preset](OperationContext &context) -> OperationContext &
-            {
-                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                OrderInfo orderInfo = service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
+    factories.emplace(OperationType::BUY_CRYPTO,
+                      [](const Config &config) -> operation
+                      {
+                          const auto preset = get<BaseConfig>(config);
+                          return [preset](OperationContext &context)
+                          {
+                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                              OrderInfo orderInfo =
+                                  service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
 
-                OrderInfo completeOrderInfo = service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              OrderInfo completeOrderInfo =
+                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                context.orderId = completeOrderInfo.orderId;
-                context.quantity =
-                    completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty : completeOrderInfo.origQty;
+                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::BUY);
 
-                context.previousInAsset = context.inAsset;
-                context.inAsset = preset.outAsset;
-                context.side = OrderOperation::BUY;
+                              context.inAsset = preset.outAsset;
+                          };
+                      });
 
-                return context;
-            };
-        });
+    factories.emplace(OperationType::SELL_CRYPTO,
+                      [](const Config &config) -> operation
+                      {
+                          const auto preset = get<BaseConfig>(config);
+                          return [preset](OperationContext &context)
+                          {
+                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                              OrderInfo orderInfo =
+                                  service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
 
-    factories.emplace(
-        OperationType::SELL_CRYPTO,
-        [](const Config &config) -> operation
-        {
-            const auto preset = get<BaseConfig>(config);
-            return [preset](OperationContext &context) -> OperationContext &
-            {
-                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                OrderInfo orderInfo = service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
+                              OrderInfo completeOrderInfo =
+                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                OrderInfo completeOrderInfo = service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::SELL);
 
-                context.orderId = completeOrderInfo.orderId;
-                context.quantity =
-                    completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty : completeOrderInfo.origQty;
-
-                context.previousInAsset = context.inAsset;
-                context.inAsset = preset.outAsset;
-                context.side = OrderOperation::SELL;
-
-                return context;
-            };
-        });
+                              context.inAsset = preset.outAsset;
+                          };
+                      });
 
     factories.emplace(OperationType::PLACE_ORDER,
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOrderConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
@@ -86,7 +88,6 @@ OperationFactory::OperationFactory()
                               request.side = preset.side;
                               request.type = preset.type;
                               request.timeInForce = preset.timeInForce;
-                              request.clientOrderId = context.orderId;
                               request.category = OrderCategory::SPOT;
                               request.triggerPrice = preset.triggerPrice;
                               request.orderFilter = preset.orderFilter;
@@ -98,17 +99,9 @@ OperationFactory::OperationFactory()
                               OrderInfo completeOrderInfo =
                                   service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                              context.orderId = completeOrderInfo.clientOrderId.empty()
-                                                    ? completeOrderInfo.orderId
-                                                    : completeOrderInfo.clientOrderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
-                                                                                   : completeOrderInfo.origQty;
+                              context.quantity = getReceivedQuantity(completeOrderInfo, preset.side);
 
-                              context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = preset.side;
-
-                              return context;
                           };
                       });
 
@@ -116,7 +109,7 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOcoConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
@@ -145,14 +138,8 @@ OperationFactory::OperationFactory()
 
                               const OrderInfo filledOrder = service->waitUntilOcoOrderFilled(ocoInfo);
 
-                              context.orderId = filledOrder.orderId;
-                              context.quantity =
-                                  filledOrder.executedQty > 0 ? filledOrder.executedQty : filledOrder.origQty;
-                              context.previousInAsset = context.inAsset;
+                              context.quantity = getReceivedQuantity(filledOrder, preset.side);
                               context.inAsset = preset.outAsset;
-                              context.side = preset.side;
-
-                              return context;
                           };
                       });
 
@@ -165,7 +152,7 @@ OperationFactory::OperationFactory()
         [](const Config &config) -> operation
         {
             const auto preset = get<SendToConfig>(config);
-            return [preset](OperationContext &context) -> OperationContext &
+            return [preset](OperationContext &context)
             {
                 string targetExchanger = context.exchangerType == ExchangerType::BYBIT ? "Bybit" : "Binance";
                 string destinationExchanger = preset.destinationExchanger == ExchangerType::BYBIT ? "Bybit" : "Binance";
@@ -173,10 +160,6 @@ OperationFactory::OperationFactory()
                      << targetExchanger << " to the " << destinationExchanger << " by chain " << preset.chain
                      << " to the address " << preset.address << "." << endl;
                 context.exchangerType = preset.destinationExchanger;
-
-                context.side = std::nullopt;
-
-                return context;
             };
         });
 }
