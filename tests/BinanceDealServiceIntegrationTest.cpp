@@ -542,6 +542,17 @@ TEST_F(BinanceDealServiceIntegrationTest, GetBalancesRest_SeedsBalanceCache)
     EXPECT_EQ(service.getBalance("BTC")->free, DecimalConverter::parseDecimal("0.125"));
 }
 
+TEST_F(BinanceDealServiceIntegrationTest, StopUserStreamDoesNotLogWhenAlreadyStopped)
+{
+    auto service = createService();
+
+    testing::internal::CaptureStdout();
+    service.stopUserStream();
+    const std::string output = testing::internal::GetCapturedStdout();
+
+    EXPECT_TRUE(output.empty());
+}
+
 TEST_F(BinanceDealServiceIntegrationTest, UserStreamAccountPositionUpdatesBalanceCache)
 {
     auto service = createService();

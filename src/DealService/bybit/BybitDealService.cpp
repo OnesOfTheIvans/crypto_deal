@@ -658,18 +658,6 @@ void BybitDealService::refreshBalancesCache(const string &accountType, const opt
     processCoins(responseDto);
 }
 
-void BybitDealService::tryRefreshBalancesCache(const string &accountType, const optional<string> &coinFilter)
-{
-    try
-    {
-        refreshBalancesCache(accountType, coinFilter);
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit balance REST refresh (" << accountType << ") failed: " << e.what() << endl;
-    }
-}
-
 void BybitDealService::processCoins(const WalletBalanceResponseDto &responseDto)
 {
     if (!responseDto.result.has_value() || !responseDto.result.value().list.has_value())
@@ -2174,8 +2162,32 @@ void BybitDealService::cancelAllOpenOrders(const string &symbol, OrderCategory c
 
 flat_map<string, AssetBalance> BybitDealService::getBalancesRest()
 {
-    tryRefreshBalancesCache("UNIFIED", nullopt);
-    tryRefreshBalancesCache("SPOT", nullopt);
+    lock_guard<mutex> lock(balanceRefreshMutex);
+    const string primaryAccountType = balanceAccountType.empty() ? "UNIFIED" : balanceAccountType;
+    const string fallbackAccountType = primaryAccountType == "UNIFIED" ? "SPOT" : "UNIFIED";
+
+    string primaryError;
+    try
+    {
+        refreshBalancesCache(primaryAccountType, nullopt);
+        balanceAccountType = primaryAccountType;
+        return getBalances();
+    }
+    catch (const exception &e)
+    {
+        primaryError = e.what();
+    }
+
+    try
+    {
+        refreshBalancesCache(fallbackAccountType, nullopt);
+        balanceAccountType = fallbackAccountType;
+    }
+    catch (const exception &e)
+    {
+        throw runtime_error("Bybit balance REST refresh failed for " + primaryAccountType + ": " + primaryError + "; " +
+                            fallbackAccountType + ": " + e.what());
+    }
 
     return getBalances();
 }

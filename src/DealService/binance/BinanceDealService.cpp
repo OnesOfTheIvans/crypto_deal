@@ -1018,14 +1018,19 @@ void BinanceDealService::startUserStream()
 
 void BinanceDealService::stopUserStream()
 {
-    cout << "Requesting user stream stop..." << endl;
-    userStream = false;
-
     shared_ptr<WebsocketStream> sharedWebsocketStream;
     {
         lock_guard<mutex> lock(userWebsocketMutex);
         sharedWebsocketStream = userWebsocketStream;
     }
+
+    if (!userStream && !sharedWebsocketStream && !runner.joinable() && getUserStreamStatus() == StreamStatus::STOPPED)
+    {
+        return;
+    }
+
+    cout << "Requesting user stream stop..." << endl;
+    userStream = false;
 
     if (sharedWebsocketStream)
     {

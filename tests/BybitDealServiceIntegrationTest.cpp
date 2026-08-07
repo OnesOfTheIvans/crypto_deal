@@ -934,10 +934,14 @@ TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_FallsBackFromUnifiedToSp
     })");
 
     const auto balances = service.getBalancesRest();
+    const auto refreshedBalances = service.getBalancesRest();
 
     ASSERT_TRUE(balances.contains("USDT"));
     EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("15"));
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("5"));
+    ASSERT_TRUE(refreshedBalances.contains("USDT"));
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 1u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 2u);
 }
 
 TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
@@ -959,18 +963,34 @@ TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_RefreshesWhenCacheAlread
             }]
         }
     })");
-    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
-        "retCode": 0,
-        "retMsg": "OK",
-        "result": { "list": [] }
-    })");
-
     const auto balances = service.getBalancesRest();
+    const auto refreshedBalances = service.getBalancesRest();
 
     ASSERT_TRUE(balances.contains("USDT"));
     EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("18"));
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("2"));
+    ASSERT_TRUE(refreshedBalances.contains("USDT"));
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 2u);
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 2u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 0u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_ThrowsWhenBothAccountTypesFail)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=UNIFIED", R"({
+        "retCode": 10001,
+        "retMsg": "Unified account unavailable"
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
+        "retCode": 10001,
+        "retMsg": "Spot account unavailable"
+    })");
+
+    EXPECT_THROW(service.getBalancesRest(), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 1u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 1u);
 }
 
 TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)

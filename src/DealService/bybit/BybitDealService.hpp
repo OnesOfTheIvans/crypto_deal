@@ -98,6 +98,8 @@ class BybitDealService : public DealService
 
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
+    std::mutex balanceRefreshMutex;
+    std::string balanceAccountType;
 
     std::map<std::string, SymbolInfo> symbolInfoCache;
     std::mutex symbolInfoMutex;
@@ -292,9 +294,6 @@ class BybitDealService : public DealService
 
     void refreshBalancesCache(const std::string &accountType,
                               const std::optional<std::string> &coinFilter = std::nullopt);
-
-    void tryRefreshBalancesCache(const std::string &accountType,
-                                 const std::optional<std::string> &coinFilter = std::nullopt);
 
     void processCoins(const bybit::WalletBalanceResponseDto &responseDto);
 

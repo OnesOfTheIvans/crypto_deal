@@ -20,8 +20,9 @@ End-to-end tests use real Binance and Bybit endpoints and require valid credenti
 
 ```bash
 cmake -S . -B build -DBUILD_END_TO_END_TESTS=ON
-cmake --build build --target DealServiceEndToEndTests
+cmake --build build --target DealServiceEndToEndTests OperationChainEndToEndTests
 ./build/end_to_end_tests/DealServiceEndToEndTests --gtest_color=yes
+./build/end_to_end_tests/OperationChainEndToEndTests --gtest_color=yes
 ```
 
 The project-provided runner can be used instead:

@@ -12,11 +12,15 @@
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <utility>
 
 #ifndef INSTANTIATE_TEST_SUITE_P
 #define INSTANTIATE_TEST_SUITE_P INSTANTIATE_TEST_CASE_P
@@ -193,6 +197,41 @@ namespace {
         return make_unique<BybitDealService>(c.bybitHost, c.bybitApiKey, c.bybitSecretKey, c.bybitWebsocketHost);
     }
 
+    template <typename Function>
+    auto executeInNewThread(Function &&function, DealService &service, const string &description)
+    {
+        using Result = invoke_result_t<Function>;
+
+        packaged_task<Result()> task(forward<Function>(function));
+        future<Result> result = task.get_future();
+        thread executionThread(move(task));
+
+        if (result.wait_for(chrono::seconds(60)) != future_status::ready)
+        {
+            try
+            {
+                service.stopUserStream();
+            }
+            catch (const exception &e)
+            {
+                cerr << "stopUserStream failed after " << description << " timed out: " << e.what() << "\n";
+            }
+
+            executionThread.join();
+            throw runtime_error(description + " did not finish within 60 seconds");
+        }
+
+        executionThread.join();
+        if constexpr (is_void_v<Result>)
+        {
+            result.get();
+        }
+        else
+        {
+            return result.get();
+        }
+    }
+
     static void callGetBalancesRestOrFail(DealService &svc, Exchange ex)
     {
         if (ex == Exchange::BINANCE)
@@ -366,6 +405,49 @@ namespace {
             {
                 SUCCEED() << "Order not open for cancel (status=" << got.status << ")";
             }
+        }
+    }
+
+    TEST_P(DealServiceEndToEndTest, WaitUntilOrderFilledReturnsMarketExecution)
+    {
+        SCOPED_TRACE(string("Exchange=") + exchangeName(GetParam()));
+        ASSERT_TRUE(svc != nullptr);
+
+        callGetBalancesRestOrFail(*svc, GetParam());
+        ASSERT_NO_THROW(svc->startUserStream());
+        ASSERT_TRUE(waitForStreamConnected(*svc))
+            << "Stream not connected. Status=" << static_cast<int>(svc->getUserStreamStatus())
+            << " Error=" << svc->getUserStreamLastError();
+
+        const Decimal quantity = DecimalConverter::parseDecimal("0.00010");
+        OrderInfo placedOrder;
+        ASSERT_NO_THROW(placedOrder = svc->buyCrypto("BTC", "USDT", quantity));
+        ASSERT_FALSE(placedOrder.symbol.empty());
+        ASSERT_FALSE(placedOrder.orderId.empty());
+
+        OrderInfo filledOrder;
+        ASSERT_NO_THROW(filledOrder = executeInNewThread(
+                            [this, &placedOrder]()
+                            { return svc->waitUntilOrderFilled(placedOrder.symbol, placedOrder.orderId); },
+                            *svc,
+                            "order fill wait"));
+
+        EXPECT_EQ(normalizeOrderStatus(filledOrder.status), "filled");
+        EXPECT_EQ(filledOrder.orderId, placedOrder.orderId);
+        EXPECT_GT(filledOrder.executedQty, Decimal{0});
+        EXPECT_GT(filledOrder.cumQuoteQty, Decimal{0});
+
+        if (filledOrder.executedQty > 0)
+        {
+            OrderInfo cleanupOrder;
+            ASSERT_NO_THROW(cleanupOrder = svc->sellCrypto("BTC", "USDT", filledOrder.executedQty));
+            ASSERT_FALSE(cleanupOrder.symbol.empty());
+            ASSERT_FALSE(cleanupOrder.orderId.empty());
+            ASSERT_NO_THROW(
+                executeInNewThread([this, &cleanupOrder]()
+                                   { return svc->waitUntilOrderFilled(cleanupOrder.symbol, cleanupOrder.orderId); },
+                                   *svc,
+                                   "cleanup order fill wait"));
         }
     }
 
