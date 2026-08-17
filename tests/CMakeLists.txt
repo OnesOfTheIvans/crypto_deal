@@ -35,3 +35,15 @@ target_link_libraries(DealServiceUnitIntegrationTests PRIVATE
 )
 
 add_test(NAME DealServiceUnitIntegrationTests COMMAND DealServiceUnitIntegrationTests)
+
+add_executable(ApplicationUnitTests
+    ApplicationConfigurationTest.cpp
+)
+
+target_link_libraries(ApplicationUnitTests PRIVATE
+    ApplicationLib
+    GTest::GTest
+    GTest::Main
+)
+
+add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
