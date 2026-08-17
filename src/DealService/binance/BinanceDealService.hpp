@@ -83,7 +83,7 @@ class BinanceDealService : public DealService
     std::condition_variable orderUpdateCondition;
     std::mutex streamLifecycleMutex;
 
-    long long serverTimeOffset = 0;
+    std::atomic<long long> serverTimeOffset{0};
     std::atomic<long long> lastSyncMonoMs{0};
     std::mutex timeSyncMutex;
 
@@ -140,6 +140,10 @@ class BinanceDealService : public DealService
     void prepareUserStreamThread();
 
     std::shared_ptr<WebsocketStream> prepareUserWebsocketStream();
+
+    void startUserStreamConcurrent();
+
+    void stopUserStreamConcurrent();
 
     OrderInfo createOrderInfo(const binance::OrderDto &order);
 

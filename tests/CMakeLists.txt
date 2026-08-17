@@ -6,6 +6,7 @@ add_executable(DealServiceUnitIntegrationTests
     DealServiceTest.cpp
     BinanceDealServiceIntegrationTest.cpp
     BybitDealServiceIntegrationTest.cpp
+    DealServiceConcurrencyTest.cpp
     OperationFactoryTest.cpp
     OperationChainTest.cpp
     OperationChainIntegrationTest.cpp

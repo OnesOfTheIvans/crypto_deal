@@ -93,12 +93,21 @@ BybitDealService::PendingOrderRegistration::~PendingOrderRegistration()
 }
 
 BybitDealService::OcoPlacementRegistration::OcoPlacementRegistration(BybitDealService &service,
+                                                                     string groupId,
                                                                      string takeProfitOrderLinkId,
                                                                      string stopLossOrderLinkId)
-    : service(service), takeProfitOrderLinkId(move(takeProfitOrderLinkId)),
+    : service(service), groupId(move(groupId)), takeProfitOrderLinkId(move(takeProfitOrderLinkId)),
       stopLossOrderLinkId(move(stopLossOrderLinkId))
 {
     lock_guard<mutex> lock(service.ocoMutex);
+    const bool groupExists = service.ocoGroups.contains(this->groupId);
+    const bool placementExists = service.placingOcoOrderLinkIds.contains(this->takeProfitOrderLinkId) ||
+                                 service.placingOcoOrderLinkIds.contains(this->stopLossOrderLinkId);
+    const bool legExists = service.ocoLegToGroup.contains(this->takeProfitOrderLinkId) ||
+                           service.ocoLegToGroup.contains(this->stopLossOrderLinkId);
+    throwIf(groupExists || placementExists || legExists,
+            "Bybit placeOco: listClientOrderId is already active: " + this->groupId);
+
     service.placingOcoOrderLinkIds.insert(this->takeProfitOrderLinkId);
     service.placingOcoOrderLinkIds.insert(this->stopLossOrderLinkId);
 }
@@ -206,7 +215,7 @@ void BybitDealService::ensureUserStreamConnected()
         StreamStatus status = getUserStreamStatus();
         if (status == StreamStatus::ERROR)
         {
-            stopUserStream();
+            stopUserStreamConcurrent();
             status = getUserStreamStatus();
         }
 
@@ -214,9 +223,9 @@ void BybitDealService::ensureUserStreamConnected()
         {
             if (runner.joinable())
             {
-                stopUserStream();
+                stopUserStreamConcurrent();
             }
-            startUserStream();
+            startUserStreamConcurrent();
         }
     }
 
@@ -564,6 +573,10 @@ void BybitDealService::setStreamStatus(StreamStatus status)
     {
         lock_guard<mutex> lock(streamStatusMutex);
         streamStatus = status;
+        if (status == StreamStatus::CONNECTING)
+        {
+            streamLastError.clear();
+        }
     }
     orderUpdateCondition.notify_all();
 }
@@ -615,10 +628,10 @@ void BybitDealService::syncTime()
     long long serverTime = stoll(responseDto.result.value().timeSecond) * 1000;
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-    serverTimeOffset = serverTime - localTime;
+    serverTimeOffset.store(serverTime - localTime);
     long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
     lastSyncMonoMs.store(currentMonoMs);
-    cout << "Bybit time synced. Offset: " << serverTimeOffset << "ms" << endl;
+    cout << "Bybit time synced. Offset: " << serverTimeOffset.load() << "ms" << endl;
 }
 
 long long BybitDealService::getServerTimestamp()
@@ -626,7 +639,7 @@ long long BybitDealService::getServerTimestamp()
     syncTime();
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-    return localTime + serverTimeOffset;
+    return localTime + serverTimeOffset.load();
 }
 
 void BybitDealService::refreshBalancesCache(const string &accountType, const optional<string> &coinFilter)
@@ -912,9 +925,20 @@ void BybitDealService::prepareUserStreamThread()
 
 void BybitDealService::startUserStream()
 {
+    lock_guard<mutex> lifecycleLock(streamLifecycleMutex);
+    startUserStreamConcurrent();
+}
+
+void BybitDealService::startUserStreamConcurrent()
+{
     if (userStream)
     {
         return;
+    }
+
+    if (runner.joinable())
+    {
+        stopUserStreamConcurrent();
     }
 
     try
@@ -974,6 +998,12 @@ AssetBalance BybitDealService::parseBalance(const CoinBalanceDto &coin)
 }
 
 void BybitDealService::stopUserStream()
+{
+    lock_guard<mutex> lifecycleLock(streamLifecycleMutex);
+    stopUserStreamConcurrent();
+}
+
+void BybitDealService::stopUserStreamConcurrent()
 {
     userStream = false;
 
@@ -1845,7 +1875,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 
     string takeProfitOrderLinkId = groupId + "_TP";
     string stopLossOrderLinkId = groupId + "_SL";
-    OcoPlacementRegistration placementRegistration(*this, takeProfitOrderLinkId, stopLossOrderLinkId);
+    OcoPlacementRegistration placementRegistration(*this, groupId, takeProfitOrderLinkId, stopLossOrderLinkId);
 
     const OrderInfo takeProfitOrderInfo = createTakeProfitOcoRequest(request, takeProfitOrderLinkId);
     const OrderInfo stopLossOrderInfo = createStopLossOcoRequest(request, stopLossOrderLinkId, takeProfitOrderLinkId);

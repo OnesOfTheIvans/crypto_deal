@@ -168,7 +168,7 @@ void BinanceDealService::ensureUserStreamConnected()
         StreamStatus status = getUserStreamStatus();
         if (status == StreamStatus::ERROR)
         {
-            stopUserStream();
+            stopUserStreamConcurrent();
             status = getUserStreamStatus();
         }
 
@@ -176,9 +176,9 @@ void BinanceDealService::ensureUserStreamConnected()
         {
             if (runner.joinable())
             {
-                stopUserStream();
+                stopUserStreamConcurrent();
             }
-            startUserStream();
+            startUserStreamConcurrent();
         }
     }
 
@@ -803,6 +803,10 @@ void BinanceDealService::setStreamStatus(StreamStatus status)
     {
         lock_guard<mutex> lock(streamStatusMutex);
         streamStatus = status;
+        if (status == StreamStatus::CONNECTING)
+        {
+            streamLastError.clear();
+        }
     }
     orderUpdateCondition.notify_all();
 }
@@ -861,10 +865,10 @@ void BinanceDealService::syncTime()
     long long serverTime = getServerTime();
     long long localTime =
         chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-    serverTimeOffset = serverTime - localTime;
+    serverTimeOffset.store(serverTime - localTime);
     long long currentMonoMs = chrono::steady_clock::now().time_since_epoch().count() / 1000000;
     lastSyncMonoMs.store(currentMonoMs);
-    cout << "Binance time synced. Offset: " << serverTimeOffset << "ms" << endl;
+    cout << "Binance time synced. Offset: " << serverTimeOffset.load() << "ms" << endl;
 }
 
 long long BinanceDealService::getServerTimestamp()
@@ -872,7 +876,7 @@ long long BinanceDealService::getServerTimestamp()
     syncTime();
     auto now = chrono::system_clock::now();
     long long localTime = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-    return localTime + serverTimeOffset;
+    return localTime + serverTimeOffset.load();
 }
 
 void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &websocketStream)
@@ -996,9 +1000,20 @@ void BinanceDealService::prepareUserStreamThread()
 
 void BinanceDealService::startUserStream()
 {
+    lock_guard<mutex> lifecycleLock(streamLifecycleMutex);
+    startUserStreamConcurrent();
+}
+
+void BinanceDealService::startUserStreamConcurrent()
+{
     if (userStream)
     {
         return;
+    }
+
+    if (runner.joinable())
+    {
+        stopUserStreamConcurrent();
     }
 
     try
@@ -1017,6 +1032,12 @@ void BinanceDealService::startUserStream()
 }
 
 void BinanceDealService::stopUserStream()
+{
+    lock_guard<mutex> lifecycleLock(streamLifecycleMutex);
+    stopUserStreamConcurrent();
+}
+
+void BinanceDealService::stopUserStreamConcurrent()
 {
     shared_ptr<WebsocketStream> sharedWebsocketStream;
     {

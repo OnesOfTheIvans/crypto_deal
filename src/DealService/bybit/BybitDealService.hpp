@@ -78,12 +78,14 @@ class BybitDealService : public DealService
     {
       private:
         BybitDealService &service;
+        std::string groupId;
         std::string takeProfitOrderLinkId;
         std::string stopLossOrderLinkId;
         bool active = true;
 
       public:
         OcoPlacementRegistration(BybitDealService &service,
+                                 std::string groupId,
                                  std::string takeProfitOrderLinkId,
                                  std::string stopLossOrderLinkId);
 
@@ -116,7 +118,7 @@ class BybitDealService : public DealService
     std::condition_variable orderUpdateCondition;
     std::mutex streamLifecycleMutex;
 
-    long long serverTimeOffset = 0;
+    std::atomic<long long> serverTimeOffset{0};
     std::atomic<long long> lastSyncMonoMs{0};
     std::mutex timeSyncMutex;
 
@@ -272,6 +274,10 @@ class BybitDealService : public DealService
     void prepareUserStreamThread();
 
     std::shared_ptr<WebsocketStream> prepareUserWebsocketStream();
+
+    void startUserStreamConcurrent();
+
+    void stopUserStreamConcurrent();
 
     void handleWalletUpdate(const bybit::StreamMessageDto &message);
 
