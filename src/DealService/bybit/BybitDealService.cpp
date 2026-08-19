@@ -1,5 +1,6 @@
 #include "BybitDealService.hpp"
 #include "EnumStringConverter.hpp"
+#include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 #include "domain/AuthRequestDto.hpp"
@@ -1610,7 +1611,31 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, OrderCategory c
 
 vector<TradablePair> BybitDealService::getTradablePairs()
 {
-    throw logic_error("Bybit tradable-pair retrieval is not implemented yet");
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/v5/market/instruments-info");
+    const map<string, string> requestParameters = {{"category", "spot"}, {"status", "Trading"}};
+    setUrlParameters(requestUrl, requestParameters);
+
+    string target = getTarget(requestUrl);
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+
+    string response = httpsPost(context);
+    const json::value jsonValue = parseAndValidate(response);
+    const InstrumentInfoResponseDto responseDto = parseResponseToDto<InstrumentInfoResponseDto>(jsonValue);
+    throwIf(!responseDto.result.has_value(), "Missing result object");
+
+    vector<TradablePair> pairs;
+    for (const InstrumentDto &instrument : responseDto.result.value().list)
+    {
+        if (instrument.status.value_or("") == "Trading")
+        {
+            pairs.push_back(
+                {instrument.symbol.value_or(""), instrument.baseCoin.value_or(""), instrument.quoteCoin.value_or("")});
+        }
+    }
+
+    return filterAndSortTradablePairs(move(pairs));
 }
 
 Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory category)

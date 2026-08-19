@@ -552,6 +552,95 @@ TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.stepSize, DecimalConverter::parseDecimal("0.0001"));
 }
 
+TEST_F(BybitDealServiceIntegrationTest, GetTradablePairs_ReturnsStrictUsableSpotPairsInDeterministicOrder)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "category": "spot",
+            "list": [
+                {
+                    "symbol": "ETHUSDT",
+                    "status": "Trading",
+                    "baseCoin": "ETH",
+                    "quoteCoin": "USDT"
+                },
+                {
+                    "symbol": "BTCUSDT",
+                    "status": "Trading",
+                    "baseCoin": "BTC",
+                    "quoteCoin": "USDT"
+                },
+                {
+                    "symbol": "BTCUSDC",
+                    "status": "Trading",
+                    "baseCoin": "BTC",
+                    "quoteCoin": "USDC"
+                },
+                {
+                    "symbol": "SUSPENDEDUSDT",
+                    "status": "Settling",
+                    "baseCoin": "SUSPENDED",
+                    "quoteCoin": "USDT"
+                },
+                {
+                    "symbol": "UNKNOWNUSDT",
+                    "baseCoin": "UNKNOWN",
+                    "quoteCoin": "USDT"
+                },
+                {
+                    "symbol": "",
+                    "status": "Trading",
+                    "baseCoin": "EMPTY",
+                    "quoteCoin": "USDT"
+                },
+                {
+                    "symbol": "BTCUSDT",
+                    "status": "Trading",
+                    "baseCoin": "BTC",
+                    "quoteCoin": "USDT"
+                }
+            ]
+        }
+    })");
+
+    const std::vector<TradablePair> pairs = service.getTradablePairs();
+
+    const std::vector<TradablePair> expected = {
+        {"BTCUSDC", "BTC", "USDC"},
+        {"BTCUSDT", "BTC", "USDT"},
+        {"ETHUSDT", "ETH", "USDT"},
+    };
+    EXPECT_EQ(pairs, expected);
+
+    const MockNetwork::RecordedRequest request = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(request.method, "GET");
+    EXPECT_NE(request.target.find("/v5/market/instruments-info?"), std::string::npos);
+    EXPECT_NE(request.target.find("category=spot"), std::string::npos);
+    EXPECT_NE(request.target.find("status=Trading"), std::string::npos);
+    EXPECT_EQ(request.target.find("limit="), std::string::npos);
+    EXPECT_EQ(request.target.find("cursor="), std::string::npos);
+    EXPECT_EQ(countRequestsContaining("/v5/market/instruments-info"), 1u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, GetTradablePairs_ReturnsEmptyCatalog)
+{
+    auto service = createService();
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "category": "spot",
+            "list": []
+        }
+    })");
+
+    EXPECT_TRUE(service.getTradablePairs().empty());
+}
+
 TEST_F(BybitDealServiceIntegrationTest, CeilQuantityToStep)
 {
     auto service = createService();
