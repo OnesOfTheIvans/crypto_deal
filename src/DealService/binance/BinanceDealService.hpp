@@ -11,6 +11,7 @@
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "common/domain/TradablePair.hpp"
 #include "domain/AccountBalanceDto.hpp"
 #include "domain/OcoDto.hpp"
 #include "domain/OrderDto.hpp"
@@ -252,6 +253,8 @@ class BinanceDealService : public DealService
     OrderInfo getOrder(const OrderQuery &request) override;
 
     SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory = OrderCategory::SPOT) override;
+
+    std::vector<TradablePair> getTradablePairs() override;
 
     Decimal
     ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory = OrderCategory::SPOT) override;

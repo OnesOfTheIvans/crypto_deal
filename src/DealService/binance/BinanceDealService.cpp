@@ -1321,6 +1321,11 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
     return createOrderInfo(json::value_to<OrderDto>(jsonValue));
 }
 
+vector<TradablePair> BinanceDealService::getTradablePairs()
+{
+    throw logic_error("Binance tradable-pair retrieval is not implemented yet");
+}
+
 SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, OrderCategory)
 {
     throwIf(symbol.empty(), "Symbol cannot be empty");

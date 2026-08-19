@@ -1608,6 +1608,11 @@ SymbolInfo BybitDealService::getSymbolInfo(const string &symbol, OrderCategory c
     return info;
 }
 
+vector<TradablePair> BybitDealService::getTradablePairs()
+{
+    throw logic_error("Bybit tradable-pair retrieval is not implemented yet");
+}
+
 Decimal BybitDealService::ceilQuantityToStep(const string &symbol, Decimal quantity, OrderCategory category)
 {
     const SymbolInfo info = getSymbolInfo(symbol, category);

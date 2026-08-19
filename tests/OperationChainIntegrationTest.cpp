@@ -97,6 +97,11 @@ namespace {
             return {};
         }
 
+        std::vector<TradablePair> getTradablePairs() override
+        {
+            return {};
+        }
+
         Decimal ceilQuantityToStep(const std::string &, Decimal quantity, OrderCategory = OrderCategory::SPOT) override
         {
             return quantity;

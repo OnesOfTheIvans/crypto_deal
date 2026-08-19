@@ -10,6 +10,7 @@
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "common/domain/TradablePair.hpp"
 #include "domain/CoinBalanceDto.hpp"
 #include "domain/InstrumentDto.hpp"
 #include "domain/OrderDto.hpp"
@@ -339,6 +340,8 @@ class BybitDealService : public DealService
     OrderInfo getOrder(const OrderQuery &request) override;
 
     SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) override;
+
+    std::vector<TradablePair> getTradablePairs() override;
 
     Decimal ceilQuantityToStep(const std::string &symbol,
                                Decimal quantity,

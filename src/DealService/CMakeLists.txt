@@ -3,6 +3,7 @@ add_library(DealLib
     binance/BinanceDealService.cpp
     bybit/BybitDealService.cpp
     common/DecimalConverter.cpp
+    common/TradablePairUtil.cpp
     common/exception_handling.cpp
     common/http_request.cpp
     common/HttpRequestContext.cpp

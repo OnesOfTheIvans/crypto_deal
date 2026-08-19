@@ -11,6 +11,7 @@
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/PlaceOrderRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "common/domain/TradablePair.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -24,6 +25,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
@@ -96,6 +98,8 @@ class DealService
     virtual OrderInfo getOrder(const OrderQuery &request) = 0;
 
     virtual SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) = 0;
+
+    virtual std::vector<TradablePair> getTradablePairs() = 0;
 
     virtual Decimal
     ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory category = OrderCategory::SPOT) = 0;

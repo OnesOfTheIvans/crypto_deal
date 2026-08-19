@@ -4,6 +4,7 @@ add_executable(DealServiceUnitIntegrationTests
     MockHttpRequest.cpp
     MockHttpRequestContext.cpp
     DealServiceTest.cpp
+    TradablePairUtilTest.cpp
     BinanceDealServiceIntegrationTest.cpp
     BybitDealServiceIntegrationTest.cpp
     DealServiceConcurrencyTest.cpp
@@ -14,6 +15,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
     ../src/DealService/common/DecimalConverter.cpp
+    ../src/DealService/common/TradablePairUtil.cpp
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
     ../src/OperationChain/OperationFactory.cpp
