@@ -409,6 +409,103 @@ TEST_F(BinanceDealServiceIntegrationTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("10.0"));
 }
 
+TEST_F(BinanceDealServiceIntegrationTest, GetTradablePairs_ReturnsStrictUsableSpotPairsInDeterministicOrder)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", R"({
+        "symbols": [
+            {
+                "symbol": "ETHUSDT",
+                "status": "TRADING",
+                "baseAsset": "ETH",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            },
+            {
+                "symbol": "BTCUSDT",
+                "status": "TRADING",
+                "baseAsset": "BTC",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            },
+            {
+                "symbol": "BTCUSDC",
+                "status": "TRADING",
+                "baseAsset": "BTC",
+                "quoteAsset": "USDC",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            },
+            {
+                "symbol": "SUSPENDEDUSDT",
+                "status": "BREAK",
+                "baseAsset": "SUSPENDED",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            },
+            {
+                "symbol": "NOSPOTUSDT",
+                "status": "TRADING",
+                "baseAsset": "NOSPOT",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": false,
+                "filters": []
+            },
+            {
+                "symbol": "UNKNOWNUSDT",
+                "status": "TRADING",
+                "baseAsset": "UNKNOWN",
+                "quoteAsset": "USDT",
+                "filters": []
+            },
+            {
+                "symbol": "",
+                "status": "TRADING",
+                "baseAsset": "EMPTY",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            },
+            {
+                "symbol": "BTCUSDT",
+                "status": "TRADING",
+                "baseAsset": "BTC",
+                "quoteAsset": "USDT",
+                "isSpotTradingAllowed": true,
+                "filters": []
+            }
+        ]
+    })");
+
+    const std::vector<TradablePair> pairs = service.getTradablePairs();
+
+    const std::vector<TradablePair> expected = {
+        {"BTCUSDC", "BTC", "USDC"},
+        {"BTCUSDT", "BTC", "USDT"},
+        {"ETHUSDT", "ETH", "USDT"},
+    };
+    EXPECT_EQ(pairs, expected);
+
+    const MockNetwork::RecordedRequest request = MockNetwork::instance().lastRequest();
+    EXPECT_EQ(request.method, "GET");
+    EXPECT_NE(request.target.find("/api/v3/exchangeInfo?"), std::string::npos);
+    EXPECT_NE(request.target.find("permissions=SPOT"), std::string::npos);
+    EXPECT_NE(request.target.find("showPermissionSets=false"), std::string::npos);
+    EXPECT_NE(request.target.find("symbolStatus=TRADING"), std::string::npos);
+}
+
+TEST_F(BinanceDealServiceIntegrationTest, GetTradablePairs_ReturnsEmptyCatalog)
+{
+    auto service = createService();
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", R"({"symbols": []})");
+
+    EXPECT_TRUE(service.getTradablePairs().empty());
+}
+
 TEST_F(BinanceDealServiceIntegrationTest, CeilQuantityToStep)
 {
     auto service = createService();

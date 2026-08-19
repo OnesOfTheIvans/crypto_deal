@@ -1,6 +1,7 @@
 #include "BinanceDealService.hpp"
 #include "EnumStringConverter.hpp"
 #include "common/HttpRequestContext.hpp"
+#include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
 #include "domain/AccountDto.hpp"
@@ -1323,7 +1324,31 @@ OrderInfo BinanceDealService::getOrder(const OrderQuery &request)
 
 vector<TradablePair> BinanceDealService::getTradablePairs()
 {
-    throw logic_error("Binance tradable-pair retrieval is not implemented yet");
+    boost::urls::url requestUrl;
+    requestUrl.set_path("/api/v3/exchangeInfo");
+    const map<string, string> requestParameters = {{"permissions", "SPOT"},
+                                                   {"showPermissionSets", "false"},
+                                                   {"symbolStatus", "TRADING"}};
+    setUrlParameters(requestUrl, requestParameters);
+
+    string target = getTarget(requestUrl);
+    HttpRequestContext context(ioc, ctx, host, target);
+    context.prepareRequest(http::verb::get);
+
+    string response = httpsPost(context);
+    json::value jsonValue = parseAndValidate(response);
+    ExchangeInfoDto exchangeInfo = json::value_to<ExchangeInfoDto>(jsonValue);
+
+    vector<TradablePair> pairs;
+    for (const SymbolDto &symbol : exchangeInfo.symbols)
+    {
+        if (symbol.status == "TRADING" && symbol.isSpotTradingAllowed.value_or(false))
+        {
+            pairs.push_back({symbol.symbol, symbol.baseAsset, symbol.quoteAsset});
+        }
+    }
+
+    return filterAndSortTradablePairs(move(pairs));
 }
 
 SymbolInfo BinanceDealService::getSymbolInfo(const string &symbol, OrderCategory)

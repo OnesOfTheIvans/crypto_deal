@@ -19,12 +19,14 @@ namespace binance {
         std::string quoteAsset;
         std::optional<std::int64_t> baseAssetPrecision;
         std::optional<std::int64_t> quotePrecision;
+        std::optional<bool> isSpotTradingAllowed;
         std::vector<FilterDto> filters;
     };
 
-    BOOST_DESCRIBE_STRUCT(SymbolDto,
-                          (),
-                          (symbol, status, baseAsset, quoteAsset, baseAssetPrecision, quotePrecision, filters))
+    BOOST_DESCRIBE_STRUCT(
+        SymbolDto,
+        (),
+        (symbol, status, baseAsset, quoteAsset, baseAssetPrecision, quotePrecision, isSpotTradingAllowed, filters))
 }
 
 #endif
