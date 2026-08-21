@@ -7,6 +7,7 @@
 #include "common/domain/OrderInfo.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderQuery.hpp"
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
@@ -25,20 +26,45 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/json.hpp>
 
-#include "common/domain/OrderQuery.hpp"
-
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace json = boost::json;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 using WebsocketStream = boost::beast::websocket::stream<boost::beast::ssl_stream<boost::beast::tcp_stream>>;
 
+namespace binance {
+    struct ExecutionReportEventDto;
+    struct ListStatusEventDto;
+    struct OutboundAccountPositionEventDto;
+}
+
 class BinanceDealService : public DealService
 {
   private:
+    using OrderKey = std::pair<std::string, std::string>;
+    using PendingOrderUpdate = std::optional<OrderInfo>;
+
+    class PendingOrderRegistration
+    {
+      private:
+        BinanceDealService &service;
+        OrderKey orderKey;
+
+      public:
+        PendingOrderRegistration(BinanceDealService &service, const std::string &symbol, const std::string &orderId);
+
+        ~PendingOrderRegistration();
+
+        PendingOrderRegistration(const PendingOrderRegistration &) = delete;
+
+        PendingOrderRegistration &operator=(const PendingOrderRegistration &) = delete;
+    };
+
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
 
@@ -51,6 +77,11 @@ class BinanceDealService : public DealService
     StreamStatus streamStatus = StreamStatus::STOPPED;
     std::string streamLastError;
     mutable std::mutex streamStatusMutex;
+
+    std::map<OrderKey, PendingOrderUpdate> pendingOrderWaits;
+    std::mutex pendingOrderWaitsMutex;
+    std::condition_variable orderUpdateCondition;
+    std::mutex streamLifecycleMutex;
 
     long long serverTimeOffset = 0;
     std::atomic<long long> lastSyncMonoMs{0};
@@ -98,6 +129,12 @@ class BinanceDealService : public DealService
 
     void handleUserStreamMessage(const std::string &msg);
 
+    void handleAccountPositionUpdate(const binance::OutboundAccountPositionEventDto &event);
+
+    void handleExecutionReport(const binance::ExecutionReportEventDto &event);
+
+    void handleListStatusUpdate(const binance::ListStatusEventDto &event);
+
     std::string buildUserStreamSubscribeRequestJson();
 
     void prepareUserStreamThread();
@@ -111,6 +148,61 @@ class BinanceDealService : public DealService
     void processSymbolFilters(SymbolInfo &info, const binance::FilterDto &filter);
 
     OcoInfo createOcoInfo(const binance::OcoDto &oco);
+
+    static OrderKey getOrderKey(const std::string &symbol, const std::string &orderId);
+
+    static bool isOrderFilled(const std::string &status);
+
+    static bool isOrderTerminal(const std::string &status);
+
+    void registerPendingOrder(const OrderKey &orderKey);
+
+    void unregisterPendingOrder(const OrderKey &orderKey);
+
+    const PendingOrderUpdate &getPendingOrderUpdate(const OrderKey &orderKey) const
+    {
+        return pendingOrderWaits.at(orderKey);
+    }
+
+    void publishOrderUpdate(const OrderInfo &orderInfo);
+
+    void ensureUserStreamConnected();
+
+    void reconcileOrder(const OrderInfo &orderInfo);
+
+    void prepareOrderSubscription(const std::string &symbol, const std::string &orderId);
+
+    PendingOrderUpdate waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId);
+
+    OrderInfo
+    processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderUpdate &pendingUpdate);
+
+    void prepareOcoSubscription(const OcoInfo &ocoInfo);
+
+    void waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
+                                  PendingOrderUpdate &takeProfitUpdate,
+                                  PendingOrderUpdate &stopLossUpdate);
+
+    OrderInfo processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                     const PendingOrderUpdate &takeProfitUpdate,
+                                     const PendingOrderUpdate &stopLossUpdate);
+
+    OrderInfo reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+
+    std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+
+    std::optional<OrderInfo> getFilledOcoOrder(const OcoInfo &ocoInfo);
+
+    [[noreturn]] void throwOcoWaitAfterReconciliationFailure(const OcoInfo &ocoInfo,
+                                                             const std::optional<std::string> &reconciliationError);
+
+    std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
+
+    [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
+
+    [[noreturn]] void throwOcoWaitFailure(const OcoInfo &ocoInfo,
+                                          const std::string &reason,
+                                          const std::optional<std::string> &cleanupError) const;
 
     void setStreamStatus(StreamStatus status);
 
@@ -139,7 +231,9 @@ class BinanceDealService : public DealService
 
     OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
-    void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
+    OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
+
+    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 
@@ -160,7 +254,7 @@ class BinanceDealService : public DealService
 
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
-    OcoInfo cancelOco(const OrderListQuery &request) override;
+    void cancelOco(const OrderListQuery &request) override;
 
     void stopUserStream() override;
 
@@ -171,6 +265,8 @@ class BinanceDealService : public DealService
     void cancelAllOpenOrders(const std::string &symbol, OrderCategory) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
+
+    ~BinanceDealService() override;
 };
 
 #endif

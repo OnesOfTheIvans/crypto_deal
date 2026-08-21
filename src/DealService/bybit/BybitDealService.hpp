@@ -6,6 +6,7 @@
 #include "common/domain/OcoInfo.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderOperation.hpp"
+#include "common/domain/OrderQuery.hpp"
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
@@ -18,8 +19,6 @@
 #include "domain/StreamMessageDto.hpp"
 #include "domain/StreamOrderMessageDto.hpp"
 
-#include "common/domain/OrderQuery.hpp"
-
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
@@ -31,10 +30,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
+#include <utility>
 
 using msec = std::chrono::milliseconds::rep;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
@@ -48,8 +50,56 @@ namespace bybit {
 class BybitDealService : public DealService
 {
   private:
+    using OrderKey = std::pair<std::string, std::string>;
+
+    struct PendingOrderWait
+    {
+        std::optional<OrderInfo> orderInfo;
+        std::optional<std::string> error;
+    };
+
+    class PendingOrderRegistration
+    {
+      private:
+        BybitDealService &service;
+        OrderKey orderKey;
+
+      public:
+        PendingOrderRegistration(BybitDealService &service, const std::string &symbol, const std::string &orderId);
+
+        ~PendingOrderRegistration();
+
+        PendingOrderRegistration(const PendingOrderRegistration &) = delete;
+
+        PendingOrderRegistration &operator=(const PendingOrderRegistration &) = delete;
+    };
+
+    class OcoPlacementRegistration
+    {
+      private:
+        BybitDealService &service;
+        std::string takeProfitOrderLinkId;
+        std::string stopLossOrderLinkId;
+        bool active = true;
+
+      public:
+        OcoPlacementRegistration(BybitDealService &service,
+                                 std::string takeProfitOrderLinkId,
+                                 std::string stopLossOrderLinkId);
+
+        ~OcoPlacementRegistration();
+
+        OcoPlacementRegistration(const OcoPlacementRegistration &) = delete;
+
+        OcoPlacementRegistration &operator=(const OcoPlacementRegistration &) = delete;
+
+        void release();
+    };
+
     mutable std::mutex balanceMutex;
     flat_map<std::string, AssetBalance> balances;
+    std::mutex balanceRefreshMutex;
+    std::string balanceAccountType;
 
     std::map<std::string, SymbolInfo> symbolInfoCache;
     std::mutex symbolInfoMutex;
@@ -60,6 +110,11 @@ class BybitDealService : public DealService
     StreamStatus streamStatus = StreamStatus::STOPPED;
     std::string streamLastError;
     mutable std::mutex streamStatusMutex;
+
+    std::map<OrderKey, PendingOrderWait> pendingOrderWaits;
+    std::mutex pendingOrderWaitsMutex;
+    std::condition_variable orderUpdateCondition;
+    std::mutex streamLifecycleMutex;
 
     long long serverTimeOffset = 0;
     std::atomic<long long> lastSyncMonoMs{0};
@@ -79,6 +134,8 @@ class BybitDealService : public DealService
     mutable std::mutex ocoMutex;
     flat_map<std::string, BybitOcoGroup> ocoGroups;
     flat_map<std::string, std::string> ocoLegToGroup;
+    std::set<std::string> placingOcoOrderLinkIds;
+    std::set<std::string> pendingOcoFilledOrderLinkIds;
 
     AssetBalance parseBalance(const bybit::CoinBalanceDto &coin);
 
@@ -89,6 +146,8 @@ class BybitDealService : public DealService
     OrderInfo createOrderInfo(const bybit::OrderResultDto &result, const OrderQuery &request, msec timestamp);
 
     OrderInfo createOrderInfo(const bybit::OrderDto &order, const OrderQuery &request, msec timestamp);
+
+    OrderInfo createOrderInfo(const bybit::StreamOrderDto &order);
 
     SymbolInfo createSymbolInfo(const bybit::InstrumentDto &instrument, const std::string &symbol);
 
@@ -112,9 +171,70 @@ class BybitDealService : public DealService
                           const OrderInfo &takeProfitOrderInfo,
                           const OrderInfo &stopLossOrderInfo) const;
 
+    static OrderKey getOrderKey(const std::string &symbol, const std::string &orderId);
+
+    static bool isOrderFilled(const std::string &status);
+
+    static bool isOrderTerminal(const std::string &status);
+
+    void registerPendingOrder(const OrderKey &orderKey);
+
+    void unregisterPendingOrder(const OrderKey &orderKey);
+
+    const PendingOrderWait &getPendingOrderWait(const OrderKey &orderKey) const
+    {
+        return pendingOrderWaits.at(orderKey);
+    }
+
+    void publishOrderUpdate(const OrderInfo &orderInfo);
+
+    void publishOrderWaitError(const OrderInfo &orderInfo, const std::string &error);
+
+    void ensureUserStreamConnected();
+
+    void reconcileOrder(const OrderInfo &orderInfo);
+
+    void prepareOrderSubscription(const std::string &symbol, const std::string &orderId);
+
+    PendingOrderWait waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId);
+
+    OrderInfo
+    processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderWait &pendingWait);
+
+    void prepareOcoSubscription(const OcoInfo &ocoInfo);
+
+    void
+    waitForOcoTerminalStatus(const OcoInfo &ocoInfo, PendingOrderWait &takeProfitWait, PendingOrderWait &stopLossWait);
+
+    OrderInfo processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                     const PendingOrderWait &takeProfitWait,
+                                     const PendingOrderWait &stopLossWait);
+
+    OrderInfo reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+
+    std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+
+    std::optional<OrderInfo> getFilledOcoOrder(const OcoInfo &ocoInfo);
+
+    [[noreturn]] void throwOcoWaitAfterReconciliationFailure(const OcoInfo &ocoInfo,
+                                                             const std::optional<std::string> &reconciliationError);
+
+    std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
+
+    OrderInfo completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder);
+
+    [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
+
+    [[noreturn]] void throwOcoWaitFailure(const OcoInfo &ocoInfo,
+                                          const std::string &reason,
+                                          const std::optional<std::string> &cleanupError) const;
+
+    void clearOcoPlacementRegistration(const std::string &takeProfitOrderLinkId,
+                                       const std::string &stopLossOrderLinkId);
+
     std::optional<std::string> cancelOcoGroupOrder(const OrderQuery &order, OrderInfo &cancelInfo);
 
-    std::optional<std::string> cancelOcoOtherLegFromUpdate(const OrderQuery &order);
+    std::optional<std::string> cancelOcoOtherLegFromUpdate(const OrderQuery &order, OrderInfo &cancelInfo);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -157,7 +277,10 @@ class BybitDealService : public DealService
 
     void handleOrderUpdate(const bybit::StreamOrderMessageDto &message);
 
-    void processOcoUpdate(const std::string &orderLinkId);
+    std::optional<std::string> processOcoUpdate(const std::string &orderLinkId,
+                                                std::optional<OrderInfo> &cancelledOrder);
+
+    void publishOcoError(const std::string &orderLinkId, const std::string &error);
 
     void setStreamStatus(StreamStatus status);
 
@@ -171,9 +294,6 @@ class BybitDealService : public DealService
 
     void refreshBalancesCache(const std::string &accountType,
                               const std::optional<std::string> &coinFilter = std::nullopt);
-
-    void tryRefreshBalancesCache(const std::string &accountType,
-                                 const std::optional<std::string> &coinFilter = std::nullopt);
 
     void processCoins(const bybit::WalletBalanceResponseDto &responseDto);
 
@@ -200,7 +320,9 @@ class BybitDealService : public DealService
 
     OrderInfo sellCrypto(const std::string &baseAsset, const std::string &quoteAsset, Decimal quantity) override;
 
-    void waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
+    OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
+
+    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
 
     Decimal getTickerPrice(const std::string &symbol);
 
@@ -218,7 +340,7 @@ class BybitDealService : public DealService
 
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
-    OcoInfo cancelOco(const OrderListQuery &request) override;
+    void cancelOco(const OrderListQuery &request) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 
@@ -235,6 +357,8 @@ class BybitDealService : public DealService
     void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) override;
 
     flat_map<std::string, AssetBalance> getBalancesRest() override;
+
+    ~BybitDealService() override;
 };
 
 #endif

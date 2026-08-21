@@ -11,6 +11,6 @@
 
 using Exchanger = std::shared_ptr<DealService>;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
-using operation = std::function<OperationContext &(OperationContext &)>;
+using operation = std::function<void(OperationContext &)>;
 
 #endif

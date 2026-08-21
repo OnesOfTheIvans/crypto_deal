@@ -6,14 +6,23 @@
 #include "domain/AccountDto.hpp"
 #include "domain/ErrorDto.hpp"
 #include "domain/ExchangeInfoDto.hpp"
+#include "domain/ExecutionReportEventDto.hpp"
+#include "domain/ExecutionReportMessageDto.hpp"
+#include "domain/ListStatusEventDto.hpp"
+#include "domain/ListStatusEventMessageDto.hpp"
+#include "domain/ListStatusOrderDto.hpp"
+#include "domain/OutboundAccountPositionEventDto.hpp"
 #include "domain/ServerTimeDto.hpp"
 #include "domain/SubscriptionResponseDto.hpp"
 #include "domain/TickerPriceDto.hpp"
+#include "domain/UserStreamEventTypeMessageDto.hpp"
 #include "domain/UserStreamMessageDto.hpp"
 #include "domain/UserStreamSubscribeRequestDto.hpp"
 
 #include <chrono>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 // DEBUG
 #include <iostream>
 
@@ -25,6 +34,12 @@ using namespace binance;
 using namespace exception_handling;
 
 namespace {
+    const set<string> BINANCE_TERMINAL_ORDER_STATUSES = {"FILLED",
+                                                         "CANCELED",
+                                                         "REJECTED",
+                                                         "EXPIRED",
+                                                         "EXPIRED_IN_MATCH"};
+
     string getErrorMessage(const ErrorDto &error)
     {
         const long long code = error.code.value_or(0);
@@ -68,7 +83,384 @@ namespace {
     {
         return toString(url.encoded_query());
     }
+
 } // namespace
+
+BinanceDealService::PendingOrderRegistration::PendingOrderRegistration(BinanceDealService &service,
+                                                                       const string &symbol,
+                                                                       const string &orderId)
+    : service(service), orderKey(symbol, orderId)
+{
+    service.registerPendingOrder(orderKey);
+}
+
+BinanceDealService::PendingOrderRegistration::~PendingOrderRegistration()
+{
+    service.unregisterPendingOrder(orderKey);
+}
+
+BinanceDealService::OrderKey BinanceDealService::getOrderKey(const string &symbol, const string &orderId)
+{
+    return {symbol, orderId};
+}
+
+bool BinanceDealService::isOrderFilled(const string &status)
+{
+    return status == "FILLED";
+}
+
+bool BinanceDealService::isOrderTerminal(const string &status)
+{
+    return BINANCE_TERMINAL_ORDER_STATUSES.contains(status);
+}
+
+void BinanceDealService::registerPendingOrder(const OrderKey &orderKey)
+{
+    lock_guard<mutex> lock(pendingOrderWaitsMutex);
+    const bool inserted = pendingOrderWaits.emplace(orderKey, PendingOrderUpdate{}).second;
+    throwIf(!inserted, "Binance order already has an active wait: " + orderKey.first + "/" + orderKey.second);
+}
+
+void BinanceDealService::unregisterPendingOrder(const OrderKey &orderKey)
+{
+    lock_guard<mutex> lock(pendingOrderWaitsMutex);
+    pendingOrderWaits.erase(orderKey);
+}
+
+void BinanceDealService::publishOrderUpdate(const OrderInfo &orderInfo)
+{
+    if (orderInfo.symbol.empty() || orderInfo.orderId.empty())
+    {
+        return;
+    }
+
+    {
+        lock_guard<mutex> lock(pendingOrderWaitsMutex);
+        auto pendingOrder = pendingOrderWaits.find(getOrderKey(orderInfo.symbol, orderInfo.orderId));
+        if (pendingOrder == pendingOrderWaits.end())
+        {
+            return;
+        }
+
+        optional<OrderInfo> &currentInfo = pendingOrder->second;
+        if (currentInfo.has_value())
+        {
+            if (isOrderFilled(currentInfo->status))
+            {
+                return;
+            }
+            if (isOrderTerminal(currentInfo->status) && !isOrderFilled(orderInfo.status))
+            {
+                return;
+            }
+        }
+
+        currentInfo = orderInfo;
+    }
+
+    orderUpdateCondition.notify_all();
+}
+
+void BinanceDealService::ensureUserStreamConnected()
+{
+    {
+        lock_guard<mutex> lifecycleLock(streamLifecycleMutex);
+        StreamStatus status = getUserStreamStatus();
+        if (status == StreamStatus::ERROR)
+        {
+            stopUserStream();
+            status = getUserStreamStatus();
+        }
+
+        if (status == StreamStatus::STOPPED)
+        {
+            if (runner.joinable())
+            {
+                stopUserStream();
+            }
+            startUserStream();
+        }
+    }
+
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    orderUpdateCondition.wait(lock,
+                              [this]()
+                              {
+                                  const StreamStatus status = getUserStreamStatus();
+                                  return status == StreamStatus::CONNECTED || status == StreamStatus::ERROR ||
+                                         status == StreamStatus::STOPPED;
+                              });
+
+    const StreamStatus status = getUserStreamStatus();
+    const string error = getUserStreamLastError();
+    throwIf(status != StreamStatus::CONNECTED,
+            "Binance user stream failed to connect" + (error.empty() ? "" : ": " + error));
+}
+
+void BinanceDealService::reconcileOrder(const OrderInfo &orderInfo)
+{
+    OrderQuery query;
+    query.symbol = orderInfo.symbol;
+    query.orderId = orderInfo.orderId;
+    query.category = OrderCategory::SPOT;
+    publishOrderUpdate(getOrder(query));
+}
+
+optional<string> BinanceDealService::cancelOcoAfterFailure(const OcoInfo &ocoInfo)
+{
+    try
+    {
+        OrderListQuery query;
+        query.symbol = ocoInfo.takeProfitOrder.symbol;
+        if (!ocoInfo.orderListId.empty())
+        {
+            query.orderListId = ocoInfo.orderListId;
+        }
+        if (!ocoInfo.listClientOrderId.empty())
+        {
+            query.listClientOrderId = ocoInfo.listClientOrderId;
+        }
+        cancelOco(query);
+
+        return nullopt;
+    }
+    catch (const exception &exception)
+    {
+        return exception.what();
+    }
+}
+
+OrderInfo BinanceDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
+{
+    const optional<string> reconciliationError = reconcileOcoSiblingOrder(ocoInfo, isTakeProfitFailed);
+    const optional<OrderInfo> filledOrder = getFilledOcoOrder(ocoInfo);
+    if (filledOrder.has_value())
+    {
+        return filledOrder.value();
+    }
+
+    throwOcoWaitAfterReconciliationFailure(ocoInfo, reconciliationError);
+}
+
+optional<string> BinanceDealService::reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
+{
+    try
+    {
+        reconcileOrder(isTakeProfitFailed ? ocoInfo.stopLossOrder : ocoInfo.takeProfitOrder);
+    }
+    catch (const exception &exception)
+    {
+        return exception.what();
+    }
+
+    return nullopt;
+}
+
+optional<OrderInfo> BinanceDealService::getFilledOcoOrder(const OcoInfo &ocoInfo)
+{
+    PendingOrderUpdate takeProfitUpdate;
+    PendingOrderUpdate stopLossUpdate;
+    {
+        lock_guard<mutex> lock(pendingOrderWaitsMutex);
+        takeProfitUpdate =
+            getPendingOrderUpdate(getOrderKey(ocoInfo.takeProfitOrder.symbol, ocoInfo.takeProfitOrder.orderId));
+        stopLossUpdate =
+            getPendingOrderUpdate(getOrderKey(ocoInfo.stopLossOrder.symbol, ocoInfo.stopLossOrder.orderId));
+    }
+
+    const bool takeProfitFilled = takeProfitUpdate.has_value() && isOrderFilled(takeProfitUpdate->status);
+    const bool stopLossFilled = stopLossUpdate.has_value() && isOrderFilled(stopLossUpdate->status);
+    if (takeProfitFilled && stopLossFilled)
+    {
+        const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+        throwOcoWaitFailure(ocoInfo, "both child orders were filled", cleanupError);
+    }
+    if (takeProfitFilled)
+    {
+        return takeProfitUpdate.value();
+    }
+    if (stopLossFilled)
+    {
+        return stopLossUpdate.value();
+    }
+
+    return nullopt;
+}
+
+void BinanceDealService::throwOcoWaitAfterReconciliationFailure(const OcoInfo &ocoInfo,
+                                                                const optional<string> &reconciliationError)
+{
+    string reason = "a child reached a terminal status before either child was filled";
+    if (reconciliationError.has_value())
+    {
+        reason += "; sibling reconciliation failed: " + reconciliationError.value();
+    }
+    const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+    throwOcoWaitFailure(ocoInfo, reason, cleanupError);
+}
+
+void BinanceDealService::throwOrderWaitFailure(const OrderInfo &orderInfo) const
+{
+    string message = "Binance order " + orderInfo.symbol + "/" + orderInfo.orderId + " reached terminal status " +
+                     orderInfo.status + " before being filled";
+    if (!orderInfo.statusReason.empty())
+    {
+        message += ": " + orderInfo.statusReason;
+    }
+    throw runtime_error(message);
+}
+
+void BinanceDealService::throwOcoWaitFailure(const OcoInfo &ocoInfo,
+                                             const string &reason,
+                                             const optional<string> &cleanupError) const
+{
+    const string groupId = !ocoInfo.listClientOrderId.empty() ? ocoInfo.listClientOrderId : ocoInfo.orderListId;
+    string message = "Binance OCO " + groupId + " failed: " + reason;
+    if (cleanupError.has_value())
+    {
+        message += "; cleanup failed: " + cleanupError.value();
+    }
+    throw runtime_error(message);
+}
+
+void BinanceDealService::prepareOrderSubscription(const string &symbol, const string &orderId)
+{
+    OrderInfo pendingOrder;
+    pendingOrder.symbol = symbol;
+    pendingOrder.orderId = orderId;
+
+    ensureUserStreamConnected();
+    reconcileOrder(pendingOrder);
+}
+
+BinanceDealService::PendingOrderUpdate BinanceDealService::waitForOrderTerminalStatus(const string &symbol,
+                                                                                      const string &orderId)
+{
+    const OrderKey orderKey = getOrderKey(symbol, orderId);
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    orderUpdateCondition.wait(lock,
+                              [this, &orderKey]()
+                              {
+                                  const PendingOrderUpdate &pendingUpdate = getPendingOrderUpdate(orderKey);
+                                  return (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status)) ||
+                                         getUserStreamStatus() != StreamStatus::CONNECTED;
+                              });
+
+    return getPendingOrderUpdate(orderKey);
+}
+
+OrderInfo BinanceDealService::processOrderUpdate(const string &symbol,
+                                                 const string &orderId,
+                                                 const PendingOrderUpdate &pendingUpdate)
+{
+    if (pendingUpdate.has_value() && isOrderFilled(pendingUpdate->status))
+    {
+        return pendingUpdate.value();
+    }
+    if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+    {
+        throwOrderWaitFailure(pendingUpdate.value());
+    }
+
+    const string streamError = getUserStreamLastError();
+    throw runtime_error("Binance user stream stopped while waiting for order " + symbol + "/" + orderId +
+                        (streamError.empty() ? "" : ": " + streamError));
+}
+
+OrderInfo BinanceDealService::waitUntilOrderFilled(const string &symbol, const string &orderId)
+{
+    throwIf(symbol.empty() || orderId.empty(), "Symbol and orderId are required while waiting for a Binance order");
+
+    const PendingOrderRegistration registration(*this, symbol, orderId);
+    prepareOrderSubscription(symbol, orderId);
+    return processOrderUpdate(symbol, orderId, waitForOrderTerminalStatus(symbol, orderId));
+}
+
+void BinanceDealService::prepareOcoSubscription(const OcoInfo &ocoInfo)
+{
+    ensureUserStreamConnected();
+    reconcileOrder(ocoInfo.takeProfitOrder);
+    reconcileOrder(ocoInfo.stopLossOrder);
+}
+
+void BinanceDealService::waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
+                                                  PendingOrderUpdate &takeProfitUpdate,
+                                                  PendingOrderUpdate &stopLossUpdate)
+{
+    const OrderKey takeProfitKey = getOrderKey(ocoInfo.takeProfitOrder.symbol, ocoInfo.takeProfitOrder.orderId);
+    const OrderKey stopLossKey = getOrderKey(ocoInfo.stopLossOrder.symbol, ocoInfo.stopLossOrder.orderId);
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    orderUpdateCondition.wait(
+        lock,
+        [this, &takeProfitKey, &stopLossKey]()
+        {
+            const PendingOrderUpdate &currentTakeProfitUpdate = getPendingOrderUpdate(takeProfitKey);
+            const PendingOrderUpdate &currentStopLossUpdate = getPendingOrderUpdate(stopLossKey);
+            const bool takeProfitTerminal =
+                currentTakeProfitUpdate.has_value() && isOrderTerminal(currentTakeProfitUpdate->status);
+            const bool stopLossTerminal =
+                currentStopLossUpdate.has_value() && isOrderTerminal(currentStopLossUpdate->status);
+            return takeProfitTerminal || stopLossTerminal || getUserStreamStatus() != StreamStatus::CONNECTED;
+        });
+
+    takeProfitUpdate = getPendingOrderUpdate(takeProfitKey);
+    stopLossUpdate = getPendingOrderUpdate(stopLossKey);
+}
+
+OrderInfo BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                                     const PendingOrderUpdate &takeProfitUpdate,
+                                                     const PendingOrderUpdate &stopLossUpdate)
+{
+    const bool takeProfitFilled = takeProfitUpdate.has_value() && isOrderFilled(takeProfitUpdate->status);
+    const bool stopLossFilled = stopLossUpdate.has_value() && isOrderFilled(stopLossUpdate->status);
+
+    if (takeProfitFilled && stopLossFilled)
+    {
+        const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+        throwOcoWaitFailure(ocoInfo, "both child orders were filled", cleanupError);
+    }
+    if (takeProfitFilled)
+    {
+        return takeProfitUpdate.value();
+    }
+    if (stopLossFilled)
+    {
+        return stopLossUpdate.value();
+    }
+
+    const bool isTakeProfitFailed = takeProfitUpdate.has_value() && !isOrderFilled(takeProfitUpdate->status) &&
+                                    isOrderTerminal(takeProfitUpdate->status);
+    if (isTakeProfitFailed || (stopLossUpdate.has_value() && !isOrderFilled(stopLossUpdate->status) &&
+                               isOrderTerminal(stopLossUpdate->status)))
+    {
+        return reconcileOcoAfterUnfilledTerminalChild(ocoInfo, isTakeProfitFailed);
+    }
+
+    const string streamError = getUserStreamLastError();
+    const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+    throwOcoWaitFailure(ocoInfo,
+                        "user stream stopped before either child was filled" +
+                            (streamError.empty() ? "" : ": " + streamError),
+                        cleanupError);
+}
+
+OrderInfo BinanceDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
+{
+    const OrderInfo &takeProfitOrder = ocoInfo.takeProfitOrder;
+    const OrderInfo &stopLossOrder = ocoInfo.stopLossOrder;
+    throwIf(takeProfitOrder.symbol.empty() || takeProfitOrder.orderId.empty() || stopLossOrder.symbol.empty() ||
+                stopLossOrder.orderId.empty(),
+            "Both Binance OCO orders must contain symbol and orderId");
+
+    const PendingOrderRegistration takeProfitRegistration(*this, takeProfitOrder.symbol, takeProfitOrder.orderId);
+    const PendingOrderRegistration stopLossRegistration(*this, stopLossOrder.symbol, stopLossOrder.orderId);
+
+    prepareOcoSubscription(ocoInfo);
+    PendingOrderUpdate takeProfitUpdate;
+    PendingOrderUpdate stopLossUpdate;
+    waitForOcoTerminalStatus(ocoInfo, takeProfitUpdate, stopLossUpdate);
+    return processOcoOrdersUpdate(ocoInfo, takeProfitUpdate, stopLossUpdate);
+}
 
 void BinanceDealService::setRequestParameters(boost::urls::url &url,
                                               const PlaceOrderRequest &request,
@@ -291,21 +683,107 @@ void BinanceDealService::handleUserStreamMessage(const string &msg)
         return;
     }
 
-    const UserStreamMessageDto message = json::value_to<UserStreamMessageDto>(jsonValue);
-    if (!message.event.has_value())
+    const UserStreamEventTypeMessageDto eventTypeMessage = json::value_to<UserStreamEventTypeMessageDto>(jsonValue);
+    if (!eventTypeMessage.event.has_value() || !eventTypeMessage.event->e.has_value())
+    {
+        cerr << "Binance user stream message is missing event type" << endl;
+        return;
+    }
+
+    const string &eventType = eventTypeMessage.event->e.value();
+    if (eventType == "outboundAccountPosition")
+    {
+        const UserStreamMessageDto message = json::value_to<UserStreamMessageDto>(jsonValue);
+        if (message.event.has_value())
+        {
+            handleAccountPositionUpdate(message.event.value());
+        }
+        return;
+    }
+
+    if (eventType == "executionReport")
+    {
+        const ExecutionReportMessageDto message = json::value_to<ExecutionReportMessageDto>(jsonValue);
+        if (message.event.has_value())
+        {
+            handleExecutionReport(message.event.value());
+        }
+        return;
+    }
+
+    if (eventType != "listStatus")
     {
         return;
     }
 
-    const OutboundAccountPositionEventDto &event = message.event.value();
-    throwIf(!event.e.has_value(), "User stream message missing or invalid 'e' (event type) field");
+    const ListStatusEventMessageDto message = json::value_to<ListStatusEventMessageDto>(jsonValue);
+    if (message.event.has_value())
+    {
+        handleListStatusUpdate(message.event.value());
+    }
+}
 
-    if (event.e.value() != "outboundAccountPosition" || !event.B.has_value())
+void BinanceDealService::handleAccountPositionUpdate(const OutboundAccountPositionEventDto &event)
+{
+    if (event.B.has_value())
+    {
+        updateCache(event.B.value());
+    }
+}
+
+void BinanceDealService::handleExecutionReport(const ExecutionReportEventDto &event)
+{
+    if (!event.s.has_value() || !event.i.has_value() || !event.X.has_value())
+    {
+        cerr << "Binance execution report is missing symbol, orderId, or status" << endl;
+        return;
+    }
+
+    OrderInfo orderInfo;
+    orderInfo.symbol = event.s.value();
+    orderInfo.orderId = to_string(event.i.value());
+    orderInfo.clientOrderId = event.c.value_or("");
+    orderInfo.side = event.S.value_or("");
+    orderInfo.type = event.o.value_or("");
+    orderInfo.timeInForce = event.f.value_or("");
+    orderInfo.status = event.X.value();
+    orderInfo.statusReason = event.r.value_or("");
+    orderInfo.price = parseToDecimal(event.p);
+    orderInfo.origQty = parseToDecimal(event.q);
+    orderInfo.executedQty = parseToDecimal(event.z);
+    orderInfo.cumQuoteQty = parseToDecimal(event.Z);
+    orderInfo.leavesQty = orderInfo.origQty - orderInfo.executedQty;
+    orderInfo.createdTimeMs = event.O.value_or(0);
+    orderInfo.updatedTimeMs = event.T.value_or(0);
+    if (orderInfo.executedQty > 0)
+    {
+        orderInfo.avgPrice = orderInfo.cumQuoteQty / orderInfo.executedQty;
+    }
+
+    publishOrderUpdate(orderInfo);
+}
+
+void BinanceDealService::handleListStatusUpdate(const ListStatusEventDto &event)
+{
+    if (event.L.value_or("") != "REJECT" || !event.O.has_value())
     {
         return;
     }
 
-    updateCache(event.B.value());
+    const string reason = event.r.value_or("");
+    for (const ListStatusOrderDto &order : event.O.value())
+    {
+        if (order.s.has_value() && order.i.has_value())
+        {
+            OrderInfo orderInfo;
+            orderInfo.symbol = order.s.value();
+            orderInfo.orderId = to_string(order.i.value());
+            orderInfo.clientOrderId = order.c.value_or("");
+            orderInfo.status = "REJECTED";
+            orderInfo.statusReason = reason;
+            publishOrderUpdate(orderInfo);
+        }
+    }
 }
 
 StreamStatus BinanceDealService::getUserStreamStatus() const
@@ -322,15 +800,21 @@ string BinanceDealService::getUserStreamLastError() const
 
 void BinanceDealService::setStreamStatus(StreamStatus status)
 {
-    lock_guard<mutex> lock(streamStatusMutex);
-    streamStatus = status;
+    {
+        lock_guard<mutex> lock(streamStatusMutex);
+        streamStatus = status;
+    }
+    orderUpdateCondition.notify_all();
 }
 
 void BinanceDealService::setStreamError(const string &error)
 {
-    lock_guard<mutex> lock(streamStatusMutex);
-    streamStatus = StreamStatus::ERROR;
-    streamLastError = error;
+    {
+        lock_guard<mutex> lock(streamStatusMutex);
+        streamStatus = StreamStatus::ERROR;
+        streamLastError = error;
+    }
+    orderUpdateCondition.notify_all();
 }
 
 long long BinanceDealService::getServerTime()
@@ -409,7 +893,7 @@ void BinanceDealService::handleUserStreamSubscriptionResponse(WebsocketStream &w
         }
     }
 
-    cerr << "Binance stream subscription failed or invalid response: " << msg << endl;
+    throw runtime_error("Binance stream subscription failed or invalid response: " + msg);
 }
 
 shared_ptr<WebsocketStream> BinanceDealService::prepareUserWebsocketStream()
@@ -487,6 +971,7 @@ void BinanceDealService::prepareUserStreamThread()
                     catch (const exception &e)
                     {
                         cerr << "Binance stream read loop error: " << e.what() << endl;
+                        setStreamError(e.what());
                         break;
                     }
                 }
@@ -495,9 +980,9 @@ void BinanceDealService::prepareUserStreamThread()
             {
                 cerr << "Binance stream error: " << e.what() << endl;
                 setStreamError(e.what());
-                userStream = false;
             }
 
+            userStream = false;
             {
                 lock_guard<mutex> lock(userWebsocketMutex);
                 userWebsocketStream.reset();
@@ -533,14 +1018,19 @@ void BinanceDealService::startUserStream()
 
 void BinanceDealService::stopUserStream()
 {
-    cout << "Requesting user stream stop..." << endl;
-    userStream = false;
-
     shared_ptr<WebsocketStream> sharedWebsocketStream;
     {
         lock_guard<mutex> lock(userWebsocketMutex);
         sharedWebsocketStream = userWebsocketStream;
     }
+
+    if (!userStream && !sharedWebsocketStream && !runner.joinable() && getUserStreamStatus() == StreamStatus::STOPPED)
+    {
+        return;
+    }
+
+    cout << "Requesting user stream stop..." << endl;
+    userStream = false;
 
     if (sharedWebsocketStream)
     {
@@ -567,6 +1057,11 @@ void BinanceDealService::stopUserStream()
         lock_guard<mutex> lock(userWebsocketMutex);
         userWebsocketStream.reset();
     }
+}
+
+BinanceDealService::~BinanceDealService()
+{
+    stopUserStream();
 }
 
 Decimal BinanceDealService::getTickerPrice(const string &symbol)
@@ -871,7 +1366,7 @@ OcoInfo BinanceDealService::placeOco(const PlaceOcoRequest &request)
     return createOcoInfo(json::value_to<OcoDto>(jsonValue));
 }
 
-OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
+void BinanceDealService::cancelOco(const OrderListQuery &request)
 {
     throwIf(request.symbol.empty(), "Symbol cannot be empty");
     throwIf(!request.orderListId.has_value() && !request.listClientOrderId.has_value(),
@@ -889,9 +1384,7 @@ OcoInfo BinanceDealService::cancelOco(const OrderListQuery &request)
 
     string response = httpsPost(context);
 
-    json::value jsonValue = parseAndValidate(response);
-
-    return createOcoInfo(json::value_to<OcoDto>(jsonValue));
+    parseAndValidate(response);
 }
 
 OcoInfo BinanceDealService::createOcoInfo(const OcoDto &oco)
@@ -903,11 +1396,26 @@ OcoInfo BinanceDealService::createOcoInfo(const OcoDto &oco)
     info.listClientOrderId = oco.listClientOrderId.value_or("");
     info.transactTimeMs = oco.transactionTime.value_or(0);
 
+    throwIf(oco.orderReports.size() != 2, "Binance OCO placement response must contain exactly two order reports");
     for (const OrderDto &report : oco.orderReports)
     {
-        info.orders.push_back(createOrderInfo(report));
+        const OrderInfo orderInfo = createOrderInfo(report);
+        if (orderInfo.type == "LIMIT_MAKER")
+        {
+            throwIf(!info.takeProfitOrder.orderId.empty(),
+                    "Binance OCO placement response contains more than one limit order");
+            info.takeProfitOrder = orderInfo;
+        }
+        else if (orderInfo.type == "STOP_LOSS_LIMIT")
+        {
+            throwIf(!info.stopLossOrder.orderId.empty(),
+                    "Binance OCO placement response contains more than one stop-loss order");
+            info.stopLossOrder = orderInfo;
+        }
     }
 
+    throwIf(info.takeProfitOrder.orderId.empty() || info.stopLossOrder.orderId.empty(),
+            "Binance OCO placement response is missing a limit or stop-loss order");
     return info;
 }
 
@@ -1072,38 +1580,4 @@ flat_map<string, AssetBalance> BinanceDealService::getBalancesRest()
     updateCache(account.balances);
 
     return getBalances();
-}
-
-// add to the paper work like bad example of ai using
-void BinanceDealService::waitUntilOrderFilled(const std::string &symbol, const std::string &orderId)
-{
-    cout << "Waiting for order " << orderId << " to be filled..." << endl;
-    int retries = 0;
-    while (true)
-    {
-        if (retries > 60) // 30 seconds
-        {
-            throw runtime_error("Timeout waiting for order " + orderId + " to fill");
-        }
-        try
-        {
-            OrderQuery orderQuery;
-            orderQuery.symbol = symbol;
-            orderQuery.orderId = orderId;
-
-            OrderInfo orderInfo = getOrder(orderQuery);
-            if (orderInfo.status == "FILLED" || orderInfo.status == "CANCELED" || orderInfo.status == "EXPIRED" ||
-                orderInfo.status == "REJECTED")
-            {
-                cout << "Order " << orderId << " is " << orderInfo.status << endl;
-                return;
-            }
-        }
-        catch (const std::exception &e)
-        {
-            cerr << "Error waiting for order: " << e.what() << endl;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        retries++;
-    }
 }

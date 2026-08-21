@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <boost/json.hpp>
 #include <cctype>
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
+#include <thread>
 
-class BybitDealServiceTest : public ::testing::Test
+class BybitDealServiceIntegrationTest : public ::testing::Test
 {
   protected:
     void SetUp() override
@@ -87,6 +90,35 @@ namespace {
     })";
     }
 
+    std::string
+    createBybitOrderResponse(const std::string &orderId, const std::string &status, const std::string &orderLinkId = "")
+    {
+        return R"({
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [{
+                    "symbol": "BTCUSDT",
+                    "orderId": ")" +
+               orderId +
+               R"(",
+                    "orderLinkId": ")" +
+               orderLinkId +
+               R"(",
+                    "side": "Sell",
+                    "orderType": "Limit",
+                    "orderStatus": ")" +
+               status +
+               R"(",
+                    "price": "50000",
+                    "qty": "0.5",
+                    "cumExecQty": "0.5",
+                    "cumExecValue": "25000"
+                }]
+            }
+        })";
+    }
+
     std::string bybitOrderPriceLimitResponse(const std::string &buyLmt = "100000", const std::string &sellLmt = "10000")
     {
         return R"({
@@ -129,7 +161,7 @@ namespace {
     }
 } // namespace
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_Success)
 {
     auto service = createService();
 
@@ -173,7 +205,78 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_Success)
     EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
+TEST_F(BybitDealServiceIntegrationTest, UserStreamOrderPublishesCompleteOrderUpdate)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("/v5/order/realtime", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "orderId": "ORDER_ID",
+                "orderLinkId": "CLIENT_ID",
+                "orderStatus": "New"
+            }]
+        }
+    })");
+
+    std::future<OrderInfo> result =
+        std::async(std::launch::async, [&service]() { return service.waitUntilOrderFilled("BTCUSDT", "ORDER_ID"); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    test_private_access::dispatchBybitUserStreamMessage(service, R"({
+        "topic": "order",
+        "data": [{
+            "category": "spot",
+            "symbol": "BTCUSDT",
+            "orderId": "ORDER_ID",
+            "orderLinkId": "CLIENT_ID",
+            "side": "Buy",
+            "orderType": "Limit",
+            "timeInForce": "GTC",
+            "orderStatus": "Filled",
+            "price": "50000",
+            "qty": "0.3",
+            "cumExecQty": "0.3",
+            "cumExecValue": "15000",
+            "leavesQty": "0",
+            "avgPrice": "50000",
+            "createdTime": "1779052073334",
+            "updatedTime": "1779052073335",
+            "rejectReason": "EC_NoError",
+            "cancelType": "UNKNOWN"
+        }]
+    })");
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const OrderInfo update = result.get();
+    EXPECT_EQ(update.status, "Filled");
+    EXPECT_EQ(update.clientOrderId, "CLIENT_ID");
+    EXPECT_EQ(update.executedQty, DecimalConverter::parseDecimal("0.3"));
+    EXPECT_EQ(update.cumQuoteQty, DecimalConverter::parseDecimal("15000"));
+    EXPECT_EQ(update.avgPrice, DecimalConverter::parseDecimal("50000"));
+    EXPECT_EQ(update.updatedTimeMs, 1779052073335LL);
+    EXPECT_EQ(countRequestsContaining("/v5/order/realtime"), 1u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, FailedWaitRemovesOrderRegistration)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("/v5/order/realtime",
+                                        createBybitOrderResponse("ORDER_ID", "PartiallyFilledCanceled"));
+    MockNetwork::instance().setResponse("/v5/order/realtime", createBybitOrderResponse("ORDER_ID", "Filled"));
+
+    EXPECT_THROW(service.waitUntilOrderFilled("BTCUSDT", "ORDER_ID"), std::runtime_error);
+
+    const OrderInfo filledOrder = service.waitUntilOrderFilled("BTCUSDT", "ORDER_ID");
+    EXPECT_EQ(filledOrder.status, "Filled");
+    EXPECT_EQ(countRequestsContaining("/v5/order/realtime"), 2u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
 {
     auto service = createService();
 
@@ -209,7 +312,7 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_ResyncsTimeAfterSyncBecomesStale)
     EXPECT_EQ(countRequestsContaining("/v5/market/time"), 2u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
+TEST_F(BybitDealServiceIntegrationTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
 {
     auto service = createService();
 
@@ -252,7 +355,7 @@ TEST_F(BybitDealServiceTest, PlaceMarketOrder_OmitsLimitAndEmptyOptionalFields)
     EXPECT_EQ(body.find("marketUnit"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
+TEST_F(BybitDealServiceIntegrationTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
 {
     auto service = createService();
 
@@ -289,7 +392,7 @@ TEST_F(BybitDealServiceTest, MarketBuyOrder_UsesPlaceOrderBaseCoinMarketUnit)
     EXPECT_EQ(body.find("timeInForce"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
+TEST_F(BybitDealServiceIntegrationTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
 {
     auto service = createService();
 
@@ -326,7 +429,7 @@ TEST_F(BybitDealServiceTest, MarketSellOrder_UsesPlaceOrderWithoutMarketUnit)
     EXPECT_EQ(body.find("timeInForce"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsBelowMinNotional)
 {
     auto service = createService();
 
@@ -344,7 +447,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBelowMinNotional)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
 {
     auto service = createService();
 
@@ -362,7 +465,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsBuyPriceAbovePriceLimit)
     EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
 {
     auto service = createService();
 
@@ -380,7 +483,7 @@ TEST_F(BybitDealServiceTest, PlaceLimitOrder_RejectsSellPriceBelowPriceLimit)
     EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, CancelOrder_Success)
+TEST_F(BybitDealServiceIntegrationTest, CancelOrder_Success)
 {
     auto service = createService();
 
@@ -411,7 +514,7 @@ TEST_F(BybitDealServiceTest, CancelOrder_Success)
     EXPECT_EQ(body.find("null"), std::string::npos);
 }
 
-TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
+TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_Success)
 {
     auto service = createService();
 
@@ -449,7 +552,7 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_Success)
     EXPECT_EQ(info.stepSize, DecimalConverter::parseDecimal("0.0001"));
 }
 
-TEST_F(BybitDealServiceTest, CeilQuantityToStep)
+TEST_F(BybitDealServiceIntegrationTest, CeilQuantityToStep)
 {
     auto service = createService();
 
@@ -459,7 +562,7 @@ TEST_F(BybitDealServiceTest, CeilQuantityToStep)
               DecimalConverter::parseDecimal("0.0002"));
 }
 
-TEST_F(BybitDealServiceTest, WalletStreamMessageUpdatesBalanceCache)
+TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageUpdatesBalanceCache)
 {
     auto service = createService();
 
@@ -476,7 +579,7 @@ TEST_F(BybitDealServiceTest, WalletStreamMessageUpdatesBalanceCache)
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.5"));
 }
 
-TEST_F(BybitDealServiceTest, WalletStreamMessageOverwritesCachedBalance)
+TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageOverwritesCachedBalance)
 {
     auto service = createService();
 
@@ -495,7 +598,7 @@ TEST_F(BybitDealServiceTest, WalletStreamMessageOverwritesCachedBalance)
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_BlankOptionalFields)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_BlankOptionalFields)
 {
     auto service = createService();
 
@@ -532,9 +635,10 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_BlankOptionalFields)
     EXPECT_EQ(balance->locked, DecimalConverter::parseDecimal("0.5"));
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_Success)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_Success)
 {
     auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
 
     std::string responseJson = R"({
         "retCode": 0,
@@ -560,7 +664,8 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
 
     OcoInfo info = service.placeOco(req);
 
-    EXPECT_EQ(info.orders.size(), 2);
+    EXPECT_FALSE(info.takeProfitOrder.orderId.empty());
+    EXPECT_FALSE(info.stopLossOrder.orderId.empty());
     ASSERT_EQ(info.listClientOrderId.size(), 33u);
     EXPECT_EQ(info.listClientOrderId[0], 'O');
     EXPECT_TRUE(std::all_of(info.listClientOrderId.begin() + 1,
@@ -586,7 +691,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_Success)
     EXPECT_EQ(orderLinkIds[1].size(), BYBIT_ORDER_LINK_ID_MAX_LENGTH);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_InvalidInput)
 {
     auto service = createService();
     PlaceOrderRequest req;
@@ -599,7 +704,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InvalidInput)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_ApiError)
 {
     auto service = createService();
     std::string errorJson = R"({
@@ -618,7 +723,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_ApiError)
     EXPECT_THROW(service.placeOrder(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, CancelOrder_ApiError)
+TEST_F(BybitDealServiceIntegrationTest, CancelOrder_ApiError)
 {
     auto service = createService();
     std::string errorJson = R"({
@@ -633,7 +738,7 @@ TEST_F(BybitDealServiceTest, CancelOrder_ApiError)
     EXPECT_THROW(service.cancelOrder(q), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_ValidationError)
 {
     auto service = createService();
     PlaceOcoRequest req;
@@ -650,9 +755,10 @@ TEST_F(BybitDealServiceTest, PlaceOco_ValidationError)
     EXPECT_THROW(service.placeOco(req), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOco_PartialFailure_Rollback)
 {
     auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
 
     std::string tpSuccess = R"({
         "retCode": 0,
@@ -696,7 +802,7 @@ TEST_F(BybitDealServiceTest, PlaceOco_PartialFailure_Rollback)
     }
 }
 
-TEST_F(BybitDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
+TEST_F(BybitDealServiceIntegrationTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
 {
     auto service = createService();
 
@@ -711,7 +817,7 @@ TEST_F(BybitDealServiceTest, MarketBuyOrder_RejectsInsufficientQuoteBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
+TEST_F(BybitDealServiceIntegrationTest, MarketSellOrder_RejectsInsufficientBaseBalance)
 {
     auto service = createService();
 
@@ -726,7 +832,7 @@ TEST_F(BybitDealServiceTest, MarketSellOrder_RejectsInsufficientBaseBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
+TEST_F(BybitDealServiceIntegrationTest, PlaceOrder_InsufficientBuyBalance)
 {
     auto service = createService();
 
@@ -744,7 +850,7 @@ TEST_F(BybitDealServiceTest, PlaceOrder_InsufficientBuyBalance)
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, GetOrder_ParsesDetailedResponse)
+TEST_F(BybitDealServiceIntegrationTest, GetOrder_ParsesDetailedResponse)
 {
     auto service = createService();
 
@@ -787,7 +893,7 @@ TEST_F(BybitDealServiceTest, GetOrder_ParsesDetailedResponse)
     EXPECT_EQ(info.updatedTimeMs, 1779052073335LL);
 }
 
-TEST_F(BybitDealServiceTest, GetOrder_EmptyListThrows)
+TEST_F(BybitDealServiceIntegrationTest, GetOrder_EmptyListThrows)
 {
     auto service = createService();
 
@@ -804,7 +910,7 @@ TEST_F(BybitDealServiceTest, GetOrder_EmptyListThrows)
     EXPECT_THROW(service.getOrder(query), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
 {
     auto service = createService();
 
@@ -828,13 +934,17 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_FallsBackFromUnifiedToSpot)
     })");
 
     const auto balances = service.getBalancesRest();
+    const auto refreshedBalances = service.getBalancesRest();
 
     ASSERT_TRUE(balances.contains("USDT"));
     EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("15"));
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("5"));
+    ASSERT_TRUE(refreshedBalances.contains("USDT"));
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 1u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 2u);
 }
 
-TEST_F(BybitDealServiceTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
 {
     auto service = createService();
 
@@ -853,21 +963,37 @@ TEST_F(BybitDealServiceTest, GetBalancesRest_RefreshesWhenCacheAlreadyPopulated)
             }]
         }
     })");
-    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
-        "retCode": 0,
-        "retMsg": "OK",
-        "result": { "list": [] }
-    })");
-
     const auto balances = service.getBalancesRest();
+    const auto refreshedBalances = service.getBalancesRest();
 
     ASSERT_TRUE(balances.contains("USDT"));
     EXPECT_EQ(balances.at("USDT").free, DecimalConverter::parseDecimal("18"));
     EXPECT_EQ(balances.at("USDT").locked, DecimalConverter::parseDecimal("2"));
+    ASSERT_TRUE(refreshedBalances.contains("USDT"));
     EXPECT_EQ(countRequestsContaining("/v5/account/wallet-balance"), 2u);
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 2u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 0u);
 }
 
-TEST_F(BybitDealServiceTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
+TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_ThrowsWhenBothAccountTypesFail)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=UNIFIED", R"({
+        "retCode": 10001,
+        "retMsg": "Unified account unavailable"
+    })");
+    MockNetwork::instance().setResponse("/v5/account/wallet-balance?accountType=SPOT", R"({
+        "retCode": 10001,
+        "retMsg": "Spot account unavailable"
+    })");
+
+    EXPECT_THROW(service.getBalancesRest(), std::runtime_error);
+    EXPECT_EQ(countRequestsContaining("accountType=UNIFIED"), 1u);
+    EXPECT_EQ(countRequestsContaining("accountType=SPOT"), 1u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
 {
     auto service = createService();
 
@@ -903,7 +1029,7 @@ TEST_F(BybitDealServiceTest, GetSymbolInfo_UsesBasePrecisionFallbackForStep)
     EXPECT_EQ(info.minNotional, DecimalConverter::parseDecimal("5"));
 }
 
-TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
+TEST_F(BybitDealServiceIntegrationTest, CancelAllOpenOrders_SuccessAndApiError)
 {
     auto service = createService();
 
@@ -925,9 +1051,10 @@ TEST_F(BybitDealServiceTest, CancelAllOpenOrders_SuccessAndApiError)
     EXPECT_THROW(service.cancelAllOpenOrders("BTCUSDT", OrderCategory::SPOT), std::runtime_error);
 }
 
-TEST_F(BybitDealServiceTest, CancelOco_Success)
+TEST_F(BybitDealServiceIntegrationTest, CancelOco_Success)
 {
     auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
 
     MockNetwork::instance().setResponse("/v5/order/create", R"({
         "retCode": 0,
@@ -972,15 +1099,152 @@ TEST_F(BybitDealServiceTest, CancelOco_Success)
     cancelQuery.symbol = "BTCUSDT";
     cancelQuery.listClientOrderId = placed.listClientOrderId;
 
-    OcoInfo cancelled = service.cancelOco(cancelQuery);
-
-    EXPECT_EQ(cancelled.listClientOrderId, "GROUP");
-    ASSERT_EQ(cancelled.orders.size(), 2u);
-    EXPECT_EQ(cancelled.orders[0].status, "Cancelled");
-    EXPECT_EQ(cancelled.orders[1].status, "Cancelled");
+    EXPECT_NO_THROW(service.cancelOco(cancelQuery));
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 2u);
 }
 
-TEST_F(BybitDealServiceTest, CancelOco_UnknownGroupThrows)
+TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateCancelsSiblingAndPublishesBothTerminalOrders)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "TP_ID", "orderLinkId": "GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/realtime", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "orderId": "TP_ID",
+                "orderLinkId": "GROUP_TP",
+                "orderStatus": "New"
+            }]
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/realtime", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "orderId": "SL_ID",
+                "orderLinkId": "GROUP_SL",
+                "orderStatus": "New"
+            }]
+        }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "55000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    PlaceOcoRequest request;
+    request.symbol = "BTCUSDT";
+    request.side = OrderOperation::SELL;
+    request.quantity = DecimalConverter::parseDecimal("0.5");
+    request.price = DecimalConverter::parseDecimal("60000");
+    request.stopPrice = DecimalConverter::parseDecimal("55000");
+    request.listClientOrderId = "GROUP";
+    const OcoInfo ocoInfo = service.placeOco(request);
+
+    std::future<OrderInfo> result =
+        std::async(std::launch::async, [&service, &ocoInfo]() { return service.waitUntilOcoOrderFilled(ocoInfo); });
+    for (int attempts = 0; attempts < 100 && countRequestsContaining("/v5/order/realtime") < 2; ++attempts)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    const std::string filledMessage = R"({
+        "topic": "order",
+        "data": [{
+            "category": "spot",
+            "symbol": "BTCUSDT",
+            "orderId": "TP_ID",
+            "orderLinkId": "GROUP_TP",
+            "orderStatus": "Filled",
+            "qty": "0.5",
+            "cumExecQty": "0.5",
+            "cumExecValue": "30000",
+            "leavesQty": "0",
+            "avgPrice": "60000"
+        }]
+    })";
+    test_private_access::dispatchBybitUserStreamMessage(service, filledMessage);
+    test_private_access::dispatchBybitUserStreamMessage(service, filledMessage);
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const OrderInfo filledOrder = result.get();
+    EXPECT_EQ(filledOrder.orderId, "TP_ID");
+    EXPECT_EQ(filledOrder.status, "Filled");
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, ReconciledOcoFillCancelsSiblingBeforeReturning)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "TP_ID", "orderLinkId": "GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "SL_ID", "orderLinkId": "GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/realtime", createBybitOrderResponse("TP_ID", "Filled", "GROUP_TP"));
+    MockNetwork::instance().setResponse("/v5/order/realtime", createBybitOrderResponse("SL_ID", "New", "GROUP_SL"));
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "55000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    PlaceOcoRequest request;
+    request.symbol = "BTCUSDT";
+    request.side = OrderOperation::SELL;
+    request.quantity = DecimalConverter::parseDecimal("0.5");
+    request.price = DecimalConverter::parseDecimal("60000");
+    request.stopPrice = DecimalConverter::parseDecimal("55000");
+    request.listClientOrderId = "GROUP";
+    const OcoInfo ocoInfo = service.placeOco(request);
+
+    const OrderInfo filledOrder = service.waitUntilOcoOrderFilled(ocoInfo);
+
+    EXPECT_EQ(filledOrder.orderId, "TP_ID");
+    EXPECT_EQ(filledOrder.status, "Filled");
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, CancelOco_UnknownGroupThrows)
 {
     auto service = createService();
 

@@ -34,9 +34,10 @@ struct OrderInfo
                              // Binance: present for LIMIT (and others), values "GTC","IOC","FOK"
                              // Bybit: similar, values "GTC","IOC","FOK" (case may differ)
 
-    std::string status; // Common meaning: lifecycle state
-                        // Binance: "NEW","PARTIALLY_FILLED","FILLED",... (ALL CAPS)
-                        // Bybit: "New","PartiallyFilled","Filled",... (+ Untriggered, etc.)
+    std::string status;       // Common meaning: lifecycle state
+                              // Binance: "NEW","PARTIALLY_FILLED","FILLED",... (ALL CAPS)
+                              // Bybit: "New","PartiallyFilled","Filled",... (+ Untriggered, etc.)
+    std::string statusReason; // Exchange-provided rejection/cancellation reason, when available
 
     Decimal price{}; // Common meaning: order price
                      // Market orders: often 0 or empty

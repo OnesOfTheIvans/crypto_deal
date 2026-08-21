@@ -8,13 +8,22 @@
 #include "type_aliasing.hpp"
 
 // DEBUG
-#include <chrono>
 #include <iostream>
-#include <stdexcept>
-#include <thread>
 
 using namespace std;
 using namespace exception_handling;
+
+namespace {
+    Decimal getReceivedQuantity(const OrderInfo &orderInfo, OrderOperation side)
+    {
+        if (side == OrderOperation::SELL)
+        {
+            return orderInfo.cumQuoteQty;
+        }
+
+        return orderInfo.executedQty > 0 ? orderInfo.executedQty : orderInfo.origQty;
+    }
+}
 
 OperationFactory::OperationFactory()
 {
@@ -22,28 +31,18 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderInfo orderInfo =
                                   service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
 
-                              service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              OrderInfo completeOrderInfo =
+                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                              OrderQuery orderQuery;
-                              orderQuery.symbol = orderInfo.symbol;
-                              orderQuery.orderId = orderInfo.orderId;
-                              OrderInfo completeOrderInfo = service->getOrder(orderQuery);
+                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::BUY);
 
-                              context.orderId = completeOrderInfo.orderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
-                                                                                   : completeOrderInfo.origQty;
-
-                              context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = OrderOperation::BUY;
-
-                              return context;
                           };
                       });
 
@@ -51,28 +50,18 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderInfo orderInfo =
                                   service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
 
-                              service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              OrderInfo completeOrderInfo =
+                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                              OrderQuery orderQuery;
-                              orderQuery.symbol = orderInfo.symbol;
-                              orderQuery.orderId = orderInfo.orderId;
-                              OrderInfo completeOrderInfo = service->getOrder(orderQuery);
+                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::SELL);
 
-                              context.orderId = completeOrderInfo.orderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
-                                                                                   : completeOrderInfo.origQty;
-
-                              context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = OrderOperation::SELL;
-
-                              return context;
                           };
                       });
 
@@ -80,25 +69,25 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOrderConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
                               PlaceOrderRequest request;
 
-                              if (preset.side == OrderOperation::BUY)
+                              switch (preset.side)
                               {
+                              case OrderOperation::BUY:
                                   request.symbol = preset.outAsset + context.inAsset;
-                              }
-                              else // SELL
-                              {
+                                  break;
+                              case OrderOperation::SELL:
                                   request.symbol = context.inAsset + preset.outAsset;
+                                  break;
                               }
 
                               request.side = preset.side;
                               request.type = preset.type;
                               request.timeInForce = preset.timeInForce;
-                              request.clientOrderId = context.orderId;
                               request.category = OrderCategory::SPOT;
                               request.triggerPrice = preset.triggerPrice;
                               request.orderFilter = preset.orderFilter;
@@ -107,175 +96,50 @@ OperationFactory::OperationFactory()
                               request.price = preset.price;
                               OrderInfo orderInfo = service->placeOrder(request);
 
-                              service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              OrderInfo completeOrderInfo =
+                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
 
-                              OrderQuery orderQuery;
-                              orderQuery.symbol = orderInfo.symbol;
-                              orderQuery.orderId = orderInfo.orderId;
-                              OrderInfo completeOrderInfo = service->getOrder(orderQuery);
+                              context.quantity = getReceivedQuantity(completeOrderInfo, preset.side);
 
-                              context.orderId = completeOrderInfo.clientOrderId.empty()
-                                                    ? completeOrderInfo.orderId
-                                                    : completeOrderInfo.clientOrderId;
-                              context.quantity = completeOrderInfo.executedQty > 0 ? completeOrderInfo.executedQty
-                                                                                   : completeOrderInfo.origQty;
-
-                              context.previousInAsset = context.inAsset;
                               context.inAsset = preset.outAsset;
-                              context.side = preset.side;
-
-                              return context;
                           };
                       });
 
-    factories.emplace(OperationType::CANCEL_ORDER,
+    factories.emplace(OperationType::PLACE_OCO,
                       [](const Config &config) -> operation
                       {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
+                          const auto preset = get<PlaceOcoConfig>(config);
+                          return [preset](OperationContext &context)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderQuery request;
 
-                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_ORDER");
+                              PlaceOcoRequest request;
 
-                              if (context.side.value() == OrderOperation::BUY)
+                              switch (preset.side)
                               {
-                                  request.symbol = context.inAsset + context.previousInAsset;
-                              }
-                              else if (context.side.value() == OrderOperation::SELL)
-                              {
-                                  request.symbol = context.previousInAsset + context.inAsset;
-                              }
-
-                              request.orderId = context.orderId;
-                              service->cancelOrder(request);
-
-                              context.side = std::nullopt;
-
-                              return context;
-                          };
-                      });
-
-    factories.emplace(
-        OperationType::PLACE_OCO,
-        [](const Config &config) -> operation
-        {
-            const auto preset = get<PlaceOcoConfig>(config);
-            return [preset](OperationContext &context) -> OperationContext &
-            {
-                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-
-                PlaceOcoRequest request;
-
-                if (preset.side == OrderOperation::BUY)
-                {
-                    request.symbol = preset.outAsset + context.inAsset;
-                }
-                else // SELL
-                {
-                    request.symbol = context.inAsset + preset.outAsset;
-                }
-
-                request.side = preset.side;
-                request.quantity = context.quantity;
-                request.price = preset.price;
-                request.stopPrice = preset.stopPrice;
-                request.stopLimitPrice = preset.stopLimitPrice;
-                request.stopLimitTimeInForce = preset.stopLimitTimeInForce;
-                request.listClientOrderId = preset.listClientOrderId;
-                request.limitClientOrderId = preset.limitClientOrderId;
-                request.stopClientOrderId = preset.stopClientOrderId;
-                OcoInfo ocoInfo = service->placeOco(request);
-
-                context.orderId = ocoInfo.listClientOrderId.empty() ? ocoInfo.orderListId : ocoInfo.listClientOrderId;
-                context.previousInAsset = context.inAsset;
-                context.inAsset = preset.outAsset;
-                context.side = preset.side;
-
-                // Polling loop to wait for execution
-                cout << "Waiting for OCO execution (" << context.orderId.value_or("unknown") << ")..." << endl;
-                int retries = 0;
-                bool filled = false;
-                while (true)
-                {
-                    if (retries > 60) // 30 seconds
-                    {
-                        throw runtime_error("Timeout waiting for OCO " + context.orderId.value_or("unknown") +
-                                            " to fill");
-                    }
-
-                    for (const auto &order : ocoInfo.orders)
-                    {
-                        try
-                        {
-                            OrderQuery query;
-                            query.symbol = request.symbol;
-                            query.orderId = order.orderId;
-                            OrderInfo currentInfo = service->getOrder(query);
-
-                            if (currentInfo.status == "Filled")
-                            {
-                                cout << "OCO Order " << currentInfo.orderId << " filled!" << endl;
-                                context.orderId = currentInfo.orderId;
-                                context.quantity =
-                                    currentInfo.executedQty > 0 ? currentInfo.executedQty : currentInfo.origQty;
-                                filled = true;
-                                break;
-                            }
-                            else if (currentInfo.status == "Cancelled" || currentInfo.status == "Rejected" ||
-                                     currentInfo.status == "Deactivated" || currentInfo.status == "Expired")
-                            {
-                                // If one leg is cancelled/rejected, we might want to keep waiting for the other or
-                                // fail? Usually OCO means if one cancels, other cancels. But if triggered? For now,
-                                // let's focus on "Filled".
-                            }
-                        }
-                        catch (const std::exception &e)
-                        {
-                            cerr << "Error checking OCO order status: " << e.what() << endl;
-                        }
-                    }
-
-                    if (filled)
-                    {
-                        break;
-                    }
-
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    retries++;
-                }
-
-                return context;
-            };
-        });
-
-    factories.emplace(OperationType::CANCEL_OCO,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context) -> OperationContext &
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderListQuery request;
-
-                              throwIf(!context.side.has_value(), "Side is missing or invalid for CANCEL_OCO");
-
-                              if (context.side.value() == OrderOperation::BUY)
-                              {
-                                  request.symbol = context.inAsset + context.previousInAsset;
-                              }
-                              else if (context.side.value() == OrderOperation::SELL)
-                              {
-                                  request.symbol = context.previousInAsset + context.inAsset;
+                              case OrderOperation::BUY:
+                                  request.symbol = preset.outAsset + context.inAsset;
+                                  break;
+                              case OrderOperation::SELL:
+                                  request.symbol = context.inAsset + preset.outAsset;
+                                  break;
                               }
 
-                              request.listClientOrderId = context.orderId;
-                              service->cancelOco(request);
+                              request.side = preset.side;
+                              request.quantity = context.quantity;
+                              request.price = preset.price;
+                              request.stopPrice = preset.stopPrice;
+                              request.stopLimitPrice = preset.stopLimitPrice;
+                              request.stopLimitTimeInForce = preset.stopLimitTimeInForce;
+                              request.listClientOrderId = preset.listClientOrderId;
+                              request.limitClientOrderId = preset.limitClientOrderId;
+                              request.stopClientOrderId = preset.stopClientOrderId;
+                              OcoInfo ocoInfo = service->placeOco(request);
 
-                              context.side = std::nullopt;
+                              const OrderInfo filledOrder = service->waitUntilOcoOrderFilled(ocoInfo);
 
-                              return context;
+                              context.quantity = getReceivedQuantity(filledOrder, preset.side);
+                              context.inAsset = preset.outAsset;
                           };
                       });
 
@@ -288,7 +152,7 @@ OperationFactory::OperationFactory()
         [](const Config &config) -> operation
         {
             const auto preset = get<SendToConfig>(config);
-            return [preset](OperationContext &context) -> OperationContext &
+            return [preset](OperationContext &context)
             {
                 string targetExchanger = context.exchangerType == ExchangerType::BYBIT ? "Bybit" : "Binance";
                 string destinationExchanger = preset.destinationExchanger == ExchangerType::BYBIT ? "Bybit" : "Binance";
@@ -296,10 +160,6 @@ OperationFactory::OperationFactory()
                      << targetExchanger << " to the " << destinationExchanger << " by chain " << preset.chain
                      << " to the address " << preset.address << "." << endl;
                 context.exchangerType = preset.destinationExchanger;
-
-                context.side = std::nullopt;
-
-                return context;
             };
         });
 }

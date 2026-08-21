@@ -25,7 +25,17 @@ namespace {
         {
             return {};
         }
-        void waitUntilOrderFilled(const std::string &, const std::string &) override {}
+
+        OrderInfo waitUntilOrderFilled(const std::string &, const std::string &) override
+        {
+            return {};
+        }
+
+        OrderInfo waitUntilOcoOrderFilled(const OcoInfo &) override
+        {
+            return {};
+        }
+
         flat_map<std::string, AssetBalance> getBalances() const override
         {
             return {};
@@ -35,15 +45,19 @@ namespace {
             return std::nullopt;
         }
         void startUserStream() override {}
+
         void stopUserStream() override {}
+
         StreamStatus getUserStreamStatus() const override
         {
             return StreamStatus::STOPPED;
         }
+
         std::string getUserStreamLastError() const override
         {
             return {};
         }
+
         OrderInfo placeOrder(const PlaceOrderRequest &) override
         {
             return {};
@@ -52,10 +66,11 @@ namespace {
         {
             return {};
         }
-        OrderInfo getOrder(const OrderQuery &) override
+        OrderInfo getOrder(const OrderQuery &query) override
         {
             return {};
         }
+
         SymbolInfo getSymbolInfo(const std::string &, OrderCategory = OrderCategory::SPOT) override
         {
             return {};
@@ -68,11 +83,10 @@ namespace {
         {
             return {};
         }
-        OcoInfo cancelOco(const OrderListQuery &) override
-        {
-            return {};
-        }
+        void cancelOco(const OrderListQuery &) override {}
+
         void cancelAllOpenOrders(const std::string &, OrderCategory) override {}
+
         flat_map<std::string, AssetBalance> getBalancesRest() override
         {
             return {};

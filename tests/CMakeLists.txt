@@ -1,24 +1,30 @@
 
 
-add_executable(DealServiceTests
+add_executable(DealServiceUnitIntegrationTests
     MockHttpRequest.cpp
     MockHttpRequestContext.cpp
-    TestCommonDealService.cpp
-    TestBinanceDealService.cpp
-    TestBybitDealService.cpp
+    DealServiceTest.cpp
+    BinanceDealServiceIntegrationTest.cpp
+    BybitDealServiceIntegrationTest.cpp
+    OperationFactoryTest.cpp
+    OperationChainTest.cpp
+    OperationChainIntegrationTest.cpp
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
     ../src/DealService/common/DecimalConverter.cpp
     ../src/DealService/common/exception_handling.cpp
+    ../src/OperationChain/ExchangerPull.cpp
+    ../src/OperationChain/OperationFactory.cpp
+    ../src/OperationChain/OperationChain.cpp
 )
 
-target_include_directories(DealServiceTests PRIVATE
+target_include_directories(DealServiceUnitIntegrationTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/DealService
 )
 
-target_link_libraries(DealServiceTests PRIVATE
+target_link_libraries(DealServiceUnitIntegrationTests PRIVATE
     GTest::GTest
     GTest::Main
     Boost::json
@@ -28,4 +34,4 @@ target_link_libraries(DealServiceTests PRIVATE
     Threads::Threads
 )
 
-add_test(NAME DealServiceTests COMMAND DealServiceTests)
+add_test(NAME DealServiceUnitIntegrationTests COMMAND DealServiceUnitIntegrationTests)
