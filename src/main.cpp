@@ -1,13 +1,23 @@
 #include "ApplicationConfigurationUtil.hpp"
 #include "binance/BinanceDealService.hpp"
 #include "bybit/BybitDealService.hpp"
+#include "graphical/GraphicalUserInterface.hpp"
+
+#include <QApplication>
+#include <QMessageBox>
+#include <QString>
 
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <string>
 
-int main()
+using namespace std;
+
+int main(int argc, char *argv[])
 {
+    QApplication application(argc, argv);
+
     try
     {
         const ApplicationConfiguration configuration = loadApplicationConfiguration(CONFIG_FILE);
@@ -19,12 +29,15 @@ int main()
                                                                          configuration.bybit.apiKey,
                                                                          configuration.bybit.secretKey,
                                                                          configuration.bybit.websocketHost);
+
+        GraphicalUserInterface userInterface(binanceDealService, bybitDealService);
+        return userInterface.run();
     }
     catch (const std::exception &exception)
     {
-        std::cerr << "Application startup failed: " << exception.what() << std::endl;
+        const string errorMessage = "Application startup failed: " + string(exception.what());
+        cerr << errorMessage << endl;
+        QMessageBox::critical(nullptr, "CryptoDeal startup failed", QString::fromStdString(errorMessage));
         return 1;
     }
-
-    return 0;
 }
