@@ -1,0 +1,79 @@
+QMainWindow#cryptoDealWindow,
+QWidget#windowContent {
+    background-color: #12151c;
+    color: #eef2f8;
+}
+
+QWidget#primarySidebar {
+    background-color: #191d27;
+    border-right: 1px solid #2a303d;
+}
+
+QLabel#brandLabel {
+    color: #f7f9fc;
+    font-size: 23px;
+    font-weight: 700;
+}
+
+QLabel#brandDescription,
+QLabel#navigationLabel,
+QLabel#proofOfConceptLabel {
+    color: #737e92;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QPushButton[navigation="true"] {
+    background-color: transparent;
+    border: 0;
+    border-radius: 7px;
+    color: #aeb7c7;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0 14px;
+    text-align: left;
+}
+
+QPushButton[navigation="true"]:hover {
+    background-color: #222836;
+    color: #f4f7fb;
+}
+
+QPushButton[navigation="true"]:checked {
+    background-color: #2768d9;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+QStackedWidget#primaryPageStack,
+QWidget[primaryPage="true"] {
+    background-color: #12151c;
+}
+
+QLabel[pageTitle="true"] {
+    color: #f7f9fc;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel[pageDescription="true"] {
+    color: #929caf;
+    font-size: 14px;
+}
+
+QWidget[placeholderCard="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
+QLabel[placeholderTitle="true"] {
+    color: #dbe2ed;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+QLabel[placeholderDescription="true"] {
+    color: #7f899b;
+    font-size: 13px;
+}

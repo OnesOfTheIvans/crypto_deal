@@ -1,10 +1,9 @@
 #include "GraphicalUserInterface.hpp"
 
+#include "CryptoDealWindow.hpp"
 #include "common/exception_handling.hpp"
 
 #include <QApplication>
-#include <QLabel>
-#include <QMainWindow>
 
 #include <utility>
 
@@ -23,13 +22,7 @@ int GraphicalUserInterface::run()
 {
     throwIf(QApplication::instance() == nullptr, "Graphical user interface requires a Qt application");
 
-    QMainWindow mainWindow;
-    mainWindow.setWindowTitle("CryptoDeal");
-    mainWindow.resize(960, 640);
-
-    auto *placeholder = new QLabel("CryptoDeal");
-    placeholder->setAlignment(Qt::AlignCenter);
-    mainWindow.setCentralWidget(placeholder);
+    CryptoDealWindow mainWindow;
     mainWindow.show();
 
     return QApplication::exec();

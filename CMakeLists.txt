@@ -19,7 +19,7 @@ endif()
 
 add_compile_definitions(CONFIG_FILE="${CMAKE_SOURCE_DIR}/config.ini")
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Test Widgets)
 find_package(Boost 1.90 REQUIRED COMPONENTS json url)
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)

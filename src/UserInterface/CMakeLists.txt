@@ -5,10 +5,22 @@ target_include_directories(UserInterfaceLib
 )
 
 add_library(GraphicalUserInterfaceLib
+    graphical/CryptoDealWindow.cpp
     graphical/GraphicalUserInterface.cpp
+    graphical/pages/AccountsPage.cpp
+    graphical/pages/OperationChainsPage.cpp
+    graphical/pages/OrdersPage.cpp
 )
 
 target_link_libraries(GraphicalUserInterfaceLib
-    PUBLIC UserInterfaceLib
-    PRIVATE DealLib Qt6::Widgets
+    PUBLIC
+        UserInterfaceLib
+        Qt6::Widgets
+    PRIVATE DealLib
+)
+
+qt_add_resources(GraphicalUserInterfaceLib graphical_styles
+    PREFIX "/styles"
+    BASE graphical/resources
+    FILES graphical/resources/dark.qss
 )

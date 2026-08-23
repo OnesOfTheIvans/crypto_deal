@@ -50,3 +50,17 @@ target_link_libraries(ApplicationUnitTests PRIVATE
 )
 
 add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
+
+add_executable(GraphicalUserInterfaceTests
+    GraphicalUserInterfaceTest.cpp
+)
+
+target_link_libraries(GraphicalUserInterfaceTests PRIVATE
+    GraphicalUserInterfaceLib
+    GTest::GTest
+    GTest::Main
+    Qt6::Test
+)
+
+add_test(NAME GraphicalUserInterfaceTests COMMAND GraphicalUserInterfaceTests)
+set_tests_properties(GraphicalUserInterfaceTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
