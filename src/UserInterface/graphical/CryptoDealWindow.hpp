@@ -9,10 +9,12 @@ class QPushButton;
 class QStackedWidget;
 class QString;
 class QWidget;
+class PairCatalog;
 
 class CryptoDealWindow final : public QMainWindow
 {
   private:
+    PairCatalog &pairCatalog;
     QStackedWidget *pageStack;
 
     void createLayout();
@@ -24,7 +26,7 @@ class CryptoDealWindow final : public QMainWindow
     void applyStyle();
 
   public:
-    explicit CryptoDealWindow(QWidget *parent = nullptr);
+    explicit CryptoDealWindow(PairCatalog &pairCatalog, QWidget *parent = nullptr);
 };
 
 #endif

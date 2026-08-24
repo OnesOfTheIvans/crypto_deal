@@ -77,3 +77,9 @@ QLabel[placeholderDescription="true"] {
     color: #7f899b;
     font-size: 13px;
 }
+
+QLabel[pairCatalogStatus="true"] {
+    color: #aeb7c7;
+    font-size: 13px;
+    padding-top: 4px;
+}

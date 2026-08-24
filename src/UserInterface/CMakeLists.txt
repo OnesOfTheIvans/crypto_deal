@@ -9,6 +9,7 @@ add_library(GraphicalUserInterfaceLib
     graphical/GraphicalUserInterface.cpp
     graphical/async/AsyncTaskExecutor.cpp
     graphical/async/UiTaskState.cpp
+    graphical/models/PairCatalog.cpp
     graphical/pages/AccountsPage.cpp
     graphical/pages/OperationChainsPage.cpp
     graphical/pages/OrdersPage.cpp
@@ -18,9 +19,9 @@ set_target_properties(GraphicalUserInterfaceLib PROPERTIES AUTOMOC ON)
 
 target_link_libraries(GraphicalUserInterfaceLib
     PUBLIC
+        DealLib
         UserInterfaceLib
         Qt6::Widgets
-    PRIVATE DealLib
 )
 
 qt_add_resources(GraphicalUserInterfaceLib graphical_styles

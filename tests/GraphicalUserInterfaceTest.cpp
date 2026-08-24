@@ -1,4 +1,5 @@
 #include "graphical/CryptoDealWindow.hpp"
+#include "graphical/models/PairCatalog.hpp"
 
 #include <QApplication>
 #include <QPushButton>
@@ -28,7 +29,8 @@ namespace {
 TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
 {
     getApplication();
-    CryptoDealWindow window;
+    PairCatalog pairCatalog;
+    CryptoDealWindow window(pairCatalog);
     window.show();
     QApplication::processEvents();
 
@@ -46,7 +48,8 @@ TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
 TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchronized)
 {
     getApplication();
-    CryptoDealWindow window;
+    PairCatalog pairCatalog;
+    CryptoDealWindow window(pairCatalog);
     window.show();
     QApplication::processEvents();
 
@@ -82,7 +85,8 @@ TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchro
 TEST(GraphicalUserInterfaceTest, UsesApprovedWindowDimensions)
 {
     getApplication();
-    CryptoDealWindow window;
+    PairCatalog pairCatalog;
+    CryptoDealWindow window(pairCatalog);
 
     EXPECT_EQ(window.size(), QSize(1180, 760));
     EXPECT_EQ(window.minimumSize(), QSize(960, 640));

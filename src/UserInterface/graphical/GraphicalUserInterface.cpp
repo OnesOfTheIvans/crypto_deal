@@ -3,6 +3,7 @@
 #include "CryptoDealWindow.hpp"
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
+#include "models/PairCatalog.hpp"
 
 #include <QApplication>
 
@@ -24,8 +25,10 @@ int GraphicalUserInterface::run()
     throwIf(QApplication::instance() == nullptr, "Graphical user interface requires a Qt application");
 
     AsyncTaskExecutor taskExecutor;
-    CryptoDealWindow mainWindow;
+    PairCatalog pairCatalog;
+    CryptoDealWindow mainWindow(pairCatalog);
     mainWindow.show();
+    pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
 
     const int exitCode = QApplication::exec();
     taskExecutor.stopAndWait();
