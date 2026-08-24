@@ -1,6 +1,7 @@
 #include "GraphicalUserInterface.hpp"
 
 #include "CryptoDealWindow.hpp"
+#include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
 
 #include <QApplication>
@@ -22,8 +23,11 @@ int GraphicalUserInterface::run()
 {
     throwIf(QApplication::instance() == nullptr, "Graphical user interface requires a Qt application");
 
+    AsyncTaskExecutor taskExecutor;
     CryptoDealWindow mainWindow;
     mainWindow.show();
 
-    return QApplication::exec();
+    const int exitCode = QApplication::exec();
+    taskExecutor.stopAndWait();
+    return exitCode;
 }

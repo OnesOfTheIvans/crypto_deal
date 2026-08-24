@@ -11,6 +11,12 @@
 namespace {
     QApplication &getApplication()
     {
+        auto *existingApplication = qobject_cast<QApplication *>(QApplication::instance());
+        if (existingApplication != nullptr)
+        {
+            return *existingApplication;
+        }
+
         static int argumentCount = 1;
         static char applicationName[] = "GraphicalUserInterfaceTests";
         static char *arguments[]{applicationName, nullptr};
