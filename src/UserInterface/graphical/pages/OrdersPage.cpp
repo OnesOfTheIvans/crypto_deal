@@ -3,8 +3,11 @@
 #include "graphical/GuiLayoutConstants.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/PairCatalog.hpp"
+#include "graphical/widgets/OrderEntryForm.hpp"
 
+#include <QFrame>
 #include <QLabel>
+#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -29,32 +32,45 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog, QWidget *parent)
     auto *description = new QLabel("Place spot orders and follow their session status.", this);
     description->setProperty("pageDescription", true);
 
-    auto *placeholderCard = new QWidget(this);
-    placeholderCard->setProperty("placeholderCard", true);
-    placeholderCard->setMinimumHeight(PLACEHOLDER_MINIMUM_HEIGHT);
+    auto *workspaceScrollArea = new QScrollArea(this);
+    workspaceScrollArea->setObjectName("orderWorkspaceScrollArea");
+    workspaceScrollArea->setFrameShape(QFrame::NoFrame);
+    workspaceScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    workspaceScrollArea->setWidgetResizable(true);
 
-    auto *placeholderLayout = new QVBoxLayout(placeholderCard);
-    placeholderLayout->setContentsMargins(PLACEHOLDER_HORIZONTAL_MARGIN,
-                                          PLACEHOLDER_VERTICAL_MARGIN,
-                                          PLACEHOLDER_HORIZONTAL_MARGIN,
-                                          PLACEHOLDER_VERTICAL_MARGIN);
-    placeholderLayout->setSpacing(PLACEHOLDER_LAYOUT_SPACING);
+    auto *workspaceContent = new QWidget(workspaceScrollArea);
+    workspaceContent->setObjectName("orderWorkspaceContent");
 
-    auto *placeholderTitle = new QLabel("Order workspace", placeholderCard);
-    placeholderTitle->setProperty("placeholderTitle", true);
+    auto *workspaceContentLayout = new QVBoxLayout(workspaceContent);
+    workspaceContentLayout->setContentsMargins(0, 0, ORDER_WORKSPACE_SCROLL_MARGIN, 0);
+    workspaceContentLayout->setSpacing(0);
 
-    auto *placeholderDescription =
-        new QLabel("Pair selection and order controls will be added in the next Orders steps.", placeholderCard);
-    placeholderDescription->setProperty("placeholderDescription", true);
-    placeholderDescription->setWordWrap(true);
+    auto *workspaceCard = new QWidget(workspaceContent);
+    workspaceCard->setObjectName("orderWorkspaceCard");
+    workspaceCard->setProperty("orderCard", true);
 
-    binanceCatalogStatus = new QLabel(placeholderCard);
+    auto *workspaceLayout = new QVBoxLayout(workspaceCard);
+    workspaceLayout->setContentsMargins(PLACEHOLDER_HORIZONTAL_MARGIN,
+                                        PLACEHOLDER_VERTICAL_MARGIN,
+                                        PLACEHOLDER_HORIZONTAL_MARGIN,
+                                        PLACEHOLDER_VERTICAL_MARGIN);
+    workspaceLayout->setSpacing(PLACEHOLDER_LAYOUT_SPACING);
+
+    auto *workspaceTitle = new QLabel("New order", workspaceCard);
+    workspaceTitle->setProperty("placeholderTitle", true);
+
+    auto *workspaceDescription =
+        new QLabel("Choose a tradable SPOT pair and prepare the fields for one placement operation.", workspaceCard);
+    workspaceDescription->setProperty("placeholderDescription", true);
+    workspaceDescription->setWordWrap(true);
+
+    binanceCatalogStatus = new QLabel(workspaceCard);
     binanceCatalogStatus->setObjectName("binancePairCatalogStatus");
     binanceCatalogStatus->setProperty("pairCatalogStatus", true);
     binanceCatalogStatus->setTextFormat(Qt::PlainText);
     binanceCatalogStatus->setWordWrap(true);
 
-    bybitCatalogStatus = new QLabel(placeholderCard);
+    bybitCatalogStatus = new QLabel(workspaceCard);
     bybitCatalogStatus->setObjectName("bybitPairCatalogStatus");
     bybitCatalogStatus->setProperty("pairCatalogStatus", true);
     bybitCatalogStatus->setTextFormat(Qt::PlainText);
@@ -73,17 +89,25 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog, QWidget *parent)
     updateCatalogStatus(ExchangerType::BINANCE, *binanceCatalogStatus, "Binance");
     updateCatalogStatus(ExchangerType::BYBIT, *bybitCatalogStatus, "Bybit");
 
-    placeholderLayout->addWidget(placeholderTitle);
-    placeholderLayout->addWidget(placeholderDescription);
-    placeholderLayout->addWidget(binanceCatalogStatus);
-    placeholderLayout->addWidget(bybitCatalogStatus);
-    placeholderLayout->addStretch();
+    auto *catalogDivider = new QFrame(workspaceCard);
+    catalogDivider->setProperty("orderFormDivider", true);
+    catalogDivider->setFrameShape(QFrame::HLine);
+
+    workspaceLayout->addWidget(workspaceTitle);
+    workspaceLayout->addWidget(workspaceDescription);
+    workspaceLayout->addWidget(binanceCatalogStatus);
+    workspaceLayout->addWidget(bybitCatalogStatus);
+    workspaceLayout->addWidget(catalogDivider);
+    workspaceLayout->addWidget(new OrderEntryForm(pairCatalog, workspaceCard));
+
+    workspaceContentLayout->addWidget(workspaceCard);
+    workspaceContentLayout->addStretch();
+    workspaceScrollArea->setWidget(workspaceContent);
 
     layout->addWidget(title);
     layout->addWidget(description);
     layout->addSpacing(PAGE_PLACEHOLDER_SPACING);
-    layout->addWidget(placeholderCard);
-    layout->addStretch();
+    layout->addWidget(workspaceScrollArea, 1);
 }
 
 void OrdersPage::updateCatalogStatus(ExchangerType exchangerType, QLabel &statusLabel, const QString &exchangeName)

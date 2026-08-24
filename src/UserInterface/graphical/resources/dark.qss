@@ -67,6 +67,12 @@ QWidget[placeholderCard="true"] {
     border-radius: 10px;
 }
 
+QWidget[orderCard="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
 QLabel[placeholderTitle="true"] {
     color: #dbe2ed;
     font-size: 16px;
@@ -82,4 +88,82 @@ QLabel[pairCatalogStatus="true"] {
     color: #aeb7c7;
     font-size: 13px;
     padding-top: 4px;
+}
+
+QScrollArea#orderWorkspaceScrollArea,
+QWidget#orderWorkspaceContent,
+QWidget#orderEntryForm,
+QWidget#orderPairDependentControls,
+QStackedWidget#orderOperationFormStack,
+QStackedWidget#orderOperationFormStack > QWidget {
+    background-color: transparent;
+    border: 0;
+}
+
+QLabel[selectedCatalogStatus="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+QLabel[orderFieldLabel="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel[operationDescription="true"] {
+    color: #7f899b;
+    font-size: 12px;
+    padding: 3px 0;
+}
+
+QComboBox[orderInput="true"],
+QLineEdit[orderInput="true"] {
+    background-color: #11161f;
+    border: 1px solid #323b4b;
+    border-radius: 6px;
+    color: #e3e9f2;
+    font-size: 13px;
+    padding: 0 10px;
+    selection-background-color: #2768d9;
+}
+
+QComboBox[orderInput="true"]:focus,
+QLineEdit[orderInput="true"]:focus {
+    border-color: #4b84e6;
+}
+
+QComboBox[orderInput="true"]:disabled,
+QLineEdit[orderInput="true"]:disabled {
+    background-color: #171b23;
+    border-color: #282e39;
+    color: #646d7c;
+}
+
+QLineEdit[readOnlyContext="true"] {
+    background-color: #202631;
+    color: #9da8b9;
+}
+
+QComboBox[orderInput="true"] QAbstractItemView {
+    background-color: #191f2a;
+    border: 1px solid #384253;
+    color: #e3e9f2;
+    selection-background-color: #2768d9;
+}
+
+QCheckBox#placeOcoUseStopLimit {
+    color: #c2cad7;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QFrame[orderFormDivider="true"] {
+    border: 0;
+    border-top: 1px solid #2b3240;
+    max-height: 1px;
 }

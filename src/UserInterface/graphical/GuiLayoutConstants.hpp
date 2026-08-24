@@ -27,6 +27,12 @@ namespace GuiLayoutConstants {
     inline constexpr int PLACEHOLDER_HORIZONTAL_MARGIN = 28;
     inline constexpr int PLACEHOLDER_VERTICAL_MARGIN = 24;
     inline constexpr int PLACEHOLDER_LAYOUT_SPACING = 8;
+    inline constexpr int ORDER_WORKSPACE_SCROLL_MARGIN = 8;
+    inline constexpr int ORDER_FORM_MARGIN = 0;
+    inline constexpr int ORDER_FORM_SECTION_SPACING = 14;
+    inline constexpr int ORDER_FORM_ROW_SPACING = 8;
+    inline constexpr int ORDER_FORM_COLUMN_SPACING = 16;
+    inline constexpr int ORDER_FORM_CONTROL_MINIMUM_HEIGHT = 36;
 }
 
 #endif

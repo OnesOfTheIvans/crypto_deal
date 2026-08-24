@@ -13,6 +13,7 @@ add_library(GraphicalUserInterfaceLib
     graphical/pages/AccountsPage.cpp
     graphical/pages/OperationChainsPage.cpp
     graphical/pages/OrdersPage.cpp
+    graphical/widgets/OrderEntryForm.cpp
 )
 
 set_target_properties(GraphicalUserInterfaceLib PROPERTIES AUTOMOC ON)
@@ -20,6 +21,7 @@ set_target_properties(GraphicalUserInterfaceLib PROPERTIES AUTOMOC ON)
 target_link_libraries(GraphicalUserInterfaceLib
     PUBLIC
         DealLib
+        OperationChainLib
         UserInterfaceLib
         Qt6::Widgets
 )
