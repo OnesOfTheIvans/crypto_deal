@@ -1,43 +1,72 @@
 #include "OrderEntryForm.hpp"
 
+#include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/PairCatalog.hpp"
+#include "graphical/models/SymbolInfoCatalog.hpp"
+#include "graphical/widgets/DecimalInputField.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QString>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWidget>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
 using namespace GuiLayoutConstants;
 using namespace std;
 
-OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog, QWidget *parent)
-    : QWidget(parent), pairCatalog(pairCatalog), exchangeSelector(nullptr), categoryField(nullptr),
-      selectedCatalogStatus(nullptr), pairDependentControls(nullptr), baseAssetSelector(nullptr),
-      quoteAssetSelector(nullptr), operationSelector(nullptr), amountLabel(nullptr), amountInput(nullptr),
-      operationFormStack(nullptr), placeOrderTypeSelector(nullptr), placeOrderLimitFields(nullptr),
-      placeOrderPriceLabel(nullptr), placeOrderPriceInput(nullptr), useOcoStopLimit(nullptr),
-      ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr), ocoStopPriceLabel(nullptr),
-      ocoStopLimitPriceLabel(nullptr), ocoLimitPriceInput(nullptr), ocoStopPriceInput(nullptr),
-      ocoStopLimitPriceInput(nullptr)
+namespace {
+    QString formatDecimal(Decimal value)
+    {
+        return QString::fromStdString(DecimalConverter::formatDecimal(value));
+    }
+
+    QString formatByIncrement(Decimal value, Decimal increment)
+    {
+        return QString::fromStdString(DecimalConverter::formatByStep(value, increment));
+    }
+
+    void appendBound(QStringList &parts, const QString &name, Decimal value, Decimal increment)
+    {
+        if (value > 0)
+        {
+            parts.push_back(name + " " + formatByIncrement(value, increment));
+        }
+    }
+}
+
+OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent)
+    : QWidget(parent), pairCatalog(pairCatalog), symbolInfoCatalog(symbolInfoCatalog), exchangeSelector(nullptr),
+      categoryField(nullptr), selectedCatalogStatus(nullptr), pairDependentControls(nullptr),
+      baseAssetSelector(nullptr), quoteAssetSelector(nullptr), operationSelector(nullptr),
+      selectedSymbolInfoStatus(nullptr), retrySymbolInfoButton(nullptr), tradingLimits(nullptr), amountLabel(nullptr),
+      amountField(nullptr), operationFormStack(nullptr), placeOrderTypeSelector(nullptr),
+      placeOrderLimitFields(nullptr), placeOrderPriceLabel(nullptr), placeOrderPriceField(nullptr),
+      useOcoStopLimit(nullptr), ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr), ocoStopPriceLabel(nullptr),
+      ocoStopLimitPriceLabel(nullptr), ocoLimitPriceField(nullptr), ocoStopPriceField(nullptr),
+      ocoStopLimitPriceField(nullptr), formValidationError(nullptr), proceedButton(nullptr)
 {
     setObjectName("orderEntryForm");
     createLayout();
     connectCatalogUpdates();
+    connectInputUpdates();
     updateSelectedCatalog();
 }
 
@@ -64,7 +93,6 @@ optional<TradablePair> OrderEntryForm::getSelectedPair() const
     {
         return nullopt;
     }
-
     return *selectedPair;
 }
 
@@ -149,23 +177,44 @@ void OrderEntryForm::createLayout()
     pairLayout->setColumnStretch(0, 1);
     pairLayout->setColumnStretch(1, 1);
 
+    auto *symbolStatusLayout = new QHBoxLayout();
+    symbolStatusLayout->setContentsMargins(0, 0, 0, 0);
+    symbolStatusLayout->setSpacing(ORDER_FORM_FEEDBACK_SPACING);
+
+    selectedSymbolInfoStatus = new QLabel(pairDependentControls);
+    selectedSymbolInfoStatus->setObjectName("selectedSymbolInfoStatus");
+    selectedSymbolInfoStatus->setProperty("symbolInfoStatus", true);
+    selectedSymbolInfoStatus->setTextFormat(Qt::PlainText);
+    selectedSymbolInfoStatus->setWordWrap(true);
+
+    retrySymbolInfoButton = new QPushButton("Retry", pairDependentControls);
+    retrySymbolInfoButton->setObjectName("retrySymbolInfoButton");
+    retrySymbolInfoButton->setProperty("secondaryOrderAction", true);
+    retrySymbolInfoButton->hide();
+
+    symbolStatusLayout->addWidget(selectedSymbolInfoStatus, 1);
+    symbolStatusLayout->addWidget(retrySymbolInfoButton);
+
+    tradingLimits = new QLabel(pairDependentControls);
+    tradingLimits->setObjectName("orderTradingLimits");
+    tradingLimits->setProperty("tradingLimits", true);
+    tradingLimits->setTextFormat(Qt::PlainText);
+    tradingLimits->setWordWrap(true);
+    tradingLimits->hide();
+
     auto *divider = new QFrame(pairDependentControls);
     divider->setProperty("orderFormDivider", true);
     divider->setFrameShape(QFrame::HLine);
 
     amountLabel = createFieldLabel("Amount (base asset)", *pairDependentControls);
     amountLabel->setObjectName("orderAmountLabel");
-
-    amountInput = new QLineEdit(pairDependentControls);
-    amountInput->setObjectName("orderAmountInput");
-    amountInput->setProperty("orderInput", true);
-    amountInput->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    amountField = new DecimalInputField("orderAmount", "orderAmountInput", pairDependentControls);
 
     auto *amountLayout = new QFormLayout();
     amountLayout->setContentsMargins(0, 0, 0, 0);
     amountLayout->setHorizontalSpacing(ORDER_FORM_COLUMN_SPACING);
     amountLayout->setVerticalSpacing(ORDER_FORM_ROW_SPACING);
-    amountLayout->addRow(amountLabel, amountInput);
+    amountLayout->addRow(amountLabel, amountField);
 
     operationFormStack = new QStackedWidget(pairDependentControls);
     operationFormStack->setObjectName("orderOperationFormStack");
@@ -178,32 +227,31 @@ void OrderEntryForm::createLayout()
     operationFormStack->addWidget(createPlaceOrderFields());
     operationFormStack->addWidget(createOcoFields());
 
+    formValidationError = new QLabel(pairDependentControls);
+    formValidationError->setObjectName("orderFormValidationError");
+    formValidationError->setProperty("validationError", true);
+    formValidationError->setTextFormat(Qt::PlainText);
+    formValidationError->setWordWrap(true);
+    formValidationError->hide();
+
+    proceedButton = new QPushButton("Proceed to confirmation", pairDependentControls);
+    proceedButton->setObjectName("orderProceedButton");
+    proceedButton->setProperty("primaryOrderAction", true);
+    proceedButton->setMinimumHeight(ORDER_FORM_ACTION_MINIMUM_HEIGHT);
+    proceedButton->setEnabled(false);
+
     pairDependentLayout->addLayout(pairLayout);
+    pairDependentLayout->addLayout(symbolStatusLayout);
+    pairDependentLayout->addWidget(tradingLimits);
     pairDependentLayout->addWidget(divider);
     pairDependentLayout->addLayout(amountLayout);
     pairDependentLayout->addWidget(operationFormStack);
+    pairDependentLayout->addWidget(formValidationError);
+    pairDependentLayout->addWidget(proceedButton, 0, Qt::AlignRight);
 
     layout->addLayout(contextLayout);
     layout->addWidget(selectedCatalogStatus);
     layout->addWidget(pairDependentControls);
-
-    connect(exchangeSelector, &QComboBox::currentIndexChanged, this, [this](int) { updateSelectedCatalog(); });
-    connect(baseAssetSelector,
-            &QComboBox::currentIndexChanged,
-            this,
-            [this](int)
-            {
-                const QString preferredQuoteAsset = quoteAssetSelector->currentText();
-                updateQuoteAssets(preferredQuoteAsset);
-                updatePairLabels();
-            });
-    connect(quoteAssetSelector, &QComboBox::currentIndexChanged, this, [this](int) { updatePairLabels(); });
-    connect(operationSelector, &QComboBox::currentIndexChanged, this, [this](int) { updateOperationFields(); });
-    connect(placeOrderTypeSelector,
-            &QComboBox::currentIndexChanged,
-            this,
-            [this](int) { updatePlaceOrderTypeFields(); });
-    connect(useOcoStopLimit, &QCheckBox::toggled, this, [this](bool) { updateOcoStopLimitFields(); });
 
     updateOperationFields();
     updatePlaceOrderTypeFields();
@@ -264,10 +312,7 @@ QWidget *OrderEntryForm::createPlaceOrderFields()
 
     placeOrderPriceLabel = createFieldLabel("Price (quote per base)", *placeOrderLimitFields);
     placeOrderPriceLabel->setObjectName("placeOrderPriceLabel");
-    placeOrderPriceInput = new QLineEdit(placeOrderLimitFields);
-    placeOrderPriceInput->setObjectName("placeOrderPriceInput");
-    placeOrderPriceInput->setProperty("orderInput", true);
-    placeOrderPriceInput->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    placeOrderPriceField = new DecimalInputField("placeOrderPrice", "placeOrderPriceInput", placeOrderLimitFields);
 
     auto *timeInForceField = new QLineEdit("GTC", placeOrderLimitFields);
     timeInForceField->setObjectName("placeOrderTimeInForceField");
@@ -276,7 +321,7 @@ QWidget *OrderEntryForm::createPlaceOrderFields()
     timeInForceField->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
     timeInForceField->setReadOnly(true);
 
-    limitLayout->addRow(placeOrderPriceLabel, placeOrderPriceInput);
+    limitLayout->addRow(placeOrderPriceLabel, placeOrderPriceField);
     limitLayout->addRow(createFieldLabel("Time in force", *placeOrderLimitFields), timeInForceField);
 
     layout->addLayout(mainFields);
@@ -306,24 +351,18 @@ QWidget *OrderEntryForm::createOcoFields()
 
     ocoLimitPriceLabel = createFieldLabel("Limit price (quote per base)", *fields);
     ocoLimitPriceLabel->setObjectName("placeOcoLimitPriceLabel");
-    ocoLimitPriceInput = new QLineEdit(fields);
-    ocoLimitPriceInput->setObjectName("placeOcoLimitPriceInput");
-    ocoLimitPriceInput->setProperty("orderInput", true);
-    ocoLimitPriceInput->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    ocoLimitPriceField = new DecimalInputField("placeOcoLimitPrice", "placeOcoLimitPriceInput", fields);
 
     ocoStopPriceLabel = createFieldLabel("Stop price (quote per base)", *fields);
     ocoStopPriceLabel->setObjectName("placeOcoStopPriceLabel");
-    ocoStopPriceInput = new QLineEdit(fields);
-    ocoStopPriceInput->setObjectName("placeOcoStopPriceInput");
-    ocoStopPriceInput->setProperty("orderInput", true);
-    ocoStopPriceInput->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    ocoStopPriceField = new DecimalInputField("placeOcoStopPrice", "placeOcoStopPriceInput", fields);
 
     useOcoStopLimit = new QCheckBox("Use a stop-limit price", fields);
     useOcoStopLimit->setObjectName("placeOcoUseStopLimit");
 
     mainFields->addRow(createFieldLabel("Side", *fields), sideSelector);
-    mainFields->addRow(ocoLimitPriceLabel, ocoLimitPriceInput);
-    mainFields->addRow(ocoStopPriceLabel, ocoStopPriceInput);
+    mainFields->addRow(ocoLimitPriceLabel, ocoLimitPriceField);
+    mainFields->addRow(ocoStopPriceLabel, ocoStopPriceField);
     mainFields->addRow(QString(), useOcoStopLimit);
 
     ocoStopLimitFields = new QWidget(fields);
@@ -336,10 +375,8 @@ QWidget *OrderEntryForm::createOcoFields()
 
     ocoStopLimitPriceLabel = createFieldLabel("Stop-limit price (quote per base)", *ocoStopLimitFields);
     ocoStopLimitPriceLabel->setObjectName("placeOcoStopLimitPriceLabel");
-    ocoStopLimitPriceInput = new QLineEdit(ocoStopLimitFields);
-    ocoStopLimitPriceInput->setObjectName("placeOcoStopLimitPriceInput");
-    ocoStopLimitPriceInput->setProperty("orderInput", true);
-    ocoStopLimitPriceInput->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    ocoStopLimitPriceField =
+        new DecimalInputField("placeOcoStopLimitPrice", "placeOcoStopLimitPriceInput", ocoStopLimitFields);
 
     auto *timeInForceField = new QLineEdit("GTC", ocoStopLimitFields);
     timeInForceField->setObjectName("placeOcoStopLimitTimeInForceField");
@@ -348,7 +385,7 @@ QWidget *OrderEntryForm::createOcoFields()
     timeInForceField->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
     timeInForceField->setReadOnly(true);
 
-    stopLimitLayout->addRow(ocoStopLimitPriceLabel, ocoStopLimitPriceInput);
+    stopLimitLayout->addRow(ocoStopLimitPriceLabel, ocoStopLimitPriceField);
     stopLimitLayout->addRow(createFieldLabel("Time in force", *ocoStopLimitFields), timeInForceField);
 
     layout->addLayout(mainFields);
@@ -389,6 +426,68 @@ void OrderEntryForm::connectCatalogUpdates()
                     }
                 });
     }
+
+    connect(&symbolInfoCatalog,
+            &SymbolInfoCatalog::symbolInfoChanged,
+            this,
+            [this](ExchangerType exchangerType, const QString &symbol)
+            {
+                const optional<TradablePair> selectedPair = getSelectedPair();
+                if (selectedPair.has_value() && exchangerType == getSelectedExchangerType() &&
+                    symbol == QString::fromStdString(selectedPair.value().symbol))
+                {
+                    updateSelectedSymbolInfo();
+                }
+            });
+}
+
+void OrderEntryForm::connectInputUpdates()
+{
+    connect(exchangeSelector, &QComboBox::currentIndexChanged, this, [this](int) { updateSelectedCatalog(); });
+    connect(baseAssetSelector,
+            &QComboBox::currentIndexChanged,
+            this,
+            [this](int)
+            {
+                const QString preferredQuoteAsset = quoteAssetSelector->currentText();
+                updateQuoteAssets(preferredQuoteAsset);
+                updatePairLabels();
+                updateSelectedSymbolInfo();
+            });
+    connect(quoteAssetSelector,
+            &QComboBox::currentIndexChanged,
+            this,
+            [this](int)
+            {
+                updatePairLabels();
+                updateSelectedSymbolInfo();
+            });
+    connect(operationSelector, &QComboBox::currentIndexChanged, this, [this](int) { updateOperationFields(); });
+    connect(placeOrderTypeSelector,
+            &QComboBox::currentIndexChanged,
+            this,
+            [this](int) { updatePlaceOrderTypeFields(); });
+    connect(useOcoStopLimit, &QCheckBox::toggled, this, [this](bool) { updateOcoStopLimitFields(); });
+
+    for (DecimalInputField *field :
+         {amountField, placeOrderPriceField, ocoLimitPriceField, ocoStopPriceField, ocoStopLimitPriceField})
+    {
+        connect(field, &DecimalInputField::inputChanged, this, [this](const QString &) { validateForm(); });
+        connect(field, &DecimalInputField::requestValidation, this, [this]() { validateForm(); });
+    }
+
+    connect(retrySymbolInfoButton,
+            &QPushButton::clicked,
+            this,
+            [this]()
+            {
+                const optional<TradablePair> selectedPair = getSelectedPair();
+                if (selectedPair.has_value())
+                {
+                    symbolInfoCatalog.retrySymbolInfo(getSelectedExchangerType(), selectedPair.value().symbol);
+                    updateSelectedSymbolInfo();
+                }
+            });
 }
 
 void OrderEntryForm::updateSelectedCatalog()
@@ -416,7 +515,6 @@ void OrderEntryForm::updateSelectedCatalog()
         selectedCatalogStatus->setText(exchangeName + " pairs are unavailable: " + loadState.getError());
         break;
     }
-
     updatePairSelectors();
 }
 
@@ -434,6 +532,7 @@ void OrderEntryForm::updatePairSelectors()
     if (!hasUsableSelectedCatalog())
     {
         updatePairLabels();
+        updateSelectedSymbolInfo();
         return;
     }
 
@@ -450,6 +549,7 @@ void OrderEntryForm::updatePairSelectors()
     baseAssetSelector->setCurrentIndex(preferredBaseIndex >= 0 ? preferredBaseIndex : 0);
     updateQuoteAssets(preferredQuoteAsset);
     updatePairLabels();
+    updateSelectedSymbolInfo();
 }
 
 void OrderEntryForm::updateQuoteAssets(const QString &preferredQuoteAsset)
@@ -484,16 +584,19 @@ void OrderEntryForm::updateQuoteAssets(const QString &preferredQuoteAsset)
 void OrderEntryForm::updateOperationFields()
 {
     operationFormStack->setCurrentIndex(operationSelector->currentIndex());
+    validateForm();
 }
 
 void OrderEntryForm::updatePlaceOrderTypeFields()
 {
-    placeOrderLimitFields->setVisible(placeOrderTypeSelector->currentText() == "Limit");
+    placeOrderLimitFields->setVisible(hasActivePlaceOrderPrice());
+    validateForm();
 }
 
 void OrderEntryForm::updateOcoStopLimitFields()
 {
-    ocoStopLimitFields->setVisible(useOcoStopLimit->isChecked());
+    ocoStopLimitFields->setVisible(hasActiveOcoStopLimitPrice());
+    validateForm();
 }
 
 void OrderEntryForm::updatePairLabels()
@@ -506,11 +609,282 @@ void OrderEntryForm::updatePairLabels()
                                   : QString("%1 per %2").arg(quoteAsset, baseAsset);
 
     amountLabel->setText("Amount (" + amountAsset + ")");
-    amountInput->setPlaceholderText(baseAsset.isEmpty() ? "Base-asset quantity" : "Amount in " + baseAsset);
+    amountField->getInput().setPlaceholderText(baseAsset.isEmpty() ? "Base-asset quantity" : "Amount in " + baseAsset);
     placeOrderPriceLabel->setText("Price (" + priceUnit + ")");
     ocoLimitPriceLabel->setText("Limit price (" + priceUnit + ")");
     ocoStopPriceLabel->setText("Stop price (" + priceUnit + ")");
     ocoStopLimitPriceLabel->setText("Stop-limit price (" + priceUnit + ")");
+}
+
+void OrderEntryForm::updateSelectedSymbolInfo()
+{
+    retrySymbolInfoButton->hide();
+    tradingLimits->hide();
+    formValidationError->hide();
+    proceedButton->setEnabled(false);
+    updateInputAvailability(false);
+    amountField->clearValidation();
+    clearPriceValidation();
+
+    const optional<TradablePair> selectedPair = getSelectedPair();
+    if (!selectedPair.has_value())
+    {
+        selectedSymbolInfoStatus->setText("Select an available pair to load its trading rules.");
+        return;
+    }
+
+    const ExchangerType exchangerType = getSelectedExchangerType();
+    const string &symbol = selectedPair.value().symbol;
+    symbolInfoCatalog.loadSymbolInfo(exchangerType, symbol);
+    const UiTaskState *loadState = symbolInfoCatalog.getLoadState(exchangerType, symbol);
+    if (loadState == nullptr)
+    {
+        selectedSymbolInfoStatus->setText("Trading rules could not be started for " + QString::fromStdString(symbol) +
+                                          ".");
+        return;
+    }
+
+    switch (loadState->getStatus())
+    {
+    case UiTaskState::Status::IDLE:
+        selectedSymbolInfoStatus->setText("Waiting to load trading rules for " + QString::fromStdString(symbol) + ".");
+        break;
+    case UiTaskState::Status::LOADING:
+        selectedSymbolInfoStatus->setText("Loading trading rules for " + QString::fromStdString(symbol) + "...");
+        break;
+    case UiTaskState::Status::FAILED:
+        selectedSymbolInfoStatus->setText("Trading rules are unavailable for " + QString::fromStdString(symbol) + ": " +
+                                          loadState->getError());
+        retrySymbolInfoButton->show();
+        break;
+    case UiTaskState::Status::SUCCEEDED:
+        const SymbolInfo *symbolInfo = symbolInfoCatalog.getSymbolInfo(exchangerType, symbol);
+        if (symbolInfo == nullptr)
+        {
+            selectedSymbolInfoStatus->setText("Trading rules returned no details for " +
+                                              QString::fromStdString(symbol) + ".");
+            break;
+        }
+        selectedSymbolInfoStatus->setText("Trading rules are ready for " + QString::fromStdString(symbol) + ".");
+        updateTradingLimits(*symbolInfo);
+        updateInputAvailability(true);
+        validateForm();
+        break;
+    }
+}
+
+void OrderEntryForm::updateTradingLimits(const SymbolInfo &symbolInfo)
+{
+    const optional<TradablePair> selectedPair = getSelectedPair();
+    if (!selectedPair.has_value())
+    {
+        tradingLimits->hide();
+        return;
+    }
+
+    QStringList quantityParts{"step " + formatByIncrement(symbolInfo.stepSize, symbolInfo.stepSize)};
+    appendBound(quantityParts, "min", symbolInfo.minQty, symbolInfo.stepSize);
+    appendBound(quantityParts, "max", symbolInfo.maxQty, symbolInfo.stepSize);
+
+    QStringList priceParts{"tick " + formatByIncrement(symbolInfo.tickSize, symbolInfo.tickSize)};
+    appendBound(priceParts, "min", symbolInfo.minPrice, symbolInfo.tickSize);
+    appendBound(priceParts, "max", symbolInfo.maxPrice, symbolInfo.tickSize);
+
+    QStringList lines;
+    lines.push_back("Amount (" + QString::fromStdString(selectedPair.value().baseAsset) +
+                    "): " + quantityParts.join(" · "));
+    lines.push_back("Price (" + QString::fromStdString(selectedPair.value().quoteAsset) +
+                    "): " + priceParts.join(" · "));
+
+    QStringList notionalParts;
+    if (symbolInfo.minNotional > 0)
+    {
+        notionalParts.push_back("min " + formatDecimal(symbolInfo.minNotional));
+    }
+    if (symbolInfo.maxNotional > 0)
+    {
+        notionalParts.push_back("max " + formatDecimal(symbolInfo.maxNotional));
+    }
+    if (!notionalParts.empty())
+    {
+        lines.push_back("Notional (" + QString::fromStdString(selectedPair.value().quoteAsset) +
+                        "): " + notionalParts.join(" · "));
+    }
+
+    tradingLimits->setText(lines.join("\n"));
+    tradingLimits->show();
+}
+
+void OrderEntryForm::updateInputAvailability(bool enabled)
+{
+    amountField->setInputEnabled(enabled);
+    placeOrderPriceField->setInputEnabled(enabled);
+    ocoLimitPriceField->setInputEnabled(enabled);
+    ocoStopPriceField->setInputEnabled(enabled);
+    ocoStopLimitPriceField->setInputEnabled(enabled);
+}
+
+void OrderEntryForm::validateForm()
+{
+    const SymbolInfo *symbolInfo = getSelectedSymbolInfo();
+    if (symbolInfo == nullptr)
+    {
+        proceedButton->setEnabled(false);
+        return;
+    }
+
+    const DecimalInputValidation amountValidation =
+        OrderInputValidation::validateQuantity(amountField->getInput().text(), *symbolInfo);
+    bool formIsValid = showFieldValidation(*amountField, amountValidation, symbolInfo->stepSize);
+
+    DecimalInputValidation placeOrderPriceValidation;
+    DecimalInputValidation ocoLimitPriceValidation;
+    DecimalInputValidation ocoStopPriceValidation;
+    DecimalInputValidation ocoStopLimitPriceValidation;
+
+    switch (getSelectedOperation())
+    {
+    case OperationType::BUY_CRYPTO:
+    case OperationType::SELL_CRYPTO:
+        clearPriceValidation();
+        break;
+    case OperationType::PLACE_ORDER:
+        ocoLimitPriceField->clearValidation();
+        ocoStopPriceField->clearValidation();
+        ocoStopLimitPriceField->clearValidation();
+        if (hasActivePlaceOrderPrice())
+        {
+            placeOrderPriceValidation =
+                OrderInputValidation::validatePrice(placeOrderPriceField->getInput().text(), *symbolInfo);
+            formIsValid = showFieldValidation(*placeOrderPriceField, placeOrderPriceValidation, symbolInfo->tickSize) &&
+                          formIsValid;
+        }
+        else
+        {
+            placeOrderPriceField->clearValidation();
+        }
+        break;
+    case OperationType::PLACE_OCO:
+        placeOrderPriceField->clearValidation();
+        ocoLimitPriceValidation =
+            OrderInputValidation::validatePrice(ocoLimitPriceField->getInput().text(), *symbolInfo);
+        ocoStopPriceValidation = OrderInputValidation::validatePrice(ocoStopPriceField->getInput().text(), *symbolInfo);
+        formIsValid =
+            showFieldValidation(*ocoLimitPriceField, ocoLimitPriceValidation, symbolInfo->tickSize) && formIsValid;
+        formIsValid =
+            showFieldValidation(*ocoStopPriceField, ocoStopPriceValidation, symbolInfo->tickSize) && formIsValid;
+        if (hasActiveOcoStopLimitPrice())
+        {
+            ocoStopLimitPriceValidation =
+                OrderInputValidation::validatePrice(ocoStopLimitPriceField->getInput().text(), *symbolInfo);
+            formIsValid =
+                showFieldValidation(*ocoStopLimitPriceField, ocoStopLimitPriceValidation, symbolInfo->tickSize) &&
+                formIsValid;
+        }
+        else
+        {
+            ocoStopLimitPriceField->clearValidation();
+        }
+        break;
+    default:
+        clearPriceValidation();
+        formIsValid = false;
+        break;
+    }
+
+    const QString notionalError = validateActiveNotional(*symbolInfo,
+                                                         amountValidation,
+                                                         placeOrderPriceValidation,
+                                                         ocoLimitPriceValidation,
+                                                         ocoStopLimitPriceValidation);
+    formValidationError->setText(notionalError);
+    formValidationError->setVisible(shouldShowNotionalValidation(notionalError));
+    proceedButton->setEnabled(formIsValid && notionalError.isEmpty());
+}
+
+bool OrderEntryForm::showFieldValidation(DecimalInputField &field,
+                                         const DecimalInputValidation &validation,
+                                         Decimal increment)
+{
+    optional<QString> correction;
+    if (validation.correction.has_value())
+    {
+        correction = formatByIncrement(validation.correction.value(), increment);
+    }
+    field.showValidation(validation.error, correction);
+    return validation.isValid();
+}
+
+QString OrderEntryForm::validateActiveNotional(const SymbolInfo &symbolInfo,
+                                               const DecimalInputValidation &amountValidation,
+                                               const DecimalInputValidation &placeOrderPriceValidation,
+                                               const DecimalInputValidation &ocoLimitPriceValidation,
+                                               const DecimalInputValidation &ocoStopLimitPriceValidation) const
+{
+    if (!amountValidation.isValid())
+    {
+        return {};
+    }
+
+    if (getSelectedOperation() == OperationType::PLACE_ORDER && hasActivePlaceOrderPrice() &&
+        placeOrderPriceValidation.isValid())
+    {
+        return OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                      placeOrderPriceValidation.value.value(),
+                                                      symbolInfo);
+    }
+    if (getSelectedOperation() != OperationType::PLACE_OCO || !ocoLimitPriceValidation.isValid())
+    {
+        return {};
+    }
+
+    QString error = OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                           ocoLimitPriceValidation.value.value(),
+                                                           symbolInfo);
+    if (!error.isEmpty())
+    {
+        return "Limit leg: " + error;
+    }
+    if (hasActiveOcoStopLimitPrice() && ocoStopLimitPriceValidation.isValid())
+    {
+        error = OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                       ocoStopLimitPriceValidation.value.value(),
+                                                       symbolInfo);
+        if (!error.isEmpty())
+        {
+            return "Stop-limit leg: " + error;
+        }
+    }
+    return {};
+}
+
+bool OrderEntryForm::shouldShowNotionalValidation(const QString &error) const
+{
+    if (error.isEmpty() || !amountField->hasValidationFeedbackEnabled())
+    {
+        return false;
+    }
+    if (getSelectedOperation() == OperationType::PLACE_ORDER)
+    {
+        return placeOrderPriceField->hasValidationFeedbackEnabled();
+    }
+    if (error.startsWith("Limit leg:"))
+    {
+        return ocoLimitPriceField->hasValidationFeedbackEnabled();
+    }
+    if (error.startsWith("Stop-limit leg:"))
+    {
+        return ocoStopLimitPriceField->hasValidationFeedbackEnabled();
+    }
+    return false;
+}
+
+void OrderEntryForm::clearPriceValidation()
+{
+    placeOrderPriceField->clearValidation();
+    ocoLimitPriceField->clearValidation();
+    ocoStopPriceField->clearValidation();
+    ocoStopLimitPriceField->clearValidation();
 }
 
 bool OrderEntryForm::hasUsableSelectedCatalog() const
@@ -520,7 +894,34 @@ bool OrderEntryForm::hasUsableSelectedCatalog() const
            !pairCatalog.getPairs(exchangerType).empty();
 }
 
+bool OrderEntryForm::hasActivePlaceOrderPrice() const
+{
+    return getSelectedOperation() == OperationType::PLACE_ORDER && placeOrderTypeSelector->currentText() == "Limit";
+}
+
+bool OrderEntryForm::hasActiveOcoStopLimitPrice() const
+{
+    return getSelectedOperation() == OperationType::PLACE_OCO && useOcoStopLimit->isChecked();
+}
+
 QString OrderEntryForm::getSelectedExchangeName() const
 {
     return exchangeSelector->currentText();
+}
+
+const SymbolInfo *OrderEntryForm::getSelectedSymbolInfo() const
+{
+    const optional<TradablePair> selectedPair = getSelectedPair();
+    if (!selectedPair.has_value())
+    {
+        return nullptr;
+    }
+
+    const UiTaskState *loadState =
+        symbolInfoCatalog.getLoadState(getSelectedExchangerType(), selectedPair.value().symbol);
+    if (loadState == nullptr || loadState->getStatus() != UiTaskState::Status::SUCCEEDED)
+    {
+        return nullptr;
+    }
+    return symbolInfoCatalog.getSymbolInfo(getSelectedExchangerType(), selectedPair.value().symbol);
 }

@@ -104,9 +104,9 @@ class BinanceDealService : public DealService
 
     Decimal getTickerPrice(const std::string &symbol);
 
-    bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
-
     std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const;
+
+    std::optional<std::string> validatePrice(Decimal price, const SymbolInfo &info) const;
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 

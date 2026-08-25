@@ -4,6 +4,7 @@ add_executable(DealServiceUnitIntegrationTests
     MockHttpRequest.cpp
     MockHttpRequestContext.cpp
     DealServiceTest.cpp
+    SymbolRuleValidatorTest.cpp
     TradablePairUtilTest.cpp
     BinanceDealServiceIntegrationTest.cpp
     BybitDealServiceIntegrationTest.cpp
@@ -15,6 +16,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
     ../src/DealService/common/DecimalConverter.cpp
+    ../src/DealService/common/SymbolRuleValidator.cpp
     ../src/DealService/common/TradablePairUtil.cpp
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
@@ -54,7 +56,10 @@ add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
 add_executable(GraphicalUserInterfaceTests
     AsyncTaskExecutorTest.cpp
     GraphicalUserInterfaceTest.cpp
+    OrderEntryFormTest.cpp
+    OrderInputValidationTest.cpp
     PairCatalogTest.cpp
+    SymbolInfoCatalogTest.cpp
 )
 
 target_link_libraries(GraphicalUserInterfaceTests PRIVATE

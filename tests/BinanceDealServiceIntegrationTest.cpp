@@ -173,6 +173,33 @@ TEST_F(BinanceDealServiceIntegrationTest, PlaceLimitOrder_Success)
     EXPECT_EQ(info.origQty, DecimalConverter::parseDecimal("1.0"));
 }
 
+TEST_F(BinanceDealServiceIntegrationTest, PlaceLimitOrder_RejectsInvalidStaticPriceTickBeforePlacement)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/api/v3/exchangeInfo", binanceSymbolInfoResponse());
+
+    PlaceOrderRequest request;
+    request.symbol = "BTCUSDT";
+    request.side = OrderOperation::BUY;
+    request.type = OrderType::LIMIT;
+    request.quantity = DecimalConverter::parseDecimal("1");
+    request.price = DecimalConverter::parseDecimal("50000.005");
+    request.timeInForce = "GTC";
+
+    try
+    {
+        service.placeOrder(request);
+        FAIL() << "Expected placeOrder to reject invalid price tick";
+    }
+    catch (const std::runtime_error &error)
+    {
+        EXPECT_NE(std::string(error.what()).find("price is not valid for tick size"), std::string::npos);
+    }
+
+    EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 0u);
+}
+
 TEST_F(BinanceDealServiceIntegrationTest, MarketBuyOrder_Success)
 {
     auto service = createService();

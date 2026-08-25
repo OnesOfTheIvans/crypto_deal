@@ -1,5 +1,8 @@
+#include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
+#include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/models/PairCatalog.hpp"
+#include "graphical/models/SymbolInfoCatalog.hpp"
 
 #include <QApplication>
 #include <QPushButton>
@@ -8,6 +11,10 @@
 #include <QString>
 #include <QtTest/QTest>
 #include <gtest/gtest.h>
+
+#include <memory>
+
+using namespace std;
 
 namespace {
     QApplication &getApplication()
@@ -29,8 +36,12 @@ namespace {
 TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
 {
     getApplication();
+    AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     window.show();
     QApplication::processEvents();
 
@@ -48,8 +59,12 @@ TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
 TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchronized)
 {
     getApplication();
+    AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     window.show();
     QApplication::processEvents();
 
@@ -85,8 +100,12 @@ TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchro
 TEST(GraphicalUserInterfaceTest, UsesApprovedWindowDimensions)
 {
     getApplication();
+    AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
 
     EXPECT_EQ(window.size(), QSize(1180, 760));
     EXPECT_EQ(window.minimumSize(), QSize(960, 640));

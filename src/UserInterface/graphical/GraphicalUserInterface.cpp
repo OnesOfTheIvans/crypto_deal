@@ -4,6 +4,7 @@
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
 #include "models/PairCatalog.hpp"
+#include "models/SymbolInfoCatalog.hpp"
 
 #include <QApplication>
 
@@ -26,7 +27,8 @@ int GraphicalUserInterface::run()
 
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow mainWindow(pairCatalog);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceDealService, bybitDealService);
+    CryptoDealWindow mainWindow(pairCatalog, symbolInfoCatalog);
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
 

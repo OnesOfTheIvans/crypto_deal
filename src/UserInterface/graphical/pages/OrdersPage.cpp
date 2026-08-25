@@ -3,6 +3,7 @@
 #include "graphical/GuiLayoutConstants.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/PairCatalog.hpp"
+#include "graphical/models/SymbolInfoCatalog.hpp"
 #include "graphical/widgets/OrderEntryForm.hpp"
 
 #include <QFrame>
@@ -13,8 +14,9 @@
 
 using namespace GuiLayoutConstants;
 
-OrdersPage::OrdersPage(PairCatalog &pairCatalog, QWidget *parent)
-    : QWidget(parent), pairCatalog(pairCatalog), binanceCatalogStatus(nullptr), bybitCatalogStatus(nullptr)
+OrdersPage::OrdersPage(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent)
+    : QWidget(parent), pairCatalog(pairCatalog), symbolInfoCatalog(symbolInfoCatalog), binanceCatalogStatus(nullptr),
+      bybitCatalogStatus(nullptr)
 {
     setObjectName("ordersPage");
     setProperty("primaryPage", true);
@@ -98,7 +100,7 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog, QWidget *parent)
     workspaceLayout->addWidget(binanceCatalogStatus);
     workspaceLayout->addWidget(bybitCatalogStatus);
     workspaceLayout->addWidget(catalogDivider);
-    workspaceLayout->addWidget(new OrderEntryForm(pairCatalog, workspaceCard));
+    workspaceLayout->addWidget(new OrderEntryForm(pairCatalog, symbolInfoCatalog, workspaceCard));
 
     workspaceContentLayout->addWidget(workspaceCard);
     workspaceContentLayout->addStretch();

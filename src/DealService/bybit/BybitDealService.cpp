@@ -1,5 +1,6 @@
 #include "BybitDealService.hpp"
 #include "EnumStringConverter.hpp"
+#include "common/SymbolRuleValidator.hpp"
 #include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
@@ -707,32 +708,25 @@ void BybitDealService::processCoins(const WalletBalanceResponseDto &responseDto)
     }
 }
 
-bool BybitDealService::isQuantityStepValid(Decimal quantity, Decimal stepSize) const
-{
-    if (stepSize <= 0)
-    {
-        return true;
-    }
-
-    const Decimal units = quantity / stepSize;
-    return units == boost::decimal::floor(units);
-}
-
 optional<string> BybitDealService::validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const
 {
-    if (!isQuantityStepValid(quantity, symbolInfo.stepSize))
+    const SymbolRuleValidation quantityValidation = SymbolRuleValidator::validateQuantity(quantity, symbolInfo);
+    switch (quantityValidation.violation)
     {
+    case SymbolRuleViolation::QUANTITY_STEP_UNAVAILABLE:
+        return "quantity step information is unavailable";
+    case SymbolRuleViolation::QUANTITY_STEP_MISMATCH:
         return "quantity is not valid for step size";
-    }
-    if (symbolInfo.minQty > 0 && quantity < symbolInfo.minQty)
-    {
+    case SymbolRuleViolation::QUANTITY_BELOW_MINIMUM:
         return "quantity " + DecimalConverter::formatDecimal(quantity) + " is below minQty " +
                DecimalConverter::formatDecimal(symbolInfo.minQty);
-    }
-    if (symbolInfo.maxQty > 0 && quantity > symbolInfo.maxQty)
-    {
+    case SymbolRuleViolation::QUANTITY_ABOVE_MAXIMUM:
         return "quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxQty " +
                DecimalConverter::formatDecimal(symbolInfo.maxQty);
+    case SymbolRuleViolation::NONE:
+        break;
+    default:
+        return "quantity does not satisfy symbol rules";
     }
 
     const bool hasNotionalRule = symbolInfo.minNotional > 0 || symbolInfo.maxNotional > 0;
@@ -752,18 +746,41 @@ optional<string> BybitDealService::validateQuantity(Decimal quantity, Decimal pr
 
 optional<string> BybitDealService::validateNotional(Decimal notional, const SymbolInfo &symbolInfo) const
 {
-    if (symbolInfo.minNotional > 0 && notional < symbolInfo.minNotional)
+    const SymbolRuleValidation validation = SymbolRuleValidator::validateNotional(notional, symbolInfo);
+    if (validation.violation == SymbolRuleViolation::NOTIONAL_BELOW_MINIMUM)
     {
         return DecimalConverter::formatDecimal(notional) + " is below minOrderAmt " +
                DecimalConverter::formatDecimal(symbolInfo.minNotional);
     }
-    if (symbolInfo.maxNotional > 0 && notional > symbolInfo.maxNotional)
+    if (validation.violation == SymbolRuleViolation::NOTIONAL_ABOVE_MAXIMUM)
     {
         return DecimalConverter::formatDecimal(notional) + " is above maxOrderAmt " +
                DecimalConverter::formatDecimal(symbolInfo.maxNotional);
     }
 
     return nullopt;
+}
+
+optional<string> BybitDealService::validatePrice(Decimal price, const SymbolInfo &symbolInfo) const
+{
+    const SymbolRuleValidation validation = SymbolRuleValidator::validatePrice(price, symbolInfo);
+    switch (validation.violation)
+    {
+    case SymbolRuleViolation::PRICE_TICK_UNAVAILABLE:
+        return "price tick information is unavailable";
+    case SymbolRuleViolation::PRICE_TICK_MISMATCH:
+        return "price is not valid for tick size";
+    case SymbolRuleViolation::PRICE_BELOW_MINIMUM:
+        return "price " + DecimalConverter::formatDecimal(price) + " is below minPrice " +
+               DecimalConverter::formatDecimal(symbolInfo.minPrice);
+    case SymbolRuleViolation::PRICE_ABOVE_MAXIMUM:
+        return "price " + DecimalConverter::formatDecimal(price) + " is above maxPrice " +
+               DecimalConverter::formatDecimal(symbolInfo.maxPrice);
+    case SymbolRuleViolation::NONE:
+        return nullopt;
+    default:
+        return "price does not satisfy symbol rules";
+    }
 }
 
 void BybitDealService::authenticateUserWebsocketStream(WebsocketStream &websocketStream)
@@ -1335,9 +1352,13 @@ string BybitDealService::createRequestBody(const OrderQuery &request) const
 OrderInfo BybitDealService::placeOrder(const PlaceOrderRequest &request)
 {
     validatePlaceOrderRequest(request);
-    validateOrderPriceLimit(request);
-
     SymbolInfo info = getSymbolInfo(request.symbol, request.category);
+    if (request.type == OrderType::LIMIT)
+    {
+        const optional<string> priceError = validatePrice(request.price.value(), info);
+        throwIf(priceError.has_value(), "Bybit placeOrder: " + priceError.value_or(""));
+    }
+    validateOrderPriceLimit(request);
     checkBalance(request, info);
 
     string bodyStr = createRequestBody(request, info);
@@ -1892,6 +1913,19 @@ optional<string> BybitDealService::cancelOcoOtherLegFromUpdate(const OrderQuery 
 OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 {
     validatePlaceOcoRequest(request);
+
+    const SymbolInfo symbolInfo = getSymbolInfo(request.symbol, OrderCategory::SPOT);
+    const optional<string> takeProfitPriceError = validatePrice(request.price, symbolInfo);
+    throwIf(takeProfitPriceError.has_value(), "Bybit placeOco take-profit price: " + takeProfitPriceError.value_or(""));
+    const optional<string> stopPriceError = validatePrice(request.stopPrice, symbolInfo);
+    throwIf(stopPriceError.has_value(), "Bybit placeOco stop price: " + stopPriceError.value_or(""));
+    if (request.stopLimitPrice.has_value())
+    {
+        const optional<string> stopLimitPriceError = validatePrice(request.stopLimitPrice.value(), symbolInfo);
+        throwIf(stopLimitPriceError.has_value(),
+                "Bybit placeOco stop-limit price: " + stopLimitPriceError.value_or(""));
+    }
+
     ensureUserStreamConnected();
 
     string groupId = request.listClientOrderId.value_or("");

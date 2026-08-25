@@ -10,11 +10,13 @@ class QStackedWidget;
 class QString;
 class QWidget;
 class PairCatalog;
+class SymbolInfoCatalog;
 
 class CryptoDealWindow final : public QMainWindow
 {
   private:
     PairCatalog &pairCatalog;
+    SymbolInfoCatalog &symbolInfoCatalog;
     QStackedWidget *pageStack;
 
     void createLayout();
@@ -26,7 +28,7 @@ class CryptoDealWindow final : public QMainWindow
     void applyStyle();
 
   public:
-    explicit CryptoDealWindow(PairCatalog &pairCatalog, QWidget *parent = nullptr);
+    CryptoDealWindow(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent = nullptr);
 };
 
 #endif

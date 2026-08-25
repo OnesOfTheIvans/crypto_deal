@@ -205,6 +205,34 @@ TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_Success)
     EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
 }
 
+TEST_F(BybitDealServiceIntegrationTest, PlaceLimitOrder_RejectsInvalidStaticPriceTickBeforeDynamicLimitCheck)
+{
+    auto service = createService();
+
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+
+    PlaceOrderRequest request;
+    request.symbol = "BTCUSDT";
+    request.side = OrderOperation::BUY;
+    request.type = OrderType::LIMIT;
+    request.quantity = DecimalConverter::parseDecimal("0.5");
+    request.price = DecimalConverter::parseDecimal("45000.005");
+    request.timeInForce = "GTC";
+
+    try
+    {
+        service.placeOrder(request);
+        FAIL() << "Expected placeOrder to reject invalid price tick";
+    }
+    catch (const std::runtime_error &error)
+    {
+        EXPECT_NE(std::string(error.what()).find("price is not valid for tick size"), std::string::npos);
+    }
+
+    EXPECT_EQ(countRequestsContaining("/v5/market/price-limit"), 0u);
+    EXPECT_EQ(countRequestsContaining("/v5/order/create"), 0u);
+}
+
 TEST_F(BybitDealServiceIntegrationTest, UserStreamOrderPublishesCompleteOrderUpdate)
 {
     auto service = createService();

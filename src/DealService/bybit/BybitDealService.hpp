@@ -304,11 +304,11 @@ class BybitDealService : public DealService
 
     void processCoins(const bybit::WalletBalanceResponseDto &responseDto);
 
-    bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
-
     std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &symbolInfo) const;
 
     std::optional<std::string> validateNotional(Decimal notional, const SymbolInfo &symbolInfo) const;
+
+    std::optional<std::string> validatePrice(Decimal price, const SymbolInfo &symbolInfo) const;
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 

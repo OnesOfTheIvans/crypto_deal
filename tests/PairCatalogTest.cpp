@@ -1,7 +1,8 @@
 #include "graphical/models/PairCatalog.hpp"
-#include "DealService.hpp"
+#include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
+#include "graphical/models/SymbolInfoCatalog.hpp"
 #include "graphical/widgets/OrderEntryForm.hpp"
 
 #include <QApplication>
@@ -54,110 +55,16 @@ namespace {
         return items;
     }
 
-    class CatalogDealService final : public DealService
+    class CatalogDealService final : public TestDealService
     {
-      private:
-        function<vector<TradablePair>()> loadPairs;
-        atomic<size_t> requestCount;
-
       public:
         CatalogDealService(ExchangerType exchangerType, function<vector<TradablePair>()> loadPairs)
-            : DealService("host", "api", "secret", "ws", 5000, exchangerType), loadPairs(move(loadPairs)),
-              requestCount(0)
+            : TestDealService(exchangerType, move(loadPairs))
         {}
 
         size_t getRequestCount() const
         {
-            return requestCount.load();
-        }
-
-        OrderInfo buyCrypto(const string &, const string &, Decimal) override
-        {
-            return {};
-        }
-
-        OrderInfo sellCrypto(const string &, const string &, Decimal) override
-        {
-            return {};
-        }
-
-        OrderInfo waitUntilOrderFilled(const string &, const string &) override
-        {
-            return {};
-        }
-
-        OrderInfo waitUntilOcoOrderFilled(const OcoInfo &) override
-        {
-            return {};
-        }
-
-        flat_map<string, AssetBalance> getBalances() const override
-        {
-            return {};
-        }
-
-        optional<AssetBalance> getBalance(const string &) const override
-        {
-            return nullopt;
-        }
-
-        void startUserStream() override {}
-
-        void stopUserStream() override {}
-
-        StreamStatus getUserStreamStatus() const override
-        {
-            return StreamStatus::STOPPED;
-        }
-
-        string getUserStreamLastError() const override
-        {
-            return {};
-        }
-
-        OrderInfo placeOrder(const PlaceOrderRequest &) override
-        {
-            return {};
-        }
-
-        OrderInfo cancelOrder(const OrderQuery &) override
-        {
-            return {};
-        }
-
-        OrderInfo getOrder(const OrderQuery &) override
-        {
-            return {};
-        }
-
-        SymbolInfo getSymbolInfo(const string &, OrderCategory = OrderCategory::SPOT) override
-        {
-            return {};
-        }
-
-        vector<TradablePair> getTradablePairs() override
-        {
-            ++requestCount;
-            return loadPairs();
-        }
-
-        Decimal ceilQuantityToStep(const string &, Decimal quantity, OrderCategory = OrderCategory::SPOT) override
-        {
-            return quantity;
-        }
-
-        OcoInfo placeOco(const PlaceOcoRequest &) override
-        {
-            return {};
-        }
-
-        void cancelOco(const OrderListQuery &) override {}
-
-        void cancelAllOpenOrders(const string &, OrderCategory) override {}
-
-        flat_map<string, AssetBalance> getBalancesRest() override
-        {
-            return {};
+            return getTradablePairRequestCount();
         }
     };
 }
@@ -245,7 +152,6 @@ TEST(PairCatalogTest, DeliversIndependentCatalogStatusToOrdersPage)
     getApplication();
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
     promise<void> releasePromise;
     const shared_future<void> release = releasePromise.get_future().share();
     atomic<bool> binanceRequestStarted = false;
@@ -262,6 +168,8 @@ TEST(PairCatalogTest, DeliversIndependentCatalogStatusToOrdersPage)
     auto bybitService =
         make_shared<CatalogDealService>(ExchangerType::BYBIT,
                                         []() -> vector<TradablePair> { throw runtime_error("Bybit status failure"); });
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     auto *binanceStatus = window.findChild<QLabel *>("binancePairCatalogStatus");
     auto *bybitStatus = window.findChild<QLabel *>("bybitPairCatalogStatus");
 
@@ -288,7 +196,6 @@ TEST(PairCatalogTest, FiltersPairSelectorsAndKeepsExchangeChoiceStableDuringInde
     getApplication();
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
     promise<void> releaseBinancePromise;
     const shared_future<void> releaseBinance = releaseBinancePromise.get_future().share();
     atomic<bool> binanceRequestStarted = false;
@@ -313,6 +220,8 @@ TEST(PairCatalogTest, FiltersPairSelectorsAndKeepsExchangeChoiceStableDuringInde
                                                                 {"SOLUSDT", "SOL", "USDT"},
                                                             };
                                                         });
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *categoryField = window.findChild<QLineEdit *>("orderCategoryField");
@@ -379,12 +288,13 @@ TEST(PairCatalogTest, DisablesPairFormForEmptyAndFailedSelectedCatalogs)
     getApplication();
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
     auto binanceService =
         make_shared<CatalogDealService>(ExchangerType::BINANCE, []() { return vector<TradablePair>{}; });
     auto bybitService =
         make_shared<CatalogDealService>(ExchangerType::BYBIT,
                                         []() -> vector<TradablePair> { throw runtime_error("Bybit pair failure"); });
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *pairControls = window.findChild<QWidget *>("orderPairDependentControls");
     auto *selectedCatalogStatus = window.findChild<QLabel *>("selectedPairCatalogStatus");
@@ -415,7 +325,6 @@ TEST(PairCatalogTest, ShowsOnlyFieldsForTheSelectedPlacementOperation)
     getApplication();
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
-    CryptoDealWindow window(pairCatalog);
     auto binanceService = make_shared<CatalogDealService>(ExchangerType::BINANCE,
                                                           []()
                                                           {
@@ -424,6 +333,8 @@ TEST(PairCatalogTest, ShowsOnlyFieldsForTheSelectedPlacementOperation)
                                                               };
                                                           });
     auto bybitService = make_shared<CatalogDealService>(ExchangerType::BYBIT, []() { return vector<TradablePair>{}; });
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
     auto *amountLabel = window.findChild<QLabel *>("orderAmountLabel");

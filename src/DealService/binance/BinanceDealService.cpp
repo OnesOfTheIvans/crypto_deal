@@ -1,6 +1,7 @@
 #include "BinanceDealService.hpp"
 #include "EnumStringConverter.hpp"
 #include "common/HttpRequestContext.hpp"
+#include "common/SymbolRuleValidator.hpp"
 #include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
 #include "common/http_request.hpp"
@@ -517,6 +518,17 @@ void BinanceDealService::setRequestParameters(boost::urls::url &url, const Place
     const Decimal belowPrice = request.stopLimitPrice.has_value() ? request.stopLimitPrice.value() : request.stopPrice;
     const string belowTif =
         request.stopLimitTimeInForce.has_value() ? request.stopLimitTimeInForce.value() : string("GTC");
+
+    const optional<string> abovePriceError = validatePrice(request.price, info);
+    throwIf(abovePriceError.has_value(), "Binance placeOco above leg: " + abovePriceError.value_or(""));
+    const optional<string> stopPriceError = validatePrice(request.stopPrice, info);
+    throwIf(stopPriceError.has_value(), "Binance placeOco stop price: " + stopPriceError.value_or(""));
+    if (request.stopLimitPrice.has_value())
+    {
+        const optional<string> belowPriceError = validatePrice(request.stopLimitPrice.value(), info);
+        throwIf(belowPriceError.has_value(), "Binance placeOco below leg: " + belowPriceError.value_or(""));
+    }
+
     optional<string> aboveQuantityError = validateQuantity(request.quantity, request.price, info);
     throwIf(aboveQuantityError.has_value(), "Binance placeOco above leg: " + aboveQuantityError.value_or(""));
     optional<string> belowQuantityError = validateQuantity(request.quantity, belowPrice, info);
@@ -1107,32 +1119,25 @@ Decimal BinanceDealService::getTickerPrice(const string &symbol)
     return Decimal{};
 }
 
-bool BinanceDealService::isQuantityStepValid(Decimal quantity, Decimal stepSize) const
-{
-    if (stepSize <= 0)
-    {
-        return true;
-    }
-
-    const Decimal units = quantity / stepSize;
-    return units == boost::decimal::floor(units);
-}
-
 optional<string> BinanceDealService::validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const
 {
-    if (!isQuantityStepValid(quantity, info.stepSize))
+    const SymbolRuleValidation quantityValidation = SymbolRuleValidator::validateQuantity(quantity, info);
+    switch (quantityValidation.violation)
     {
+    case SymbolRuleViolation::QUANTITY_STEP_UNAVAILABLE:
+        return "quantity step information is unavailable";
+    case SymbolRuleViolation::QUANTITY_STEP_MISMATCH:
         return "quantity is not valid for step size";
-    }
-    if (info.minQty > 0 && quantity < info.minQty)
-    {
+    case SymbolRuleViolation::QUANTITY_BELOW_MINIMUM:
         return "quantity " + DecimalConverter::formatDecimal(quantity) + " is below minQty " +
                DecimalConverter::formatDecimal(info.minQty);
-    }
-    if (info.maxQty > 0 && quantity > info.maxQty)
-    {
+    case SymbolRuleViolation::QUANTITY_ABOVE_MAXIMUM:
         return "quantity " + DecimalConverter::formatDecimal(quantity) + " is above maxQty " +
                DecimalConverter::formatDecimal(info.maxQty);
+    case SymbolRuleViolation::NONE:
+        break;
+    default:
+        return "quantity does not satisfy symbol rules";
     }
 
     const bool hasNotionalRule = info.minNotional > 0 || info.maxNotional > 0;
@@ -1144,12 +1149,13 @@ optional<string> BinanceDealService::validateQuantity(Decimal quantity, Decimal 
     if (price > 0)
     {
         const Decimal notional = quantity * price;
-        if (info.minNotional > 0 && notional < info.minNotional)
+        const SymbolRuleValidation notionalValidation = SymbolRuleValidator::validateNotional(notional, info);
+        if (notionalValidation.violation == SymbolRuleViolation::NOTIONAL_BELOW_MINIMUM)
         {
             return "notional " + DecimalConverter::formatDecimal(notional) + " is below minNotional " +
                    DecimalConverter::formatDecimal(info.minNotional);
         }
-        if (info.maxNotional > 0 && notional > info.maxNotional)
+        if (notionalValidation.violation == SymbolRuleViolation::NOTIONAL_ABOVE_MAXIMUM)
         {
             return "notional " + DecimalConverter::formatDecimal(notional) + " is above maxNotional " +
                    DecimalConverter::formatDecimal(info.maxNotional);
@@ -1157,6 +1163,28 @@ optional<string> BinanceDealService::validateQuantity(Decimal quantity, Decimal 
     }
 
     return nullopt;
+}
+
+optional<string> BinanceDealService::validatePrice(Decimal price, const SymbolInfo &info) const
+{
+    const SymbolRuleValidation validation = SymbolRuleValidator::validatePrice(price, info);
+    switch (validation.violation)
+    {
+    case SymbolRuleViolation::PRICE_TICK_UNAVAILABLE:
+        return "price tick information is unavailable";
+    case SymbolRuleViolation::PRICE_TICK_MISMATCH:
+        return "price is not valid for tick size";
+    case SymbolRuleViolation::PRICE_BELOW_MINIMUM:
+        return "price " + DecimalConverter::formatDecimal(price) + " is below minPrice " +
+               DecimalConverter::formatDecimal(info.minPrice);
+    case SymbolRuleViolation::PRICE_ABOVE_MAXIMUM:
+        return "price " + DecimalConverter::formatDecimal(price) + " is above maxPrice " +
+               DecimalConverter::formatDecimal(info.maxPrice);
+    case SymbolRuleViolation::NONE:
+        return nullopt;
+    default:
+        return "price does not satisfy symbol rules";
+    }
 }
 
 OrderInfo BinanceDealService::buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity)
@@ -1263,6 +1291,11 @@ OrderInfo BinanceDealService::placeOrder(const PlaceOrderRequest &request)
     validatePlaceOrderRequest(request);
 
     SymbolInfo info = getSymbolInfo(request.symbol);
+    if (request.type == OrderType::LIMIT)
+    {
+        const optional<string> priceError = validatePrice(request.price.value(), info);
+        throwIf(priceError.has_value(), "Binance placeOrder: " + priceError.value_or(""));
+    }
     const Decimal validationPrice = request.type == OrderType::LIMIT && request.price.has_value()
                                         ? request.price.value()
                                         : getTickerPrice(request.symbol);

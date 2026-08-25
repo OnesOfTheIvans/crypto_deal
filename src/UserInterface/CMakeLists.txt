@@ -10,9 +10,12 @@ add_library(GraphicalUserInterfaceLib
     graphical/async/AsyncTaskExecutor.cpp
     graphical/async/UiTaskState.cpp
     graphical/models/PairCatalog.cpp
+    graphical/models/SymbolInfoCatalog.cpp
     graphical/pages/AccountsPage.cpp
     graphical/pages/OperationChainsPage.cpp
     graphical/pages/OrdersPage.cpp
+    graphical/validation/OrderInputValidation.cpp
+    graphical/widgets/DecimalInputField.cpp
     graphical/widgets/OrderEntryForm.cpp
 )
 

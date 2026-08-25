@@ -109,6 +109,20 @@ QLabel[selectedCatalogStatus="true"] {
     padding: 8px 10px;
 }
 
+QLabel[symbolInfoStatus="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
+QLabel[tradingLimits="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #9da8b9;
+    font-size: 12px;
+    padding: 9px 10px;
+}
+
 QLabel[orderFieldLabel="true"] {
     color: #aeb7c7;
     font-size: 12px;
@@ -137,6 +151,10 @@ QLineEdit[orderInput="true"]:focus {
     border-color: #4b84e6;
 }
 
+QLineEdit[orderInput="true"][validationError="true"] {
+    border-color: #d45c68;
+}
+
 QComboBox[orderInput="true"]:disabled,
 QLineEdit[orderInput="true"]:disabled {
     background-color: #171b23;
@@ -160,6 +178,53 @@ QCheckBox#placeOcoUseStopLimit {
     color: #c2cad7;
     font-size: 13px;
     spacing: 8px;
+}
+
+QLabel[validationError="true"] {
+    color: #ef8791;
+    font-size: 12px;
+}
+
+QWidget[correctionPanel="true"] {
+    background-color: transparent;
+}
+
+QLabel[correctionDescription="true"] {
+    color: #e2bd73;
+    font-size: 12px;
+}
+
+QPushButton[secondaryOrderAction="true"] {
+    background-color: #252d3b;
+    border: 1px solid #3a4659;
+    border-radius: 6px;
+    color: #d7deea;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+QPushButton[secondaryOrderAction="true"]:hover {
+    background-color: #303a4b;
+    border-color: #4b5a70;
+}
+
+QPushButton[primaryOrderAction="true"] {
+    background-color: #2768d9;
+    border: 0;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton[primaryOrderAction="true"]:hover {
+    background-color: #3477e7;
+}
+
+QPushButton[primaryOrderAction="true"]:disabled {
+    background-color: #242b37;
+    color: #667184;
 }
 
 QFrame[orderFormDivider="true"] {
