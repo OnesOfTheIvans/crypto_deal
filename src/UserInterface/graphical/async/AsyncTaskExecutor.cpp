@@ -120,7 +120,7 @@ void AsyncTaskExecutor::deliverTaskCompletion(AsyncTaskDetail::TaskCompletionBas
     }
 }
 
-void AsyncTaskExecutor::stopAndWait()
+void AsyncTaskExecutor::requestStop()
 {
     if (stopping.exchange(true, memory_order_acq_rel))
     {
@@ -131,6 +131,12 @@ void AsyncTaskExecutor::stopAndWait()
     {
         taskEntry.second.worker.request_stop();
     }
+}
+
+void AsyncTaskExecutor::stopAndWait()
+{
+    requestStop();
+
     for (auto &taskEntry : tasks)
     {
         if (taskEntry.second.worker.joinable())

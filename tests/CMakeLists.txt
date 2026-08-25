@@ -55,9 +55,11 @@ add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
 
 add_executable(GraphicalUserInterfaceTests
     AsyncTaskExecutorTest.cpp
+    BalanceCatalogTest.cpp
     GraphicalUserInterfaceTest.cpp
     OrderEntryFormTest.cpp
     OrderInputValidationTest.cpp
+    OrderPlacementModelTest.cpp
     PairCatalogTest.cpp
     SymbolInfoCatalogTest.cpp
 )

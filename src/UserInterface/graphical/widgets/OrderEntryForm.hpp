@@ -4,6 +4,7 @@
 #include "ExchangerType.hpp"
 #include "OperationType.hpp"
 #include "common/domain/TradablePair.hpp"
+#include "graphical/models/BasicOrderDraft.hpp"
 #include "graphical/validation/OrderInputValidation.hpp"
 
 #include <QString>
@@ -12,6 +13,7 @@
 #include <optional>
 
 class DecimalInputField;
+class BalanceCatalog;
 class PairCatalog;
 class QCheckBox;
 class QComboBox;
@@ -23,12 +25,17 @@ class SymbolInfoCatalog;
 
 class OrderEntryForm final : public QWidget
 {
+    Q_OBJECT
+
   private:
     PairCatalog &pairCatalog;
+    BalanceCatalog &balanceCatalog;
     SymbolInfoCatalog &symbolInfoCatalog;
     QComboBox *exchangeSelector;
     QLineEdit *categoryField;
     QLabel *selectedCatalogStatus;
+    QLabel *selectedBalanceStatus;
+    QPushButton *retryBalanceButton;
     QWidget *pairDependentControls;
     QComboBox *baseAssetSelector;
     QComboBox *quoteAssetSelector;
@@ -39,6 +46,7 @@ class OrderEntryForm final : public QWidget
     QLabel *amountLabel;
     DecimalInputField *amountField;
     QStackedWidget *operationFormStack;
+    QComboBox *placeOrderSideSelector;
     QComboBox *placeOrderTypeSelector;
     QWidget *placeOrderLimitFields;
     QLabel *placeOrderPriceLabel;
@@ -52,7 +60,9 @@ class OrderEntryForm final : public QWidget
     DecimalInputField *ocoStopPriceField;
     DecimalInputField *ocoStopLimitPriceField;
     QLabel *formValidationError;
+    QLabel *placementAvailabilityMessage;
     QPushButton *proceedButton;
+    bool placementActive;
 
     void createLayout();
 
@@ -69,6 +79,8 @@ class OrderEntryForm final : public QWidget
     void connectInputUpdates();
 
     void updateSelectedCatalog();
+
+    void updateSelectedBalance();
 
     void updatePairSelectors();
 
@@ -90,6 +102,8 @@ class OrderEntryForm final : public QWidget
 
     void validateForm();
 
+    void updatePlacementAvailability();
+
     bool showFieldValidation(DecimalInputField &field, const DecimalInputValidation &validation, Decimal increment);
 
     QString validateActiveNotional(const SymbolInfo &symbolInfo,
@@ -104,6 +118,8 @@ class OrderEntryForm final : public QWidget
 
     bool hasUsableSelectedCatalog() const;
 
+    bool hasReadySelectedBalances() const;
+
     bool hasActivePlaceOrderPrice() const;
 
     bool hasActiveOcoStopLimitPrice() const;
@@ -113,13 +129,23 @@ class OrderEntryForm final : public QWidget
     const SymbolInfo *getSelectedSymbolInfo() const;
 
   public:
-    OrderEntryForm(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent = nullptr);
+    OrderEntryForm(PairCatalog &pairCatalog,
+                   BalanceCatalog &balanceCatalog,
+                   SymbolInfoCatalog &symbolInfoCatalog,
+                   QWidget *parent = nullptr);
 
     ExchangerType getSelectedExchangerType() const;
 
     std::optional<TradablePair> getSelectedPair() const;
 
     OperationType getSelectedOperation() const;
+
+    std::optional<BasicOrderDraft> createBasicOrderDraft() const;
+
+    void setPlacementActive(bool active);
+
+  signals:
+    void requestConfirmation();
 };
 
 #endif

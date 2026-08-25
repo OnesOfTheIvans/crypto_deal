@@ -163,6 +163,8 @@ class AsyncTaskExecutor final : public QObject
                          [](const QString &) {});
     }
 
+    void requestStop();
+
     void stopAndWait();
 
     std::size_t getActiveTaskCount() const;

@@ -9,6 +9,8 @@ add_library(GraphicalUserInterfaceLib
     graphical/GraphicalUserInterface.cpp
     graphical/async/AsyncTaskExecutor.cpp
     graphical/async/UiTaskState.cpp
+    graphical/models/BalanceCatalog.cpp
+    graphical/models/OrderPlacementModel.cpp
     graphical/models/PairCatalog.cpp
     graphical/models/SymbolInfoCatalog.cpp
     graphical/pages/AccountsPage.cpp
@@ -16,6 +18,7 @@ add_library(GraphicalUserInterfaceLib
     graphical/pages/OrdersPage.cpp
     graphical/validation/OrderInputValidation.cpp
     graphical/widgets/DecimalInputField.cpp
+    graphical/widgets/OrderConfirmationDialog.cpp
     graphical/widgets/OrderEntryForm.cpp
 )
 

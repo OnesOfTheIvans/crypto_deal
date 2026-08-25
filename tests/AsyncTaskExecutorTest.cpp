@@ -247,10 +247,12 @@ TEST(AsyncTaskExecutorTest, RequestsCooperativeStopAndJoinsWorkers)
         [&callbackExecuted](const QString &) { callbackExecuted = true; }));
     QTRY_VERIFY_WITH_TIMEOUT(taskStarted.load(), 1000);
 
+    executor.requestStop();
+    EXPECT_TRUE(executor.isStopping());
+    EXPECT_FALSE(executor.startTask(state, receiver, []() {}, []() {}));
+
     executor.stopAndWait();
 
-    EXPECT_TRUE(executor.isStopping());
     EXPECT_EQ(executor.getActiveTaskCount(), 0);
     EXPECT_FALSE(callbackExecuted);
-    EXPECT_FALSE(executor.startTask(state, receiver, []() {}, []() {}));
 }

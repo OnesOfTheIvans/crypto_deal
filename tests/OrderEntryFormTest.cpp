@@ -1,7 +1,10 @@
+#include "graphical/widgets/OrderEntryForm.hpp"
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/async/UiTaskState.hpp"
+#include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OrderPlacementModel.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 
@@ -17,12 +20,15 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 using namespace std;
+using namespace std::chrono_literals;
 
 namespace {
     QApplication &getApplication()
@@ -78,8 +84,11 @@ TEST(OrderEntryFormTest, ShowsLimitsAndGatesProceedWithExplicitQuantityAndPriceC
         []() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; },
         [](const string &symbol) { return createBtcSymbolInfo(symbol); });
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *limits = window.findChild<QLabel *>("orderTradingLimits");
     auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
@@ -95,6 +104,8 @@ TEST(OrderEntryFormTest, ShowsLimitsAndGatesProceedWithExplicitQuantityAndPriceC
     auto *usePriceCorrection = window.findChild<QPushButton *>("placeOrderPriceUseCorrection");
     auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
 
+    ASSERT_NE(entryFormWidget, nullptr);
+    auto &entryForm = static_cast<OrderEntryForm &>(*entryFormWidget);
     ASSERT_NE(symbolStatus, nullptr);
     ASSERT_NE(limits, nullptr);
     ASSERT_NE(amountInput, nullptr);
@@ -112,6 +123,7 @@ TEST(OrderEntryFormTest, ShowsLimitsAndGatesProceedWithExplicitQuantityAndPriceC
 
     window.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
 
     QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(), QString("Trading rules are ready for BTCUSDT."), 1000);
     EXPECT_TRUE(limits->text().contains("Amount (BTC): step 0.001 · min 0.001 · max 10"));
@@ -168,6 +180,17 @@ TEST(OrderEntryFormTest, ShowsLimitsAndGatesProceedWithExplicitQuantityAndPriceC
     EXPECT_EQ(priceInput->text(), QString("3333.34"));
     EXPECT_TRUE(proceedButton->isEnabled());
 
+    const optional<BasicOrderDraft> limitDraft = entryForm.createBasicOrderDraft();
+    ASSERT_TRUE(limitDraft.has_value());
+    EXPECT_EQ(limitDraft->operation, OperationType::PLACE_ORDER);
+    EXPECT_EQ(limitDraft->side, OrderOperation::BUY);
+    EXPECT_EQ(limitDraft->type, OrderType::LIMIT);
+    EXPECT_EQ(limitDraft->quantityText, "0.003");
+    ASSERT_TRUE(limitDraft->price.has_value());
+    EXPECT_EQ(limitDraft->price.value(), DecimalConverter::parseDecimal("3333.34"));
+    ASSERT_TRUE(limitDraft->timeInForce.has_value());
+    EXPECT_EQ(limitDraft->timeInForce.value(), "GTC");
+
     orderTypeSelector->setCurrentText("Market");
     priceInput->setText("invalid but inactive");
     EXPECT_TRUE(proceedButton->isEnabled());
@@ -183,8 +206,10 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
         []() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; },
         [](const string &symbol) { return createBtcSymbolInfo(symbol); });
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
     auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
@@ -193,6 +218,7 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     auto *useStopLimit = window.findChild<QCheckBox *>("placeOcoUseStopLimit");
     auto *stopLimitPriceInput = window.findChild<QLineEdit *>("placeOcoStopLimitPriceInput");
     auto *formError = window.findChild<QLabel *>("orderFormValidationError");
+    auto *placementAvailability = window.findChild<QLabel *>("orderPlacementAvailability");
     auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
 
     ASSERT_NE(symbolStatus, nullptr);
@@ -203,10 +229,12 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     ASSERT_NE(useStopLimit, nullptr);
     ASSERT_NE(stopLimitPriceInput, nullptr);
     ASSERT_NE(formError, nullptr);
+    ASSERT_NE(placementAvailability, nullptr);
     ASSERT_NE(proceedButton, nullptr);
 
     window.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
     QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(), QString("Trading rules are ready for BTCUSDT."), 1000);
 
     operationSelector->setCurrentText("Place OCO");
@@ -226,7 +254,10 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     finishEditing(*stopPriceInput);
 
     limitPriceInput->setText("5000");
-    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_FALSE(proceedButton->isEnabled());
+    EXPECT_TRUE(placementAvailability->isVisible());
+    EXPECT_EQ(placementAvailability->text(),
+              QString("OCO confirmation and placement will be enabled in the next GUI step."));
 
     useStopLimit->setChecked(true);
     EXPECT_FALSE(proceedButton->isEnabled());
@@ -240,7 +271,7 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     stopLimitPriceInput->setText("4900");
     EXPECT_FALSE(proceedButton->isEnabled());
     stopLimitPriceInput->setText("5000");
-    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_FALSE(proceedButton->isEnabled());
 }
 
 TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSelectedPair)
@@ -261,8 +292,10 @@ TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSele
             return createBtcSymbolInfo(symbol);
         });
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *retryButton = window.findChild<QPushButton *>("retrySymbolInfoButton");
     auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
@@ -273,6 +306,7 @@ TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSele
 
     window.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
     QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(),
                               QString("Trading rules are unavailable for BTCUSDT: temporary symbol failure"),
                               1000);
@@ -284,4 +318,87 @@ TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSele
     EXPECT_FALSE(retryButton->isVisible());
     EXPECT_TRUE(amountInput->isEnabled());
     EXPECT_EQ(binanceService->getSymbolInfoRequestCount(), 2u);
+}
+
+TEST(OrderEntryFormTest, GatesPlacementUntilSelectedBalancesLoadAndRetriesAnExactFailure)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    PairCatalog pairCatalog;
+    promise<void> releaseBalancePromise;
+    const shared_future<void> releaseBalance = releaseBalancePromise.get_future().share();
+    atomic<int> balanceAttempts = 0;
+    auto binanceService = make_shared<TestDealService>(
+        ExchangerType::BINANCE,
+        []() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; },
+        [](const string &symbol) { return createBtcSymbolInfo(symbol); },
+        [&balanceAttempts, releaseBalance]()
+        {
+            if (++balanceAttempts == 1)
+            {
+                releaseBalance.wait_for(2s);
+                throw runtime_error("temporary balance failure");
+            }
+            return BalanceCatalog::BalanceSnapshot{};
+        });
+    auto bybitService = make_shared<TestDealService>(
+        ExchangerType::BYBIT,
+        []() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; },
+        [](const string &symbol) { return createBtcSymbolInfo(symbol); });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
+    auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
+    auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
+    auto *balanceStatus = window.findChild<QLabel *>("selectedBalanceStatus");
+    auto *retryBalanceButton = window.findChild<QPushButton *>("retryBalanceButton");
+    auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
+    auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
+
+    ASSERT_NE(entryFormWidget, nullptr);
+    auto &entryForm = static_cast<OrderEntryForm &>(*entryFormWidget);
+    ASSERT_NE(exchangeSelector, nullptr);
+    ASSERT_NE(symbolStatus, nullptr);
+    ASSERT_NE(balanceStatus, nullptr);
+    ASSERT_NE(retryBalanceButton, nullptr);
+    ASSERT_NE(amountInput, nullptr);
+    ASSERT_NE(proceedButton, nullptr);
+
+    window.show();
+    pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
+
+    QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(), QString("Trading rules are ready for BTCUSDT."), 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceAttempts.load(), 1, 1000);
+    EXPECT_EQ(balanceStatus->text(), QString("Loading Binance balances required for placement..."));
+    amountInput->setText("0.010");
+    EXPECT_FALSE(proceedButton->isEnabled());
+    EXPECT_FALSE(entryForm.createBasicOrderDraft().has_value());
+
+    exchangeSelector->setCurrentText("Bybit");
+    QTRY_COMPARE_WITH_TIMEOUT(balanceStatus->text(), QString("Bybit balances are ready for placement."), 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(proceedButton->isEnabled(), 1000);
+    EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
+
+    exchangeSelector->setCurrentText("Binance");
+    EXPECT_EQ(balanceStatus->text(), QString("Loading Binance balances required for placement..."));
+    EXPECT_FALSE(proceedButton->isEnabled());
+
+    releaseBalancePromise.set_value();
+
+    QTRY_COMPARE_WITH_TIMEOUT(balanceStatus->text(),
+                              QString("Binance balances are unavailable: temporary balance failure"),
+                              1000);
+    EXPECT_TRUE(retryBalanceButton->isVisible());
+    EXPECT_FALSE(proceedButton->isEnabled());
+
+    QTest::mouseClick(retryBalanceButton, Qt::LeftButton);
+
+    QTRY_COMPARE_WITH_TIMEOUT(balanceStatus->text(), QString("Binance balances are ready for placement."), 1000);
+    EXPECT_FALSE(retryBalanceButton->isVisible());
+    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
+    EXPECT_EQ(binanceService->getBalanceRequestCount(), 2u);
 }

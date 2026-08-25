@@ -1,6 +1,8 @@
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
+#include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OrderPlacementModel.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 
@@ -40,8 +42,10 @@ TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
     PairCatalog pairCatalog;
     auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     window.show();
     QApplication::processEvents();
 
@@ -63,8 +67,10 @@ TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchro
     PairCatalog pairCatalog;
     auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     window.show();
     QApplication::processEvents();
 
@@ -104,8 +110,10 @@ TEST(GraphicalUserInterfaceTest, UsesApprovedWindowDimensions)
     PairCatalog pairCatalog;
     auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
 
     EXPECT_EQ(window.size(), QSize(1180, 760));
     EXPECT_EQ(window.minimumSize(), QSize(960, 640));

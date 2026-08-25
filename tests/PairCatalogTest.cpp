@@ -2,6 +2,8 @@
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
+#include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OrderPlacementModel.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 #include "graphical/widgets/OrderEntryForm.hpp"
 
@@ -168,8 +170,10 @@ TEST(PairCatalogTest, DeliversIndependentCatalogStatusToOrdersPage)
     auto bybitService =
         make_shared<CatalogDealService>(ExchangerType::BYBIT,
                                         []() -> vector<TradablePair> { throw runtime_error("Bybit status failure"); });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *binanceStatus = window.findChild<QLabel *>("binancePairCatalogStatus");
     auto *bybitStatus = window.findChild<QLabel *>("bybitPairCatalogStatus");
 
@@ -220,8 +224,10 @@ TEST(PairCatalogTest, FiltersPairSelectorsAndKeepsExchangeChoiceStableDuringInde
                                                                 {"SOLUSDT", "SOL", "USDT"},
                                                             };
                                                         });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *categoryField = window.findChild<QLineEdit *>("orderCategoryField");
@@ -293,8 +299,10 @@ TEST(PairCatalogTest, DisablesPairFormForEmptyAndFailedSelectedCatalogs)
     auto bybitService =
         make_shared<CatalogDealService>(ExchangerType::BYBIT,
                                         []() -> vector<TradablePair> { throw runtime_error("Bybit pair failure"); });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *pairControls = window.findChild<QWidget *>("orderPairDependentControls");
     auto *selectedCatalogStatus = window.findChild<QLabel *>("selectedPairCatalogStatus");
@@ -333,8 +341,10 @@ TEST(PairCatalogTest, ShowsOnlyFieldsForTheSelectedPlacementOperation)
                                                               };
                                                           });
     auto bybitService = make_shared<CatalogDealService>(ExchangerType::BYBIT, []() { return vector<TradablePair>{}; });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
     auto *amountLabel = window.findChild<QLabel *>("orderAmountLabel");

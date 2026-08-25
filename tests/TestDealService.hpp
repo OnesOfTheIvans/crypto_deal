@@ -17,12 +17,15 @@ class TestDealService : public DealService
   public:
     using TradablePairLoader = std::function<std::vector<TradablePair>()>;
     using SymbolInfoLoader = std::function<SymbolInfo(const std::string &)>;
+    using BalanceLoader = std::function<flat_map<std::string, AssetBalance>()>;
 
   private:
     TradablePairLoader tradablePairLoader;
     SymbolInfoLoader symbolInfoLoader;
+    BalanceLoader balanceLoader;
     std::atomic<std::size_t> tradablePairRequestCount;
     std::atomic<std::size_t> symbolInfoRequestCount;
+    std::atomic<std::size_t> balanceRequestCount;
 
     static SymbolInfo createDefaultSymbolInfo(const std::string &symbol)
     {
@@ -46,10 +49,12 @@ class TestDealService : public DealService
   public:
     explicit TestDealService(ExchangerType exchangerType,
                              TradablePairLoader tradablePairLoader = {},
-                             SymbolInfoLoader symbolInfoLoader = {})
+                             SymbolInfoLoader symbolInfoLoader = {},
+                             BalanceLoader balanceLoader = {})
         : DealService("host", "api", "secret", "ws", 5000, exchangerType),
           tradablePairLoader(std::move(tradablePairLoader)), symbolInfoLoader(std::move(symbolInfoLoader)),
-          tradablePairRequestCount(0), symbolInfoRequestCount(0)
+          balanceLoader(std::move(balanceLoader)), tradablePairRequestCount(0), symbolInfoRequestCount(0),
+          balanceRequestCount(0)
     {}
 
     std::size_t getTradablePairRequestCount() const
@@ -60,6 +65,11 @@ class TestDealService : public DealService
     std::size_t getSymbolInfoRequestCount() const
     {
         return symbolInfoRequestCount.load();
+    }
+
+    std::size_t getBalanceRequestCount() const
+    {
+        return balanceRequestCount.load();
     }
 
     OrderInfo buyCrypto(const std::string &, const std::string &, Decimal) override
@@ -151,7 +161,8 @@ class TestDealService : public DealService
 
     flat_map<std::string, AssetBalance> getBalancesRest() override
     {
-        return {};
+        ++balanceRequestCount;
+        return balanceLoader ? balanceLoader() : flat_map<std::string, AssetBalance>{};
     }
 };
 

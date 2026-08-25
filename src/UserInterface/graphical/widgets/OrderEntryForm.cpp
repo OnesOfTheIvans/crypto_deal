@@ -3,6 +3,7 @@
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
 #include "graphical/async/UiTaskState.hpp"
+#include "graphical/models/BalanceCatalog.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 #include "graphical/widgets/DecimalInputField.hpp"
@@ -52,22 +53,28 @@ namespace {
     }
 }
 
-OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent)
-    : QWidget(parent), pairCatalog(pairCatalog), symbolInfoCatalog(symbolInfoCatalog), exchangeSelector(nullptr),
-      categoryField(nullptr), selectedCatalogStatus(nullptr), pairDependentControls(nullptr),
-      baseAssetSelector(nullptr), quoteAssetSelector(nullptr), operationSelector(nullptr),
-      selectedSymbolInfoStatus(nullptr), retrySymbolInfoButton(nullptr), tradingLimits(nullptr), amountLabel(nullptr),
-      amountField(nullptr), operationFormStack(nullptr), placeOrderTypeSelector(nullptr),
+OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog,
+                               BalanceCatalog &balanceCatalog,
+                               SymbolInfoCatalog &symbolInfoCatalog,
+                               QWidget *parent)
+    : QWidget(parent), pairCatalog(pairCatalog), balanceCatalog(balanceCatalog), symbolInfoCatalog(symbolInfoCatalog),
+      exchangeSelector(nullptr), categoryField(nullptr), selectedCatalogStatus(nullptr), selectedBalanceStatus(nullptr),
+      retryBalanceButton(nullptr), pairDependentControls(nullptr), baseAssetSelector(nullptr),
+      quoteAssetSelector(nullptr), operationSelector(nullptr), selectedSymbolInfoStatus(nullptr),
+      retrySymbolInfoButton(nullptr), tradingLimits(nullptr), amountLabel(nullptr), amountField(nullptr),
+      operationFormStack(nullptr), placeOrderSideSelector(nullptr), placeOrderTypeSelector(nullptr),
       placeOrderLimitFields(nullptr), placeOrderPriceLabel(nullptr), placeOrderPriceField(nullptr),
       useOcoStopLimit(nullptr), ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr), ocoStopPriceLabel(nullptr),
       ocoStopLimitPriceLabel(nullptr), ocoLimitPriceField(nullptr), ocoStopPriceField(nullptr),
-      ocoStopLimitPriceField(nullptr), formValidationError(nullptr), proceedButton(nullptr)
+      ocoStopLimitPriceField(nullptr), formValidationError(nullptr), placementAvailabilityMessage(nullptr),
+      proceedButton(nullptr), placementActive(false)
 {
     setObjectName("orderEntryForm");
     createLayout();
     connectCatalogUpdates();
     connectInputUpdates();
     updateSelectedCatalog();
+    updateSelectedBalance();
 }
 
 ExchangerType OrderEntryForm::getSelectedExchangerType() const
@@ -99,6 +106,70 @@ optional<TradablePair> OrderEntryForm::getSelectedPair() const
 OperationType OrderEntryForm::getSelectedOperation() const
 {
     return static_cast<OperationType>(operationSelector->currentData().toInt());
+}
+
+optional<BasicOrderDraft> OrderEntryForm::createBasicOrderDraft() const
+{
+    const optional<TradablePair> selectedPair = getSelectedPair();
+    const SymbolInfo *symbolInfo = getSelectedSymbolInfo();
+    if (!selectedPair.has_value() || symbolInfo == nullptr || !hasReadySelectedBalances() ||
+        getSelectedOperation() == OperationType::PLACE_OCO)
+    {
+        return nullopt;
+    }
+
+    const DecimalInputValidation amountValidation =
+        OrderInputValidation::validateQuantity(amountField->getInput().text(), *symbolInfo);
+    if (!amountValidation.isValid())
+    {
+        return nullopt;
+    }
+
+    BasicOrderDraft draft;
+    draft.exchangerType = getSelectedExchangerType();
+    draft.operation = getSelectedOperation();
+    draft.pair = selectedPair.value();
+    draft.quantity = amountValidation.value.value();
+    draft.quantityText = DecimalConverter::formatByStep(draft.quantity, symbolInfo->stepSize);
+
+    switch (draft.operation)
+    {
+    case OperationType::BUY_CRYPTO:
+        draft.side = OrderOperation::BUY;
+        draft.type = OrderType::MARKET;
+        break;
+    case OperationType::SELL_CRYPTO:
+        draft.side = OrderOperation::SELL;
+        draft.type = OrderType::MARKET;
+        break;
+    case OperationType::PLACE_ORDER:
+        draft.side = static_cast<OrderOperation>(placeOrderSideSelector->currentData().toInt());
+        draft.type = static_cast<OrderType>(placeOrderTypeSelector->currentData().toInt());
+        if (draft.type == OrderType::LIMIT)
+        {
+            const DecimalInputValidation priceValidation =
+                OrderInputValidation::validatePrice(placeOrderPriceField->getInput().text(), *symbolInfo);
+            if (!priceValidation.isValid() ||
+                !OrderInputValidation::validateNotional(draft.quantity, priceValidation.value.value(), *symbolInfo)
+                     .isEmpty())
+            {
+                return nullopt;
+            }
+            draft.price = priceValidation.value.value();
+            draft.priceText = DecimalConverter::formatByStep(draft.price.value(), symbolInfo->tickSize);
+            draft.timeInForce = "GTC";
+        }
+        break;
+    default:
+        return nullopt;
+    }
+    return draft;
+}
+
+void OrderEntryForm::setPlacementActive(bool active)
+{
+    placementActive = active;
+    validateForm();
 }
 
 void OrderEntryForm::createLayout()
@@ -137,6 +208,24 @@ void OrderEntryForm::createLayout()
     selectedCatalogStatus->setProperty("selectedCatalogStatus", true);
     selectedCatalogStatus->setTextFormat(Qt::PlainText);
     selectedCatalogStatus->setWordWrap(true);
+
+    auto *balanceStatusLayout = new QHBoxLayout();
+    balanceStatusLayout->setContentsMargins(0, 0, 0, 0);
+    balanceStatusLayout->setSpacing(ORDER_FORM_FEEDBACK_SPACING);
+
+    selectedBalanceStatus = new QLabel(this);
+    selectedBalanceStatus->setObjectName("selectedBalanceStatus");
+    selectedBalanceStatus->setProperty("symbolInfoStatus", true);
+    selectedBalanceStatus->setTextFormat(Qt::PlainText);
+    selectedBalanceStatus->setWordWrap(true);
+
+    retryBalanceButton = new QPushButton("Retry", this);
+    retryBalanceButton->setObjectName("retryBalanceButton");
+    retryBalanceButton->setProperty("secondaryOrderAction", true);
+    retryBalanceButton->hide();
+
+    balanceStatusLayout->addWidget(selectedBalanceStatus, 1);
+    balanceStatusLayout->addWidget(retryBalanceButton);
 
     pairDependentControls = new QWidget(this);
     pairDependentControls->setObjectName("orderPairDependentControls");
@@ -234,6 +323,13 @@ void OrderEntryForm::createLayout()
     formValidationError->setWordWrap(true);
     formValidationError->hide();
 
+    placementAvailabilityMessage = new QLabel(pairDependentControls);
+    placementAvailabilityMessage->setObjectName("orderPlacementAvailability");
+    placementAvailabilityMessage->setProperty("placementAvailability", true);
+    placementAvailabilityMessage->setTextFormat(Qt::PlainText);
+    placementAvailabilityMessage->setWordWrap(true);
+    placementAvailabilityMessage->hide();
+
     proceedButton = new QPushButton("Proceed to confirmation", pairDependentControls);
     proceedButton->setObjectName("orderProceedButton");
     proceedButton->setProperty("primaryOrderAction", true);
@@ -247,10 +343,12 @@ void OrderEntryForm::createLayout()
     pairDependentLayout->addLayout(amountLayout);
     pairDependentLayout->addWidget(operationFormStack);
     pairDependentLayout->addWidget(formValidationError);
+    pairDependentLayout->addWidget(placementAvailabilityMessage);
     pairDependentLayout->addWidget(proceedButton, 0, Qt::AlignRight);
 
     layout->addLayout(contextLayout);
     layout->addWidget(selectedCatalogStatus);
+    layout->addLayout(balanceStatusLayout);
     layout->addWidget(pairDependentControls);
 
     updateOperationFields();
@@ -287,19 +385,21 @@ QWidget *OrderEntryForm::createPlaceOrderFields()
     mainFields->setHorizontalSpacing(ORDER_FORM_COLUMN_SPACING);
     mainFields->setVerticalSpacing(ORDER_FORM_ROW_SPACING);
 
-    auto *sideSelector = new QComboBox(fields);
-    sideSelector->setObjectName("placeOrderSideSelector");
-    sideSelector->setProperty("orderInput", true);
-    sideSelector->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
-    sideSelector->addItems({"Buy", "Sell"});
+    placeOrderSideSelector = new QComboBox(fields);
+    placeOrderSideSelector->setObjectName("placeOrderSideSelector");
+    placeOrderSideSelector->setProperty("orderInput", true);
+    placeOrderSideSelector->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    placeOrderSideSelector->addItem("Buy", static_cast<int>(OrderOperation::BUY));
+    placeOrderSideSelector->addItem("Sell", static_cast<int>(OrderOperation::SELL));
 
     placeOrderTypeSelector = new QComboBox(fields);
     placeOrderTypeSelector->setObjectName("placeOrderTypeSelector");
     placeOrderTypeSelector->setProperty("orderInput", true);
     placeOrderTypeSelector->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
-    placeOrderTypeSelector->addItems({"Market", "Limit"});
+    placeOrderTypeSelector->addItem("Market", static_cast<int>(OrderType::MARKET));
+    placeOrderTypeSelector->addItem("Limit", static_cast<int>(OrderType::LIMIT));
 
-    mainFields->addRow(createFieldLabel("Side", *fields), sideSelector);
+    mainFields->addRow(createFieldLabel("Side", *fields), placeOrderSideSelector);
     mainFields->addRow(createFieldLabel("Order type", *fields), placeOrderTypeSelector);
 
     placeOrderLimitFields = new QWidget(fields);
@@ -425,6 +525,17 @@ void OrderEntryForm::connectCatalogUpdates()
                         updateSelectedCatalog();
                     }
                 });
+
+        connect(&balanceCatalog.getLoadState(exchangerType),
+                &UiTaskState::statusChanged,
+                this,
+                [this, exchangerType](UiTaskState::Status)
+                {
+                    if (exchangerType == getSelectedExchangerType())
+                    {
+                        updateSelectedBalance();
+                    }
+                });
     }
 
     connect(&symbolInfoCatalog,
@@ -443,7 +554,14 @@ void OrderEntryForm::connectCatalogUpdates()
 
 void OrderEntryForm::connectInputUpdates()
 {
-    connect(exchangeSelector, &QComboBox::currentIndexChanged, this, [this](int) { updateSelectedCatalog(); });
+    connect(exchangeSelector,
+            &QComboBox::currentIndexChanged,
+            this,
+            [this](int)
+            {
+                updateSelectedCatalog();
+                updateSelectedBalance();
+            });
     connect(baseAssetSelector,
             &QComboBox::currentIndexChanged,
             this,
@@ -468,6 +586,7 @@ void OrderEntryForm::connectInputUpdates()
             this,
             [this](int) { updatePlaceOrderTypeFields(); });
     connect(useOcoStopLimit, &QCheckBox::toggled, this, [this](bool) { updateOcoStopLimitFields(); });
+    connect(proceedButton, &QPushButton::clicked, this, &OrderEntryForm::requestConfirmation);
 
     for (DecimalInputField *field :
          {amountField, placeOrderPriceField, ocoLimitPriceField, ocoStopPriceField, ocoStopLimitPriceField})
@@ -487,6 +606,15 @@ void OrderEntryForm::connectInputUpdates()
                     symbolInfoCatalog.retrySymbolInfo(getSelectedExchangerType(), selectedPair.value().symbol);
                     updateSelectedSymbolInfo();
                 }
+            });
+
+    connect(retryBalanceButton,
+            &QPushButton::clicked,
+            this,
+            [this]()
+            {
+                balanceCatalog.retryBalances(getSelectedExchangerType());
+                updateSelectedBalance();
             });
 }
 
@@ -516,6 +644,31 @@ void OrderEntryForm::updateSelectedCatalog()
         break;
     }
     updatePairSelectors();
+}
+
+void OrderEntryForm::updateSelectedBalance()
+{
+    const UiTaskState &loadState = balanceCatalog.getLoadState(getSelectedExchangerType());
+    const QString exchangeName = getSelectedExchangeName();
+    retryBalanceButton->hide();
+
+    switch (loadState.getStatus())
+    {
+    case UiTaskState::Status::IDLE:
+        selectedBalanceStatus->setText(exchangeName + " balances are waiting for the startup load.");
+        break;
+    case UiTaskState::Status::LOADING:
+        selectedBalanceStatus->setText("Loading " + exchangeName + " balances required for placement...");
+        break;
+    case UiTaskState::Status::SUCCEEDED:
+        selectedBalanceStatus->setText(exchangeName + " balances are ready for placement.");
+        break;
+    case UiTaskState::Status::FAILED:
+        selectedBalanceStatus->setText(exchangeName + " balances are unavailable: " + loadState.getError());
+        retryBalanceButton->show();
+        break;
+    }
+    validateForm();
 }
 
 void OrderEntryForm::updatePairSelectors()
@@ -726,6 +879,7 @@ void OrderEntryForm::updateInputAvailability(bool enabled)
 
 void OrderEntryForm::validateForm()
 {
+    updatePlacementAvailability();
     const SymbolInfo *symbolInfo = getSelectedSymbolInfo();
     if (symbolInfo == nullptr)
     {
@@ -799,7 +953,27 @@ void OrderEntryForm::validateForm()
                                                          ocoStopLimitPriceValidation);
     formValidationError->setText(notionalError);
     formValidationError->setVisible(shouldShowNotionalValidation(notionalError));
-    proceedButton->setEnabled(formIsValid && notionalError.isEmpty());
+    proceedButton->setEnabled(formIsValid && notionalError.isEmpty() && hasReadySelectedBalances() &&
+                              !placementActive && getSelectedOperation() != OperationType::PLACE_OCO);
+}
+
+void OrderEntryForm::updatePlacementAvailability()
+{
+    if (getSelectedOperation() == OperationType::PLACE_OCO)
+    {
+        placementAvailabilityMessage->setText("OCO confirmation and placement will be enabled in the next GUI step.");
+        placementAvailabilityMessage->show();
+        return;
+    }
+    if (placementActive)
+    {
+        placementAvailabilityMessage->setText(
+            "Finish monitoring the current order before placing another. Session order tracking will remove this "
+            "temporary limitation.");
+        placementAvailabilityMessage->show();
+        return;
+    }
+    placementAvailabilityMessage->hide();
 }
 
 bool OrderEntryForm::showFieldValidation(DecimalInputField &field,
@@ -892,6 +1066,11 @@ bool OrderEntryForm::hasUsableSelectedCatalog() const
     const ExchangerType exchangerType = getSelectedExchangerType();
     return pairCatalog.getLoadState(exchangerType).getStatus() == UiTaskState::Status::SUCCEEDED &&
            !pairCatalog.getPairs(exchangerType).empty();
+}
+
+bool OrderEntryForm::hasReadySelectedBalances() const
+{
+    return balanceCatalog.getLoadState(getSelectedExchangerType()).getStatus() == UiTaskState::Status::SUCCEEDED;
 }
 
 bool OrderEntryForm::hasActivePlaceOrderPrice() const

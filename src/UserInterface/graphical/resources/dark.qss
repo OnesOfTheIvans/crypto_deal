@@ -123,6 +123,44 @@ QLabel[tradingLimits="true"] {
     padding: 9px 10px;
 }
 
+QWidget[placementStatusPanel="true"],
+QLabel[confirmationSummary="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+}
+
+QWidget[placementStatusPanel="true"] {
+    margin-top: 8px;
+}
+
+QLabel[placementStatusTitle="true"],
+QLabel[confirmationTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[placementStatusDetails="true"],
+QLabel[confirmationSummary="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
+QLabel[confirmationSummary="true"] {
+    padding: 12px;
+}
+
+QLabel[placementAvailability="true"] {
+    color: #e2bd73;
+    font-size: 12px;
+}
+
+QDialog#orderConfirmationDialog {
+    background-color: #191e28;
+    color: #eef2f8;
+}
+
 QLabel[orderFieldLabel="true"] {
     color: #aeb7c7;
     font-size: 12px;

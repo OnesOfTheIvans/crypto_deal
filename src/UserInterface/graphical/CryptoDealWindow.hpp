@@ -9,14 +9,18 @@ class QPushButton;
 class QStackedWidget;
 class QString;
 class QWidget;
+class BalanceCatalog;
 class PairCatalog;
+class OrderPlacementModel;
 class SymbolInfoCatalog;
 
 class CryptoDealWindow final : public QMainWindow
 {
   private:
     PairCatalog &pairCatalog;
+    BalanceCatalog &balanceCatalog;
     SymbolInfoCatalog &symbolInfoCatalog;
+    OrderPlacementModel &orderPlacementModel;
     QStackedWidget *pageStack;
 
     void createLayout();
@@ -28,7 +32,11 @@ class CryptoDealWindow final : public QMainWindow
     void applyStyle();
 
   public:
-    CryptoDealWindow(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent = nullptr);
+    CryptoDealWindow(PairCatalog &pairCatalog,
+                     BalanceCatalog &balanceCatalog,
+                     SymbolInfoCatalog &symbolInfoCatalog,
+                     OrderPlacementModel &orderPlacementModel,
+                     QWidget *parent = nullptr);
 };
 
 #endif

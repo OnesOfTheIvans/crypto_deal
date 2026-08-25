@@ -2,6 +2,8 @@
 
 #include "GuiLayoutConstants.hpp"
 #include "common/exception_handling.hpp"
+#include "models/BalanceCatalog.hpp"
+#include "models/OrderPlacementModel.hpp"
 #include "models/PairCatalog.hpp"
 #include "models/SymbolInfoCatalog.hpp"
 #include "pages/AccountsPage.hpp"
@@ -22,8 +24,13 @@
 using namespace exception_handling;
 using namespace GuiLayoutConstants;
 
-CryptoDealWindow::CryptoDealWindow(PairCatalog &pairCatalog, SymbolInfoCatalog &symbolInfoCatalog, QWidget *parent)
-    : QMainWindow(parent), pairCatalog(pairCatalog), symbolInfoCatalog(symbolInfoCatalog), pageStack(nullptr)
+CryptoDealWindow::CryptoDealWindow(PairCatalog &pairCatalog,
+                                   BalanceCatalog &balanceCatalog,
+                                   SymbolInfoCatalog &symbolInfoCatalog,
+                                   OrderPlacementModel &orderPlacementModel,
+                                   QWidget *parent)
+    : QMainWindow(parent), pairCatalog(pairCatalog), balanceCatalog(balanceCatalog),
+      symbolInfoCatalog(symbolInfoCatalog), orderPlacementModel(orderPlacementModel), pageStack(nullptr)
 {
     setObjectName("cryptoDealWindow");
     setWindowTitle("CryptoDeal");
@@ -87,7 +94,8 @@ void CryptoDealWindow::createLayout()
 
     pageStack = new QStackedWidget(windowContent);
     pageStack->setObjectName("primaryPageStack");
-    pageStack->addWidget(new OrdersPage(pairCatalog, symbolInfoCatalog, pageStack));
+    pageStack->addWidget(
+        new OrdersPage(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel, pageStack));
     pageStack->addWidget(new OperationChainsPage(pageStack));
     pageStack->addWidget(new AccountsPage(pageStack));
 

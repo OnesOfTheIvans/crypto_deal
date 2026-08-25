@@ -1,8 +1,11 @@
 #include "GraphicalUserInterface.hpp"
 
 #include "CryptoDealWindow.hpp"
+#include "DealService.hpp"
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
+#include "models/BalanceCatalog.hpp"
+#include "models/OrderPlacementModel.hpp"
 #include "models/PairCatalog.hpp"
 #include "models/SymbolInfoCatalog.hpp"
 
@@ -27,12 +30,18 @@ int GraphicalUserInterface::run()
 
     AsyncTaskExecutor taskExecutor;
     PairCatalog pairCatalog;
+    BalanceCatalog balanceCatalog(taskExecutor, binanceDealService, bybitDealService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceDealService, bybitDealService);
-    CryptoDealWindow mainWindow(pairCatalog, symbolInfoCatalog);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceDealService, bybitDealService);
+    CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
+    balanceCatalog.loadBalances();
 
     const int exitCode = QApplication::exec();
+    taskExecutor.requestStop();
+    binanceDealService->stopUserStream();
+    bybitDealService->stopUserStream();
     taskExecutor.stopAndWait();
     return exitCode;
 }
