@@ -64,10 +64,10 @@ OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog,
       retrySymbolInfoButton(nullptr), tradingLimits(nullptr), amountLabel(nullptr), amountField(nullptr),
       operationFormStack(nullptr), placeOrderSideSelector(nullptr), placeOrderTypeSelector(nullptr),
       placeOrderLimitFields(nullptr), placeOrderPriceLabel(nullptr), placeOrderPriceField(nullptr),
-      useOcoStopLimit(nullptr), ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr), ocoStopPriceLabel(nullptr),
-      ocoStopLimitPriceLabel(nullptr), ocoLimitPriceField(nullptr), ocoStopPriceField(nullptr),
-      ocoStopLimitPriceField(nullptr), formValidationError(nullptr), placementAvailabilityMessage(nullptr),
-      proceedButton(nullptr), placementActive(false)
+      ocoSideSelector(nullptr), useOcoStopLimit(nullptr), ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr),
+      ocoStopPriceLabel(nullptr), ocoStopLimitPriceLabel(nullptr), ocoLimitPriceField(nullptr),
+      ocoStopPriceField(nullptr), ocoStopLimitPriceField(nullptr), formValidationError(nullptr),
+      placementAvailabilityMessage(nullptr), proceedButton(nullptr), placementActive(false)
 {
     setObjectName("orderEntryForm");
     createLayout();
@@ -162,6 +162,66 @@ optional<BasicOrderDraft> OrderEntryForm::createBasicOrderDraft() const
         break;
     default:
         return nullopt;
+    }
+    return draft;
+}
+
+optional<OcoOrderDraft> OrderEntryForm::createOcoOrderDraft() const
+{
+    const optional<TradablePair> selectedPair = getSelectedPair();
+    const SymbolInfo *symbolInfo = getSelectedSymbolInfo();
+    if (!selectedPair.has_value() || symbolInfo == nullptr || !hasReadySelectedBalances() ||
+        getSelectedOperation() != OperationType::PLACE_OCO)
+    {
+        return nullopt;
+    }
+
+    const DecimalInputValidation amountValidation =
+        OrderInputValidation::validateQuantity(amountField->getInput().text(), *symbolInfo);
+    const DecimalInputValidation limitPriceValidation =
+        OrderInputValidation::validatePrice(ocoLimitPriceField->getInput().text(), *symbolInfo);
+    const DecimalInputValidation stopPriceValidation =
+        OrderInputValidation::validatePrice(ocoStopPriceField->getInput().text(), *symbolInfo);
+    if (!amountValidation.isValid() || !limitPriceValidation.isValid() || !stopPriceValidation.isValid() ||
+        !OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                limitPriceValidation.value.value(),
+                                                *symbolInfo)
+             .isEmpty())
+    {
+        return nullopt;
+    }
+    if (!hasActiveOcoStopLimitPrice() && !OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                                                 stopPriceValidation.value.value(),
+                                                                                 *symbolInfo)
+                                              .isEmpty())
+    {
+        return nullopt;
+    }
+
+    OcoOrderDraft draft;
+    draft.exchangerType = getSelectedExchangerType();
+    draft.pair = selectedPair.value();
+    draft.side = static_cast<OrderOperation>(ocoSideSelector->currentData().toInt());
+    draft.quantity = amountValidation.value.value();
+    draft.limitPrice = limitPriceValidation.value.value();
+    draft.stopPrice = stopPriceValidation.value.value();
+    draft.quantityText = DecimalConverter::formatByStep(draft.quantity, symbolInfo->stepSize);
+    draft.limitPriceText = DecimalConverter::formatByStep(draft.limitPrice, symbolInfo->tickSize);
+    draft.stopPriceText = DecimalConverter::formatByStep(draft.stopPrice, symbolInfo->tickSize);
+
+    if (hasActiveOcoStopLimitPrice())
+    {
+        const DecimalInputValidation stopLimitPriceValidation =
+            OrderInputValidation::validatePrice(ocoStopLimitPriceField->getInput().text(), *symbolInfo);
+        if (!stopLimitPriceValidation.isValid() ||
+            !OrderInputValidation::validateNotional(draft.quantity, stopLimitPriceValidation.value.value(), *symbolInfo)
+                 .isEmpty())
+        {
+            return nullopt;
+        }
+        draft.stopLimitPrice = stopLimitPriceValidation.value.value();
+        draft.stopLimitTimeInForce = "GTC";
+        draft.stopLimitPriceText = DecimalConverter::formatByStep(draft.stopLimitPrice.value(), symbolInfo->tickSize);
     }
     return draft;
 }
@@ -443,11 +503,12 @@ QWidget *OrderEntryForm::createOcoFields()
     mainFields->setHorizontalSpacing(ORDER_FORM_COLUMN_SPACING);
     mainFields->setVerticalSpacing(ORDER_FORM_ROW_SPACING);
 
-    auto *sideSelector = new QComboBox(fields);
-    sideSelector->setObjectName("placeOcoSideSelector");
-    sideSelector->setProperty("orderInput", true);
-    sideSelector->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
-    sideSelector->addItems({"Buy", "Sell"});
+    ocoSideSelector = new QComboBox(fields);
+    ocoSideSelector->setObjectName("placeOcoSideSelector");
+    ocoSideSelector->setProperty("orderInput", true);
+    ocoSideSelector->setMinimumHeight(ORDER_FORM_CONTROL_MINIMUM_HEIGHT);
+    ocoSideSelector->addItem("Buy", static_cast<int>(OrderOperation::BUY));
+    ocoSideSelector->addItem("Sell", static_cast<int>(OrderOperation::SELL));
 
     ocoLimitPriceLabel = createFieldLabel("Limit price (quote per base)", *fields);
     ocoLimitPriceLabel->setObjectName("placeOcoLimitPriceLabel");
@@ -460,7 +521,7 @@ QWidget *OrderEntryForm::createOcoFields()
     useOcoStopLimit = new QCheckBox("Use a stop-limit price", fields);
     useOcoStopLimit->setObjectName("placeOcoUseStopLimit");
 
-    mainFields->addRow(createFieldLabel("Side", *fields), sideSelector);
+    mainFields->addRow(createFieldLabel("Side", *fields), ocoSideSelector);
     mainFields->addRow(ocoLimitPriceLabel, ocoLimitPriceField);
     mainFields->addRow(ocoStopPriceLabel, ocoStopPriceField);
     mainFields->addRow(QString(), useOcoStopLimit);
@@ -950,21 +1011,15 @@ void OrderEntryForm::validateForm()
                                                          amountValidation,
                                                          placeOrderPriceValidation,
                                                          ocoLimitPriceValidation,
+                                                         ocoStopPriceValidation,
                                                          ocoStopLimitPriceValidation);
     formValidationError->setText(notionalError);
     formValidationError->setVisible(shouldShowNotionalValidation(notionalError));
-    proceedButton->setEnabled(formIsValid && notionalError.isEmpty() && hasReadySelectedBalances() &&
-                              !placementActive && getSelectedOperation() != OperationType::PLACE_OCO);
+    proceedButton->setEnabled(formIsValid && notionalError.isEmpty() && hasReadySelectedBalances() && !placementActive);
 }
 
 void OrderEntryForm::updatePlacementAvailability()
 {
-    if (getSelectedOperation() == OperationType::PLACE_OCO)
-    {
-        placementAvailabilityMessage->setText("OCO confirmation and placement will be enabled in the next GUI step.");
-        placementAvailabilityMessage->show();
-        return;
-    }
     if (placementActive)
     {
         placementAvailabilityMessage->setText(
@@ -993,6 +1048,7 @@ QString OrderEntryForm::validateActiveNotional(const SymbolInfo &symbolInfo,
                                                const DecimalInputValidation &amountValidation,
                                                const DecimalInputValidation &placeOrderPriceValidation,
                                                const DecimalInputValidation &ocoLimitPriceValidation,
+                                               const DecimalInputValidation &ocoStopPriceValidation,
                                                const DecimalInputValidation &ocoStopLimitPriceValidation) const
 {
     if (!amountValidation.isValid())
@@ -1018,6 +1074,16 @@ QString OrderEntryForm::validateActiveNotional(const SymbolInfo &symbolInfo,
     if (!error.isEmpty())
     {
         return "Limit leg: " + error;
+    }
+    if (!hasActiveOcoStopLimitPrice() && ocoStopPriceValidation.isValid())
+    {
+        error = OrderInputValidation::validateNotional(amountValidation.value.value(),
+                                                       ocoStopPriceValidation.value.value(),
+                                                       symbolInfo);
+        if (!error.isEmpty())
+        {
+            return "Stop leg: " + error;
+        }
     }
     if (hasActiveOcoStopLimitPrice() && ocoStopLimitPriceValidation.isValid())
     {
@@ -1045,6 +1111,10 @@ bool OrderEntryForm::shouldShowNotionalValidation(const QString &error) const
     if (error.startsWith("Limit leg:"))
     {
         return ocoLimitPriceField->hasValidationFeedbackEnabled();
+    }
+    if (error.startsWith("Stop leg:"))
+    {
+        return ocoStopPriceField->hasValidationFeedbackEnabled();
     }
     if (error.startsWith("Stop-limit leg:"))
     {

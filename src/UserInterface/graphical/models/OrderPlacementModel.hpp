@@ -2,6 +2,8 @@
 #define ORDER_PLACEMENT_MODEL_H
 
 #include "BasicOrderDraft.hpp"
+#include "OcoOrderDraft.hpp"
+#include "common/domain/OcoInfo.hpp"
 #include "common/domain/OrderInfo.hpp"
 #include "graphical/async/UiTaskState.hpp"
 
@@ -39,7 +41,9 @@ class OrderPlacementModel final : public QObject
     UiTaskState waitState;
     Status status;
     std::optional<BasicOrderDraft> currentDraft;
+    std::optional<OcoOrderDraft> currentOcoDraft;
     std::optional<OrderInfo> acceptedOrder;
+    std::optional<OcoInfo> acceptedOco;
     std::optional<OrderInfo> terminalOrder;
     QString error;
 
@@ -52,6 +56,14 @@ class OrderPlacementModel final : public QObject
     void startOrderWait();
 
     void finishOrderWait(OrderInfo orderInfo);
+
+    void acceptOco(OcoInfo ocoInfo);
+
+    void continueAfterOcoAcceptance();
+
+    void startOcoWait();
+
+    std::optional<OrderInfo> getAcceptedOcoFilledOrder() const;
 
     void failSubmission(const QString &failure);
 
@@ -69,11 +81,17 @@ class OrderPlacementModel final : public QObject
 
     bool placeOrder(const BasicOrderDraft &draft);
 
+    bool placeOco(const OcoOrderDraft &draft);
+
     Status getStatus() const;
 
     const std::optional<BasicOrderDraft> &getCurrentDraft() const;
 
+    const std::optional<OcoOrderDraft> &getCurrentOcoDraft() const;
+
     const std::optional<OrderInfo> &getAcceptedOrder() const;
+
+    const std::optional<OcoInfo> &getAcceptedOco() const;
 
     const std::optional<OrderInfo> &getTerminalOrder() const;
 

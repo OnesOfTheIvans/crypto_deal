@@ -5,6 +5,7 @@
 #include "OperationType.hpp"
 #include "common/domain/TradablePair.hpp"
 #include "graphical/models/BasicOrderDraft.hpp"
+#include "graphical/models/OcoOrderDraft.hpp"
 #include "graphical/validation/OrderInputValidation.hpp"
 
 #include <QString>
@@ -51,6 +52,7 @@ class OrderEntryForm final : public QWidget
     QWidget *placeOrderLimitFields;
     QLabel *placeOrderPriceLabel;
     DecimalInputField *placeOrderPriceField;
+    QComboBox *ocoSideSelector;
     QCheckBox *useOcoStopLimit;
     QWidget *ocoStopLimitFields;
     QLabel *ocoLimitPriceLabel;
@@ -110,6 +112,7 @@ class OrderEntryForm final : public QWidget
                                    const DecimalInputValidation &amountValidation,
                                    const DecimalInputValidation &placeOrderPriceValidation,
                                    const DecimalInputValidation &ocoLimitPriceValidation,
+                                   const DecimalInputValidation &ocoStopPriceValidation,
                                    const DecimalInputValidation &ocoStopLimitPriceValidation) const;
 
     bool shouldShowNotionalValidation(const QString &error) const;
@@ -141,6 +144,8 @@ class OrderEntryForm final : public QWidget
     OperationType getSelectedOperation() const;
 
     std::optional<BasicOrderDraft> createBasicOrderDraft() const;
+
+    std::optional<OcoOrderDraft> createOcoOrderDraft() const;
 
     void setPlacementActive(bool active);
 

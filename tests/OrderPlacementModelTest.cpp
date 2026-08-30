@@ -7,6 +7,7 @@
 #include "graphical/models/SymbolInfoCatalog.hpp"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -75,12 +76,43 @@ namespace {
         return draft;
     }
 
+    OcoOrderDraft createOcoDraft(ExchangerType exchangerType)
+    {
+        OcoOrderDraft draft;
+        draft.exchangerType = exchangerType;
+        draft.pair = {"BTCUSDT", "BTC", "USDT"};
+        draft.side = OrderOperation::SELL;
+        draft.quantity = DecimalConverter::parseDecimal("0.01");
+        draft.limitPrice = DecimalConverter::parseDecimal("60000");
+        draft.stopPrice = DecimalConverter::parseDecimal("50000");
+        draft.stopLimitPrice = DecimalConverter::parseDecimal("49900");
+        draft.stopLimitTimeInForce = "GTC";
+        draft.quantityText = "0.010";
+        draft.limitPriceText = "60000";
+        draft.stopPriceText = "50000";
+        draft.stopLimitPriceText = "49900";
+        return draft;
+    }
+
+    OcoInfo
+    createOcoInfo(const string &takeProfitStatus, const string &stopLossStatus, const string &groupId = "OCO-GROUP-1")
+    {
+        OcoInfo ocoInfo;
+        ocoInfo.orderListId = groupId;
+        ocoInfo.listClientOrderId = groupId;
+        ocoInfo.takeProfitOrder = createOrderInfo(takeProfitStatus, "OCO-TP-1");
+        ocoInfo.stopLossOrder = createOrderInfo(stopLossStatus, "OCO-SL-1");
+        return ocoInfo;
+    }
+
     class PlacementDealService final : public TestDealService
     {
       public:
         using CryptoHandler = function<OrderInfo(const string &, const string &, Decimal)>;
         using OrderHandler = function<OrderInfo(const PlaceOrderRequest &)>;
         using WaitHandler = function<OrderInfo(const string &, const string &)>;
+        using OcoHandler = function<OcoInfo(const PlaceOcoRequest &)>;
+        using OcoWaitHandler = function<OrderInfo(const OcoInfo &)>;
 
         struct CryptoCall
         {
@@ -94,15 +126,20 @@ namespace {
         CryptoHandler sellHandler;
         OrderHandler orderHandler;
         WaitHandler waitHandler;
+        OcoHandler ocoHandler;
+        OcoWaitHandler ocoWaitHandler;
         atomic<size_t> buyCount;
         atomic<size_t> sellCount;
         atomic<size_t> orderCount;
         atomic<size_t> waitCount;
+        atomic<size_t> ocoCount;
+        atomic<size_t> ocoWaitCount;
         atomic<size_t> stopCount;
         mutable mutex callMutex;
         optional<CryptoCall> lastBuyCall;
         optional<CryptoCall> lastSellCall;
         optional<PlaceOrderRequest> lastOrderRequest;
+        optional<PlaceOcoRequest> lastOcoRequest;
 
         OrderInfo createDefaultAcceptedOrder() const
         {
@@ -115,7 +152,7 @@ namespace {
                   exchangerType,
                   providePair ? TradablePairLoader([]() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; })
                               : TradablePairLoader()),
-              buyCount(0), sellCount(0), orderCount(0), waitCount(0), stopCount(0)
+              buyCount(0), sellCount(0), orderCount(0), waitCount(0), ocoCount(0), ocoWaitCount(0), stopCount(0)
         {}
 
         void setBuyHandler(CryptoHandler handler)
@@ -136,6 +173,16 @@ namespace {
         void setWaitHandler(WaitHandler handler)
         {
             waitHandler = move(handler);
+        }
+
+        void setOcoHandler(OcoHandler handler)
+        {
+            ocoHandler = move(handler);
+        }
+
+        void setOcoWaitHandler(OcoWaitHandler handler)
+        {
+            ocoWaitHandler = move(handler);
         }
 
         size_t getBuyCount() const
@@ -163,6 +210,16 @@ namespace {
             return stopCount.load();
         }
 
+        size_t getOcoCount() const
+        {
+            return ocoCount.load();
+        }
+
+        size_t getOcoWaitCount() const
+        {
+            return ocoWaitCount.load();
+        }
+
         optional<CryptoCall> getLastBuyCall() const
         {
             lock_guard<mutex> lock(callMutex);
@@ -179,6 +236,12 @@ namespace {
         {
             lock_guard<mutex> lock(callMutex);
             return lastOrderRequest;
+        }
+
+        optional<PlaceOcoRequest> getLastOcoRequest() const
+        {
+            lock_guard<mutex> lock(callMutex);
+            return lastOcoRequest;
         }
 
         OrderInfo buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity) override
@@ -215,6 +278,22 @@ namespace {
         {
             ++waitCount;
             return waitHandler ? waitHandler(symbol, orderId) : createDefaultAcceptedOrder();
+        }
+
+        OcoInfo placeOco(const PlaceOcoRequest &request) override
+        {
+            ++ocoCount;
+            {
+                lock_guard<mutex> lock(callMutex);
+                lastOcoRequest = request;
+            }
+            return ocoHandler ? ocoHandler(request) : createOcoInfo("NEW", "NEW");
+        }
+
+        OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override
+        {
+            ++ocoWaitCount;
+            return ocoWaitHandler ? ocoWaitHandler(ocoInfo) : createOrderInfo("FILLED", "OCO-TP-1");
         }
 
         void stopUserStream() override
@@ -276,6 +355,84 @@ TEST(OrderPlacementModelTest, MapsBuySellAndCustomOrdersToTheSelectedSharedServi
     EXPECT_EQ(limitRequestSnapshot->price.value(), DecimalConverter::parseDecimal("5000"));
     ASSERT_TRUE(limitRequestSnapshot->timeInForce.has_value());
     EXPECT_EQ(limitRequestSnapshot->timeInForce.value(), "GTC");
+}
+
+TEST(OrderPlacementModelTest, MapsOcoOrdersAndShowsAcceptedGroupBeforeAConfirmedChildFill)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    promise<void> releaseWaitPromise;
+    const shared_future<void> releaseWait = releaseWaitPromise.get_future().share();
+    auto binanceService = make_shared<PlacementDealService>(ExchangerType::BINANCE);
+    binanceService->setOcoHandler([](const PlaceOcoRequest &) { return createOcoInfo("NEW", "NEW"); });
+    binanceService->setOcoWaitHandler(
+        [releaseWait](const OcoInfo &)
+        {
+            releaseWait.wait_for(2s);
+            return createOrderInfo("FILLED", "OCO-SL-1");
+        });
+    auto bybitService = make_shared<PlacementDealService>(ExchangerType::BYBIT);
+    OrderPlacementModel model(taskExecutor, binanceService, bybitService);
+
+    const OcoOrderDraft draft = createOcoDraft(ExchangerType::BINANCE);
+    EXPECT_TRUE(model.placeOco(draft));
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::WAITING, 1000);
+    ASSERT_TRUE(model.getAcceptedOco().has_value());
+    EXPECT_EQ(model.getAcceptedOco()->orderListId, "OCO-GROUP-1");
+    EXPECT_EQ(model.getAcceptedOco()->takeProfitOrder.orderId, "OCO-TP-1");
+    EXPECT_EQ(model.getAcceptedOco()->stopLossOrder.orderId, "OCO-SL-1");
+    const optional<PlaceOcoRequest> requestSnapshot = binanceService->getLastOcoRequest();
+    ASSERT_TRUE(requestSnapshot.has_value());
+    const PlaceOcoRequest &request = requestSnapshot.value();
+    EXPECT_EQ(request.symbol, "BTCUSDT");
+    EXPECT_EQ(request.side, OrderOperation::SELL);
+    EXPECT_EQ(request.quantity, DecimalConverter::parseDecimal("0.01"));
+    EXPECT_EQ(request.price, DecimalConverter::parseDecimal("60000"));
+    EXPECT_EQ(request.stopPrice, DecimalConverter::parseDecimal("50000"));
+    ASSERT_TRUE(request.stopLimitPrice.has_value());
+    EXPECT_EQ(request.stopLimitPrice.value(), DecimalConverter::parseDecimal("49900"));
+    ASSERT_TRUE(request.stopLimitTimeInForce.has_value());
+    EXPECT_EQ(request.stopLimitTimeInForce.value(), "GTC");
+    EXPECT_FALSE(model.placeOrder(createDraft(ExchangerType::BINANCE, OperationType::BUY_CRYPTO)));
+
+    releaseWaitPromise.set_value();
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::FILLED, 1000);
+    ASSERT_TRUE(model.getTerminalOrder().has_value());
+    EXPECT_EQ(model.getTerminalOrder()->orderId, "OCO-SL-1");
+    EXPECT_EQ(model.getTerminalOrder()->status, "FILLED");
+
+    binanceService->setOcoHandler([](const PlaceOcoRequest &) { return createOcoInfo("FILLED", "NEW", "OCO-TP"); });
+    EXPECT_TRUE(model.placeOco(createOcoDraft(ExchangerType::BINANCE)));
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::FILLED, 1000);
+    ASSERT_TRUE(model.getTerminalOrder().has_value());
+    EXPECT_EQ(model.getTerminalOrder()->orderId, "OCO-TP-1");
+    EXPECT_EQ(binanceService->getOcoWaitCount(), 1u);
+}
+
+TEST(OrderPlacementModelTest, PreservesOcoPlacementAndMonitoringFailuresWithAcceptedGroupDetails)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    auto binanceService = make_shared<PlacementDealService>(ExchangerType::BINANCE);
+    binanceService->setOcoHandler(
+        [](const PlaceOcoRequest &) -> OcoInfo
+        { throw runtime_error("Binance placeOco: private validation rejected the stop leg"); });
+    auto bybitService = make_shared<PlacementDealService>(ExchangerType::BYBIT);
+    OrderPlacementModel model(taskExecutor, binanceService, bybitService);
+
+    EXPECT_TRUE(model.placeOco(createOcoDraft(ExchangerType::BINANCE)));
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::SUBMISSION_FAILED, 1000);
+    EXPECT_EQ(model.getError(), QString("Binance placeOco: private validation rejected the stop leg"));
+    EXPECT_FALSE(model.getAcceptedOco().has_value());
+
+    binanceService->setOcoHandler([](const PlaceOcoRequest &) { return createOcoInfo("NEW", "NEW", "OCO-2"); });
+    binanceService->setOcoWaitHandler([](const OcoInfo &) -> OrderInfo
+                                      { throw runtime_error("unfilled child cleanup failed after stream error"); });
+    EXPECT_TRUE(model.placeOco(createOcoDraft(ExchangerType::BINANCE)));
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::WAIT_FAILED, 1000);
+    EXPECT_EQ(model.getError(), QString("unfilled child cleanup failed after stream error"));
+    ASSERT_TRUE(model.getAcceptedOco().has_value());
+    EXPECT_EQ(model.getAcceptedOco()->orderListId, "OCO-2");
 }
 
 TEST(OrderPlacementModelTest, ShowsAcceptedWaitingAndFilledStatesAndRejectsASecondActiveOrder)
@@ -374,6 +531,39 @@ TEST(OrderPlacementModelTest, StopsStreamsBeforeJoiningAPendingOrderWait)
     OrderPlacementModel model(taskExecutor, binanceService, bybitService);
 
     EXPECT_TRUE(model.placeOrder(createDraft(ExchangerType::BINANCE, OperationType::BUY_CRYPTO)));
+    QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::WAITING, 1000);
+    stopRequested = true;
+    binanceService->stopUserStream();
+    bybitService->stopUserStream();
+
+    const auto startedAt = chrono::steady_clock::now();
+    taskExecutor.stopAndWait();
+    EXPECT_LT(chrono::steady_clock::now() - startedAt, 1s);
+    EXPECT_EQ(binanceService->getStopCount(), 1u);
+    EXPECT_EQ(bybitService->getStopCount(), 1u);
+}
+
+TEST(OrderPlacementModelTest, StopsStreamsBeforeJoiningAPendingOcoWait)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    atomic<bool> stopRequested = false;
+    auto binanceService = make_shared<PlacementDealService>(ExchangerType::BINANCE);
+    binanceService->setOcoHandler([](const PlaceOcoRequest &) { return createOcoInfo("NEW", "NEW"); });
+    binanceService->setOcoWaitHandler(
+        [&stopRequested](const OcoInfo &) -> OrderInfo
+        {
+            const auto deadline = chrono::steady_clock::now() + 2s;
+            while (!stopRequested.load() && chrono::steady_clock::now() < deadline)
+            {
+                this_thread::yield();
+            }
+            throw runtime_error("OCO stream stopped during shutdown");
+        });
+    auto bybitService = make_shared<PlacementDealService>(ExchangerType::BYBIT);
+    OrderPlacementModel model(taskExecutor, binanceService, bybitService);
+
+    EXPECT_TRUE(model.placeOco(createOcoDraft(ExchangerType::BINANCE)));
     QTRY_COMPARE_WITH_TIMEOUT(model.getStatus(), OrderPlacementModel::Status::WAITING, 1000);
     stopRequested = true;
     binanceService->stopUserStream();
@@ -555,5 +745,115 @@ TEST(OrderPlacementModelTest, PlacesOnlyAfterConfirmationAndShowsAcceptedThenFil
     QTRY_COMPARE_WITH_TIMEOUT(orderPlacementModel.getStatus(), OrderPlacementModel::Status::FILLED, 1000);
     EXPECT_EQ(placementTitle->text(), QString("Order filled"));
     EXPECT_TRUE(placementDetails->text().contains("Exchange status: FILLED"));
+    EXPECT_TRUE(proceedButton->isEnabled());
+}
+
+TEST(OrderPlacementModelTest, ConfirmsOcoPlacementAndShowsGroupChildrenAndConfirmedFilledChild)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    PairCatalog pairCatalog;
+    promise<void> releaseWaitPromise;
+    const shared_future<void> releaseWait = releaseWaitPromise.get_future().share();
+    auto binanceService = make_shared<PlacementDealService>(ExchangerType::BINANCE, true);
+    binanceService->setOcoHandler([](const PlaceOcoRequest &) { return createOcoInfo("NEW", "NEW", "UI-OCO-1"); });
+    binanceService->setOcoWaitHandler(
+        [releaseWait](const OcoInfo &)
+        {
+            releaseWait.wait_for(2s);
+            return createOrderInfo("FILLED", "OCO-SL-1");
+        });
+    auto bybitService = make_shared<PlacementDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
+    auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
+    auto *ocoSideSelector = window.findChild<QComboBox *>("placeOcoSideSelector");
+    auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
+    auto *limitPriceInput = window.findChild<QLineEdit *>("placeOcoLimitPriceInput");
+    auto *stopPriceInput = window.findChild<QLineEdit *>("placeOcoStopPriceInput");
+    auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
+    auto *placementTitle = window.findChild<QLabel *>("orderPlacementStatusTitle");
+    auto *placementDetails = window.findChild<QLabel *>("orderPlacementStatusDetails");
+
+    ASSERT_NE(symbolStatus, nullptr);
+    ASSERT_NE(operationSelector, nullptr);
+    ASSERT_NE(ocoSideSelector, nullptr);
+    ASSERT_NE(amountInput, nullptr);
+    ASSERT_NE(limitPriceInput, nullptr);
+    ASSERT_NE(stopPriceInput, nullptr);
+    ASSERT_NE(proceedButton, nullptr);
+    ASSERT_NE(placementTitle, nullptr);
+    ASSERT_NE(placementDetails, nullptr);
+
+    window.show();
+    pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
+    QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(), QString("Trading rules are ready for BTCUSDT."), 1000);
+    operationSelector->setCurrentText("Place OCO");
+    ocoSideSelector->setCurrentText("Sell");
+    amountInput->setText("0.010");
+    limitPriceInput->setText("60000");
+    stopPriceInput->setText("50000");
+    ASSERT_TRUE(proceedButton->isEnabled());
+
+    bool reviewedSummary = false;
+    QTimer::singleShot(0,
+                       [&reviewedSummary]()
+                       {
+                           auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                           if (dialog == nullptr)
+                           {
+                               return;
+                           }
+                           auto *summary = dialog->findChild<QLabel *>("orderConfirmationSummary");
+                           auto *cancelButton = dialog->findChild<QPushButton *>("cancelOrderConfirmationButton");
+                           if (summary != nullptr && cancelButton != nullptr)
+                           {
+                               reviewedSummary = summary->text().contains("Operation: Place OCO") &&
+                                                 summary->text().contains("Limit leg: 60000 USDT per BTC") &&
+                                                 summary->text().contains("Stop trigger: 50000 USDT per BTC");
+                               QTest::mouseClick(cancelButton, Qt::LeftButton);
+                           }
+                       });
+    QTest::mouseClick(proceedButton, Qt::LeftButton);
+
+    EXPECT_TRUE(reviewedSummary);
+    EXPECT_EQ(binanceService->getOcoCount(), 0u);
+    EXPECT_EQ(orderPlacementModel.getStatus(), OrderPlacementModel::Status::IDLE);
+
+    QTimer::singleShot(0,
+                       []()
+                       {
+                           auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                           if (dialog != nullptr)
+                           {
+                               auto *placeButton = dialog->findChild<QPushButton *>("placeConfirmedOrderButton");
+                               if (placeButton != nullptr)
+                               {
+                                   QTest::mouseClick(placeButton, Qt::LeftButton);
+                               }
+                           }
+                       });
+    QTest::mouseClick(proceedButton, Qt::LeftButton);
+
+    QTRY_COMPARE_WITH_TIMEOUT(orderPlacementModel.getStatus(), OrderPlacementModel::Status::WAITING, 1000);
+    EXPECT_EQ(placementTitle->text(), QString("OCO order accepted · waiting for a confirmed child fill"));
+    EXPECT_TRUE(placementDetails->text().contains("OCO group ID: UI-OCO-1"));
+    EXPECT_TRUE(placementDetails->text().contains("Take-profit child ID: OCO-TP-1"));
+    EXPECT_TRUE(placementDetails->text().contains("Stop-loss child ID: OCO-SL-1"));
+    const optional<PlaceOcoRequest> requestSnapshot = binanceService->getLastOcoRequest();
+    ASSERT_TRUE(requestSnapshot.has_value());
+    EXPECT_EQ(requestSnapshot->side, OrderOperation::SELL);
+    EXPECT_FALSE(requestSnapshot->stopLimitPrice.has_value());
+    EXPECT_FALSE(requestSnapshot->stopLimitTimeInForce.has_value());
+    EXPECT_FALSE(proceedButton->isEnabled());
+
+    releaseWaitPromise.set_value();
+    QTRY_COMPARE_WITH_TIMEOUT(orderPlacementModel.getStatus(), OrderPlacementModel::Status::FILLED, 1000);
+    EXPECT_EQ(placementTitle->text(), QString("OCO child order filled"));
+    EXPECT_TRUE(placementDetails->text().contains("Confirmed filled child ID: OCO-SL-1"));
     EXPECT_TRUE(proceedButton->isEnabled());
 }

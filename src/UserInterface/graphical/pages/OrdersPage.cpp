@@ -169,6 +169,22 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog,
 
 void OrdersPage::requestOrderConfirmation()
 {
+    if (orderEntryForm->getSelectedOperation() == OperationType::PLACE_OCO)
+    {
+        const optional<OcoOrderDraft> draft = orderEntryForm->createOcoOrderDraft();
+        if (!draft.has_value())
+        {
+            return;
+        }
+
+        OrderConfirmationDialog confirmationDialog(draft.value(), this);
+        if (confirmationDialog.exec() == QDialog::Accepted)
+        {
+            orderPlacementModel.placeOco(draft.value());
+        }
+        return;
+    }
+
     const optional<BasicOrderDraft> draft = orderEntryForm->createBasicOrderDraft();
     if (!draft.has_value())
     {
@@ -186,8 +202,11 @@ void OrdersPage::updatePlacementStatus()
 {
     const OrderPlacementModel::Status status = orderPlacementModel.getStatus();
     const optional<BasicOrderDraft> &draft = orderPlacementModel.getCurrentDraft();
+    const optional<OcoOrderDraft> &ocoDraft = orderPlacementModel.getCurrentOcoDraft();
     const optional<OrderInfo> &acceptedOrder = orderPlacementModel.getAcceptedOrder();
+    const optional<OcoInfo> &acceptedOco = orderPlacementModel.getAcceptedOco();
     const optional<OrderInfo> &terminalOrder = orderPlacementModel.getTerminalOrder();
+    const bool isOcoPlacement = ocoDraft.has_value();
     QString details;
 
     if (draft.has_value())
@@ -195,10 +214,33 @@ void OrdersPage::updatePlacementStatus()
         details = QString::fromStdString(draft->pair.baseAsset + "/" + draft->pair.quoteAsset) + " · " +
                   QString::fromStdString(draft->quantityText) + " " + QString::fromStdString(draft->pair.baseAsset);
     }
+    else if (ocoDraft.has_value())
+    {
+        details = QString::fromStdString(ocoDraft->pair.baseAsset + "/" + ocoDraft->pair.quoteAsset) + " · " +
+                  QString::fromStdString(ocoDraft->quantityText) + " " +
+                  QString::fromStdString(ocoDraft->pair.baseAsset) +
+                  "\nLimit leg: " + QString::fromStdString(ocoDraft->limitPriceText) + " " +
+                  QString::fromStdString(ocoDraft->pair.quoteAsset) +
+                  "\nStop trigger: " + QString::fromStdString(ocoDraft->stopPriceText) + " " +
+                  QString::fromStdString(ocoDraft->pair.quoteAsset);
+        if (ocoDraft->stopLimitPriceText.has_value())
+        {
+            details += "\nStop-limit leg: " + QString::fromStdString(ocoDraft->stopLimitPriceText.value()) + " " +
+                       QString::fromStdString(ocoDraft->pair.quoteAsset);
+        }
+    }
     if (acceptedOrder.has_value())
     {
         details += "\nOrder ID: " + QString::fromStdString(acceptedOrder->orderId) +
                    " · Exchange status: " + QString::fromStdString(acceptedOrder->status);
+    }
+    else if (acceptedOco.has_value())
+    {
+        details += "\nOCO group ID: " + QString::fromStdString(acceptedOco->orderListId) +
+                   "\nTake-profit child ID: " + QString::fromStdString(acceptedOco->takeProfitOrder.orderId) +
+                   " · Exchange status: " + QString::fromStdString(acceptedOco->takeProfitOrder.status) +
+                   "\nStop-loss child ID: " + QString::fromStdString(acceptedOco->stopLossOrder.orderId) +
+                   " · Exchange status: " + QString::fromStdString(acceptedOco->stopLossOrder.status);
     }
 
     placementStatusError->hide();
@@ -209,40 +251,50 @@ void OrdersPage::updatePlacementStatus()
         placementStatusPanel->hide();
         break;
     case OrderPlacementModel::Status::SUBMITTING:
-        placementStatusTitle->setText("Submitting order");
+        placementStatusTitle->setText(isOcoPlacement ? "Submitting OCO order" : "Submitting order");
         placementStatusDetails->setText(details);
         placementStatusPanel->show();
         break;
     case OrderPlacementModel::Status::ACCEPTED:
-        placementStatusTitle->setText("Order accepted");
+        placementStatusTitle->setText(isOcoPlacement ? "OCO order accepted" : "Order accepted");
         placementStatusDetails->setText(details);
         placementStatusPanel->show();
         break;
     case OrderPlacementModel::Status::WAITING:
-        placementStatusTitle->setText("Order accepted · waiting for a confirmed fill");
+        placementStatusTitle->setText(isOcoPlacement ? "OCO order accepted · waiting for a confirmed child fill"
+                                                     : "Order accepted · waiting for a confirmed fill");
         placementStatusDetails->setText(details);
         placementStatusPanel->show();
         break;
     case OrderPlacementModel::Status::FILLED:
         if (terminalOrder.has_value())
         {
-            details = QString::fromStdString(terminalOrder->symbol) +
-                      "\nOrder ID: " + QString::fromStdString(terminalOrder->orderId) +
-                      " · Exchange status: " + QString::fromStdString(terminalOrder->status);
+            if (isOcoPlacement)
+            {
+                details += "\nConfirmed filled child ID: " + QString::fromStdString(terminalOrder->orderId) +
+                           " · Exchange status: " + QString::fromStdString(terminalOrder->status);
+            }
+            else
+            {
+                details = QString::fromStdString(terminalOrder->symbol) +
+                          "\nOrder ID: " + QString::fromStdString(terminalOrder->orderId) +
+                          " · Exchange status: " + QString::fromStdString(terminalOrder->status);
+            }
         }
-        placementStatusTitle->setText("Order filled");
+        placementStatusTitle->setText(isOcoPlacement ? "OCO child order filled" : "Order filled");
         placementStatusDetails->setText(details);
         placementStatusPanel->show();
         break;
     case OrderPlacementModel::Status::SUBMISSION_FAILED:
-        placementStatusTitle->setText("Order placement failed");
+        placementStatusTitle->setText(isOcoPlacement ? "OCO placement failed" : "Order placement failed");
         placementStatusDetails->setText(details);
         placementStatusError->setText(orderPlacementModel.getError());
         placementStatusError->show();
         placementStatusPanel->show();
         break;
     case OrderPlacementModel::Status::WAIT_FAILED:
-        placementStatusTitle->setText("Order accepted · status monitoring failed");
+        placementStatusTitle->setText(isOcoPlacement ? "OCO accepted · status monitoring or cleanup failed"
+                                                     : "Order accepted · status monitoring failed");
         placementStatusDetails->setText(details);
         placementStatusError->setText(orderPlacementModel.getError());
         placementStatusError->show();

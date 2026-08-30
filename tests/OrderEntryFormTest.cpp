@@ -254,10 +254,13 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     finishEditing(*stopPriceInput);
 
     limitPriceInput->setText("5000");
+    EXPECT_EQ(formError->text(), QString("Stop leg: Notional 7.8 is below the minimum 10."));
+    EXPECT_TRUE(formError->isVisible());
     EXPECT_FALSE(proceedButton->isEnabled());
-    EXPECT_TRUE(placementAvailability->isVisible());
-    EXPECT_EQ(placementAvailability->text(),
-              QString("OCO confirmation and placement will be enabled in the next GUI step."));
+
+    stopPriceInput->setText("5000");
+    EXPECT_FALSE(placementAvailability->isVisible());
+    EXPECT_TRUE(proceedButton->isEnabled());
 
     useStopLimit->setChecked(true);
     EXPECT_FALSE(proceedButton->isEnabled());
@@ -271,7 +274,7 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     stopLimitPriceInput->setText("4900");
     EXPECT_FALSE(proceedButton->isEnabled());
     stopLimitPriceInput->setText("5000");
-    EXPECT_FALSE(proceedButton->isEnabled());
+    EXPECT_TRUE(proceedButton->isEnabled());
 }
 
 TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSelectedPair)
