@@ -1,6 +1,7 @@
 #include "BinanceDealService.hpp"
 #include "EnumStringConverter.hpp"
 #include "common/HttpRequestContext.hpp"
+#include "common/OrderStatusUtil.hpp"
 #include "common/SymbolRuleValidator.hpp"
 #include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
@@ -22,7 +23,6 @@
 #include "domain/UserStreamSubscribeRequestDto.hpp"
 
 #include <chrono>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 // DEBUG
@@ -36,12 +36,6 @@ using namespace binance;
 using namespace exception_handling;
 
 namespace {
-    const set<string> BINANCE_TERMINAL_ORDER_STATUSES = {"FILLED",
-                                                         "CANCELED",
-                                                         "REJECTED",
-                                                         "EXPIRED",
-                                                         "EXPIRED_IN_MATCH"};
-
     string getErrorMessage(const ErrorDto &error)
     {
         const long long code = error.code.value_or(0);
@@ -108,12 +102,12 @@ BinanceDealService::OrderKey BinanceDealService::getOrderKey(const string &symbo
 
 bool BinanceDealService::isOrderFilled(const string &status)
 {
-    return status == "FILLED";
+    return OrderStatusUtil::isOrderFilled(ExchangerType::BINANCE, status);
 }
 
 bool BinanceDealService::isOrderTerminal(const string &status)
 {
-    return BINANCE_TERMINAL_ORDER_STATUSES.contains(status);
+    return OrderStatusUtil::isOrderTerminal(ExchangerType::BINANCE, status);
 }
 
 void BinanceDealService::registerPendingOrder(const OrderKey &orderKey)

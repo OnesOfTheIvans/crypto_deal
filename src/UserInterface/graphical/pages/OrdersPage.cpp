@@ -12,8 +12,11 @@
 
 #include <QDateTime>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QTabWidget>
 #include <QTreeWidget>
@@ -200,6 +203,10 @@ namespace {
             status = entry.type == OrderSessionModel::EntryType::OCO_GROUP ? "Confirmed child filled; sibling terminal"
                                                                            : "Filled";
             break;
+        case OrderSessionModel::Status::TERMINAL:
+            status = entry.type == OrderSessionModel::EntryType::OCO_GROUP ? "OCO terminal without a filled child"
+                                                                           : "Terminal without fill";
+            break;
         case OrderSessionModel::Status::SUBMISSION_FAILED:
             status = "Submission failed";
             break;
@@ -211,7 +218,67 @@ namespace {
         {
             status += "\n" + entry.error;
         }
+        if (entry.type == OrderSessionModel::EntryType::BASIC_ORDER)
+        {
+            const OrderInfo *orderInfo = getDisplayedBasicOrder(entry);
+            if (orderInfo != nullptr && !orderInfo->status.empty())
+            {
+                status += "\nExchange: " + QString::fromStdString(orderInfo->status);
+                if (!orderInfo->statusReason.empty())
+                {
+                    status += " · " + QString::fromStdString(orderInfo->statusReason);
+                }
+            }
+        }
+        switch (entry.action)
+        {
+        case OrderSessionModel::Action::NONE:
+            break;
+        case OrderSessionModel::Action::REFRESHING:
+            status += "\nRefreshing exchange status...";
+            break;
+        case OrderSessionModel::Action::CANCELLING:
+            status +=
+                entry.type == OrderSessionModel::EntryType::OCO_GROUP ? "\nCancelling OCO..." : "\nCancelling order...";
+            break;
+        case OrderSessionModel::Action::CANCELLING_ALL:
+            status += "\nCancelling all open orders for this exchange/pair...";
+            break;
+        }
+        if (!entry.actionMessage.isEmpty())
+        {
+            status += "\n" + entry.actionMessage;
+        }
+        if (!entry.actionError.isEmpty())
+        {
+            status += "\n" + entry.actionError;
+        }
         return status;
+    }
+
+    QString getEntryIdentifier(const OrderSessionModel::Entry &entry)
+    {
+        if (entry.type == OrderSessionModel::EntryType::OCO_GROUP)
+        {
+            return entry.acceptedOco.has_value() && !entry.acceptedOco->orderListId.empty()
+                       ? QString::fromStdString(entry.acceptedOco->orderListId)
+                       : "Session #" + QString::number(entry.id);
+        }
+
+        const OrderInfo *orderInfo = getDisplayedBasicOrder(entry);
+        return orderInfo != nullptr && !orderInfo->orderId.empty() ? QString::fromStdString(orderInfo->orderId)
+                                                                   : "Session #" + QString::number(entry.id);
+    }
+
+    const TradablePair &getEntryPair(const OrderSessionModel::Entry &entry)
+    {
+        return entry.type == OrderSessionModel::EntryType::BASIC_ORDER ? entry.basicDraft->pair : entry.ocoDraft->pair;
+    }
+
+    ExchangerType getEntryExchangerType(const OrderSessionModel::Entry &entry)
+    {
+        return entry.type == OrderSessionModel::EntryType::BASIC_ORDER ? entry.basicDraft->exchangerType
+                                                                       : entry.ocoDraft->exchangerType;
     }
 
     void setEntryId(QTreeWidgetItem &item, OrderSessionModel::EntryId entryId)
@@ -347,6 +414,8 @@ namespace {
                                 "Status"});
         table->setRootIsDecorated(true);
         table->setItemsExpandable(false);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setSelectionMode(QAbstractItemView::SingleSelection);
         table->setWordWrap(true);
         table->setAlternatingRowColors(true);
         table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -374,7 +443,9 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog,
     : QWidget(parent), pairCatalog(pairCatalog), balanceCatalog(balanceCatalog), symbolInfoCatalog(symbolInfoCatalog),
       orderSessionModel(orderSessionModel), binanceCatalogStatus(nullptr), bybitCatalogStatus(nullptr),
       orderEntryForm(nullptr), activeOrdersEmptyState(nullptr), allSessionOrdersEmptyState(nullptr),
-      activeOrdersTable(nullptr), allSessionOrdersTable(nullptr)
+      activeOrdersTable(nullptr), allSessionOrdersTable(nullptr), sessionOrdersTabs(nullptr),
+      sessionOrderActionContext(nullptr), refreshSessionOrderButton(nullptr), cancelSessionOrderButton(nullptr),
+      cancelAllSessionOrdersButton(nullptr), updatingSessionOrderTables(false)
 {
     setObjectName("ordersPage");
     setProperty("primaryPage", true);
@@ -474,12 +545,48 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog,
     sessionOrdersTitle->setProperty("placeholderTitle", true);
 
     auto *sessionOrdersDescription =
-        new QLabel("Orders placed in this session only. Refresh and cancellation actions arrive in the next step.",
+        new QLabel("Orders placed in this session only. Select a row to refresh or cancel it, or to cancel all open "
+                   "orders for its exchange and pair.",
                    sessionOrdersWorkspace);
     sessionOrdersDescription->setProperty("placeholderDescription", true);
     sessionOrdersDescription->setWordWrap(true);
 
-    auto *sessionOrdersTabs = new QTabWidget(sessionOrdersWorkspace);
+    auto *sessionOrderActionBar = new QWidget(sessionOrdersWorkspace);
+    sessionOrderActionBar->setObjectName("sessionOrderActionBar");
+    sessionOrderActionBar->setProperty("sessionOrderActionBar", true);
+    auto *sessionOrderActionLayout = new QVBoxLayout(sessionOrderActionBar);
+    sessionOrderActionLayout->setContentsMargins(0, 0, 0, 0);
+    sessionOrderActionLayout->setSpacing(ORDER_FORM_FEEDBACK_SPACING);
+
+    sessionOrderActionContext = new QLabel("Select a session order to refresh or cancel it.", sessionOrderActionBar);
+    sessionOrderActionContext->setObjectName("sessionOrderActionContext");
+    sessionOrderActionContext->setProperty("sessionOrderActionContext", true);
+    sessionOrderActionContext->setWordWrap(true);
+
+    auto *sessionOrderActionButtons = new QHBoxLayout();
+    sessionOrderActionButtons->setContentsMargins(0, 0, 0, 0);
+    sessionOrderActionButtons->setSpacing(ORDER_FORM_FEEDBACK_SPACING);
+
+    refreshSessionOrderButton = new QPushButton("Refresh status", sessionOrderActionBar);
+    refreshSessionOrderButton->setObjectName("refreshSessionOrderButton");
+    refreshSessionOrderButton->setProperty("secondaryOrderAction", true);
+
+    cancelSessionOrderButton = new QPushButton("Cancel order", sessionOrderActionBar);
+    cancelSessionOrderButton->setObjectName("cancelSessionOrderButton");
+    cancelSessionOrderButton->setProperty("secondaryOrderAction", true);
+
+    cancelAllSessionOrdersButton = new QPushButton("Cancel all for selected pair", sessionOrderActionBar);
+    cancelAllSessionOrdersButton->setObjectName("cancelAllSessionOrdersButton");
+    cancelAllSessionOrdersButton->setProperty("dangerOrderAction", true);
+
+    sessionOrderActionButtons->addWidget(refreshSessionOrderButton);
+    sessionOrderActionButtons->addWidget(cancelSessionOrderButton);
+    sessionOrderActionButtons->addWidget(cancelAllSessionOrdersButton);
+    sessionOrderActionButtons->addStretch();
+    sessionOrderActionLayout->addWidget(sessionOrderActionContext);
+    sessionOrderActionLayout->addLayout(sessionOrderActionButtons);
+
+    sessionOrdersTabs = new QTabWidget(sessionOrdersWorkspace);
     sessionOrdersTabs->setObjectName("sessionOrdersTabs");
     sessionOrdersTabs->setProperty("sessionOrdersTabs", true);
     sessionOrdersTabs->addTab(createSessionOrderView(sessionOrdersTabs,
@@ -497,12 +604,29 @@ OrdersPage::OrdersPage(PairCatalog &pairCatalog,
 
     connect(orderEntryForm, &OrderEntryForm::requestConfirmation, this, &OrdersPage::requestOrderConfirmation);
     connect(&orderSessionModel, &OrderSessionModel::entriesChanged, this, &OrdersPage::updateSessionOrderTables);
+    connect(activeOrdersTable, &QTreeWidget::itemSelectionChanged, this, &OrdersPage::updateSessionOrderSelection);
+    connect(allSessionOrdersTable, &QTreeWidget::itemSelectionChanged, this, &OrdersPage::updateSessionOrderSelection);
+    connect(sessionOrdersTabs,
+            &QTabWidget::currentChanged,
+            this,
+            [this](int)
+            {
+                updatingSessionOrderTables = true;
+                restoreSessionOrderSelection(*getCurrentSessionOrderTable());
+                updatingSessionOrderTables = false;
+                updateSessionOrderSelection();
+            });
+    connect(refreshSessionOrderButton, &QPushButton::clicked, this, &OrdersPage::refreshSelectedSessionOrder);
+    connect(cancelSessionOrderButton, &QPushButton::clicked, this, &OrdersPage::cancelSelectedSessionOrder);
+    connect(cancelAllSessionOrdersButton, &QPushButton::clicked, this, &OrdersPage::cancelAllSelectedSessionOrders);
 
     workspaceLayout->addWidget(orderEntryForm);
     sessionOrdersLayout->addWidget(sessionOrdersTitle);
     sessionOrdersLayout->addWidget(sessionOrdersDescription);
+    sessionOrdersLayout->addWidget(sessionOrderActionBar);
     sessionOrdersLayout->addWidget(sessionOrdersTabs, 1);
     updateSessionOrderTables();
+    updateSessionOrderActions();
 
     workspaceContentLayout->addWidget(workspaceCard);
     workspaceContentLayout->addStretch();
@@ -550,8 +674,12 @@ void OrdersPage::requestOrderConfirmation()
 
 void OrdersPage::updateSessionOrderTables()
 {
+    updatingSessionOrderTables = true;
     updateSessionOrderTable(*activeOrdersTable, *activeOrdersEmptyState, true);
     updateSessionOrderTable(*allSessionOrdersTable, *allSessionOrdersEmptyState, false);
+    restoreSessionOrderSelection(*getCurrentSessionOrderTable());
+    updatingSessionOrderTables = false;
+    updateSessionOrderSelection();
 }
 
 void OrdersPage::updateSessionOrderTable(QTreeWidget &table, QLabel &emptyState, bool showOnlyActiveOrders)
@@ -577,6 +705,210 @@ void OrdersPage::updateSessionOrderTable(QTreeWidget &table, QLabel &emptyState,
     const bool hasRows = table.topLevelItemCount() > 0;
     emptyState.setVisible(!hasRows);
     table.setVisible(hasRows);
+}
+
+void OrdersPage::updateSessionOrderSelection()
+{
+    if (updatingSessionOrderTables)
+    {
+        return;
+    }
+
+    QTreeWidget *table = getCurrentSessionOrderTable();
+    QTreeWidgetItem *item = table->currentItem();
+    if (item == nullptr)
+    {
+        selectedSessionEntryId.reset();
+    }
+    else
+    {
+        selectedSessionEntryId = item->data(UPDATED_AT_COLUMN, Qt::UserRole).toULongLong();
+    }
+    updateSessionOrderActions();
+}
+
+void OrdersPage::updateSessionOrderActions()
+{
+    refreshSessionOrderButton->setText("Refresh status");
+    cancelSessionOrderButton->setText("Cancel order");
+    cancelAllSessionOrdersButton->setText("Cancel all for selected pair");
+    refreshSessionOrderButton->setEnabled(false);
+    cancelSessionOrderButton->setEnabled(false);
+    cancelAllSessionOrdersButton->setEnabled(false);
+
+    if (!selectedSessionEntryId.has_value())
+    {
+        sessionOrderActionContext->setText("Select a session order to refresh or cancel it.");
+        return;
+    }
+
+    const OrderSessionModel::Entry *entry = orderSessionModel.findEntryById(selectedSessionEntryId.value());
+    if (entry == nullptr)
+    {
+        selectedSessionEntryId.reset();
+        sessionOrderActionContext->setText("Select a session order to refresh or cancel it.");
+        return;
+    }
+
+    const ExchangerType exchangerType = getEntryExchangerType(*entry);
+    const TradablePair &pair = getEntryPair(*entry);
+    const QString exchangeName = getExchangeName(exchangerType);
+    const QString pairName = getPairName(pair);
+    sessionOrderActionContext->setText("Selected: " + exchangeName + " " + pairName + " · " +
+                                       getEntryIdentifier(*entry));
+    cancelSessionOrderButton->setText(entry->type == OrderSessionModel::EntryType::OCO_GROUP ? "Cancel OCO"
+                                                                                             : "Cancel order");
+    cancelAllSessionOrdersButton->setText("Cancel all for " + exchangeName + " " + pairName);
+
+    if (entry->action == OrderSessionModel::Action::REFRESHING)
+    {
+        refreshSessionOrderButton->setText("Refreshing...");
+    }
+    else if (entry->action == OrderSessionModel::Action::CANCELLING)
+    {
+        cancelSessionOrderButton->setText(
+            entry->type == OrderSessionModel::EntryType::OCO_GROUP ? "Cancelling OCO..." : "Cancelling order...");
+    }
+    else if (entry->action == OrderSessionModel::Action::CANCELLING_ALL)
+    {
+        cancelAllSessionOrdersButton->setText("Cancelling all...");
+    }
+
+    refreshSessionOrderButton->setEnabled(orderSessionModel.canRefreshOrder(entry->id));
+    cancelSessionOrderButton->setEnabled(orderSessionModel.canCancelOrder(entry->id));
+    cancelAllSessionOrdersButton->setEnabled(orderSessionModel.canCancelAllOpenOrders(entry->id));
+}
+
+void OrdersPage::restoreSessionOrderSelection(QTreeWidget &table)
+{
+    if (!selectedSessionEntryId.has_value())
+    {
+        return;
+    }
+
+    QTreeWidgetItem *item = findSessionOrderItem(table, selectedSessionEntryId.value());
+    if (item != nullptr)
+    {
+        table.setCurrentItem(item);
+    }
+}
+
+QTreeWidget *OrdersPage::getCurrentSessionOrderTable() const
+{
+    return sessionOrdersTabs->currentIndex() == 0 ? activeOrdersTable : allSessionOrdersTable;
+}
+
+QTreeWidgetItem *OrdersPage::findSessionOrderItem(QTreeWidget &table, uint64_t entryId) const
+{
+    for (int topLevelIndex = 0; topLevelIndex < table.topLevelItemCount(); ++topLevelIndex)
+    {
+        QTreeWidgetItem *topLevelItem = table.topLevelItem(topLevelIndex);
+        if (topLevelItem->data(UPDATED_AT_COLUMN, Qt::UserRole).toULongLong() == entryId)
+        {
+            return topLevelItem;
+        }
+        for (int childIndex = 0; childIndex < topLevelItem->childCount(); ++childIndex)
+        {
+            QTreeWidgetItem *childItem = topLevelItem->child(childIndex);
+            if (childItem->data(UPDATED_AT_COLUMN, Qt::UserRole).toULongLong() == entryId)
+            {
+                return childItem;
+            }
+        }
+    }
+    return nullptr;
+}
+
+void OrdersPage::refreshSelectedSessionOrder()
+{
+    if (selectedSessionEntryId.has_value())
+    {
+        orderSessionModel.refreshOrder(selectedSessionEntryId.value());
+    }
+}
+
+void OrdersPage::cancelSelectedSessionOrder()
+{
+    if (selectedSessionEntryId.has_value() && confirmSelectedOrderCancellation())
+    {
+        orderSessionModel.cancelOrder(selectedSessionEntryId.value());
+    }
+}
+
+void OrdersPage::cancelAllSelectedSessionOrders()
+{
+    if (selectedSessionEntryId.has_value() && confirmSelectedPairCancellation())
+    {
+        orderSessionModel.cancelAllOpenOrders(selectedSessionEntryId.value());
+    }
+}
+
+bool OrdersPage::confirmSelectedOrderCancellation()
+{
+    if (!selectedSessionEntryId.has_value())
+    {
+        return false;
+    }
+
+    const OrderSessionModel::Entry *entry = orderSessionModel.findEntryById(selectedSessionEntryId.value());
+    if (entry == nullptr || !orderSessionModel.canCancelOrder(entry->id))
+    {
+        return false;
+    }
+
+    const QString action = entry->type == OrderSessionModel::EntryType::OCO_GROUP ? "Cancel OCO" : "Cancel order";
+    const QString target = entry->type == OrderSessionModel::EntryType::OCO_GROUP ? "OCO group " : "order ";
+    QMessageBox confirmation(QMessageBox::Warning,
+                             action + "?",
+                             "Cancel " + target + getEntryIdentifier(*entry) + " on " +
+                                 getExchangeName(getEntryExchangerType(*entry)) + " for " +
+                                 getPairName(getEntryPair(*entry)) + "?",
+                             QMessageBox::NoButton,
+                             this);
+    confirmation.setObjectName("sessionOrderCancellationDialog");
+    confirmation.setTextFormat(Qt::PlainText);
+    auto *confirmButton = confirmation.addButton(action, QMessageBox::AcceptRole);
+    confirmButton->setObjectName("confirmSessionOrderCancellationButton");
+    auto *keepButton = confirmation.addButton("Keep order", QMessageBox::RejectRole);
+    keepButton->setObjectName("keepSessionOrderButton");
+    confirmation.setDefaultButton(keepButton);
+    confirmation.setEscapeButton(keepButton);
+    confirmation.exec();
+    return confirmation.clickedButton() == confirmButton;
+}
+
+bool OrdersPage::confirmSelectedPairCancellation()
+{
+    if (!selectedSessionEntryId.has_value())
+    {
+        return false;
+    }
+
+    const OrderSessionModel::Entry *entry = orderSessionModel.findEntryById(selectedSessionEntryId.value());
+    if (entry == nullptr || !orderSessionModel.canCancelAllOpenOrders(entry->id))
+    {
+        return false;
+    }
+
+    const QString exchangeName = getExchangeName(getEntryExchangerType(*entry));
+    const QString pairName = getPairName(getEntryPair(*entry));
+    QMessageBox confirmation(QMessageBox::Warning,
+                             "Cancel all open orders?",
+                             "Cancel every open order on " + exchangeName + " for " + pairName + "?",
+                             QMessageBox::NoButton,
+                             this);
+    confirmation.setObjectName("cancelAllOrdersConfirmationDialog");
+    confirmation.setTextFormat(Qt::PlainText);
+    confirmation.setInformativeText("This includes open orders not created in this CryptoDeal session. "
+                                    "The exchange request cannot be undone.");
+    auto *confirmButton = confirmation.addButton("Cancel all open orders", QMessageBox::AcceptRole);
+    confirmButton->setObjectName("confirmCancelAllOrdersButton");
+    auto *keepButton = confirmation.addButton("Keep orders", QMessageBox::RejectRole);
+    keepButton->setObjectName("keepAllOrdersButton");
+    confirmation.setDefaultButton(keepButton);
+    confirmation.setEscapeButton(keepButton);
+    confirmation.exec();
+    return confirmation.clickedButton() == confirmButton;
 }
 
 void OrdersPage::updateCatalogStatus(ExchangerType exchangerType, QLabel &statusLabel, const QString &exchangeName)

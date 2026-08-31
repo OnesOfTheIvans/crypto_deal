@@ -1,5 +1,6 @@
 #include "BybitDealService.hpp"
 #include "EnumStringConverter.hpp"
+#include "common/OrderStatusUtil.hpp"
 #include "common/SymbolRuleValidator.hpp"
 #include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
@@ -35,12 +36,6 @@ using namespace exception_handling;
 
 namespace {
     constexpr size_t BYBIT_OCO_GROUP_ID_MAX_LENGTH = 33;
-    const set<string> BYBIT_TERMINAL_ORDER_STATUSES = {"Filled",
-                                                       "Cancelled",
-                                                       "Rejected",
-                                                       "Deactivated",
-                                                       "PartiallyFilledCanceled"};
-
     template <typename ResponseDtoType> string getErrorMessage(const ResponseDtoType &response)
     {
         return "Bybit Error " + to_string(response.retCode) + ": " + response.retMsg.value_or("Unknown Error");
@@ -134,12 +129,12 @@ BybitDealService::OrderKey BybitDealService::getOrderKey(const string &symbol, c
 
 bool BybitDealService::isOrderFilled(const string &status)
 {
-    return status == "Filled";
+    return OrderStatusUtil::isOrderFilled(ExchangerType::BYBIT, status);
 }
 
 bool BybitDealService::isOrderTerminal(const string &status)
 {
-    return BYBIT_TERMINAL_ORDER_STATUSES.contains(status);
+    return OrderStatusUtil::isOrderTerminal(ExchangerType::BYBIT, status);
 }
 
 void BybitDealService::registerPendingOrder(const OrderKey &orderKey)

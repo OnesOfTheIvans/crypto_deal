@@ -3,6 +3,7 @@ add_library(DealLib
     binance/BinanceDealService.cpp
     bybit/BybitDealService.cpp
     common/DecimalConverter.cpp
+    common/OrderStatusUtil.cpp
     common/SymbolRuleValidator.cpp
     common/TradablePairUtil.cpp
     common/exception_handling.cpp

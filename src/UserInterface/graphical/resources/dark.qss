@@ -150,6 +150,18 @@ QLabel[sessionOrdersEmptyState="true"] {
     padding: 10px 2px;
 }
 
+QWidget[sessionOrderActionBar="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    padding: 9px;
+}
+
+QLabel[sessionOrderActionContext="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
 QTabWidget[ordersWorkspaceTabs="true"]::pane,
 QTabWidget[sessionOrdersTabs="true"]::pane {
     border: 1px solid #2a3342;
@@ -292,6 +304,27 @@ QPushButton[secondaryOrderAction="true"] {
 QPushButton[secondaryOrderAction="true"]:hover {
     background-color: #303a4b;
     border-color: #4b5a70;
+}
+
+QPushButton[dangerOrderAction="true"] {
+    background-color: #42242b;
+    border: 1px solid #74404a;
+    border-radius: 6px;
+    color: #f2c4c9;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+QPushButton[dangerOrderAction="true"]:hover {
+    background-color: #553039;
+    border-color: #94505d;
+}
+
+QPushButton[dangerOrderAction="true"]:disabled,
+QPushButton[secondaryOrderAction="true"]:disabled {
+    background-color: #20242d;
+    border-color: #2b313d;
+    color: #626b7a;
 }
 
 QPushButton[primaryOrderAction="true"] {
