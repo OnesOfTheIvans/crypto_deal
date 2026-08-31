@@ -1,4 +1,5 @@
 #include "ApplicationConfigurationUtil.hpp"
+#include "OperationChainDefinitionLoader.hpp"
 #include "binance/BinanceDealService.hpp"
 #include "bybit/BybitDealService.hpp"
 #include "graphical/GraphicalUserInterface.hpp"
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 
 using namespace std;
 
@@ -20,6 +22,7 @@ int main(int argc, char *argv[])
 
     try
     {
+        auto operationChainDefinitions = OperationChainDefinitionLoader::load(OPERATION_CHAINS_FILE);
         const ApplicationConfiguration configuration = loadApplicationConfiguration(CONFIG_FILE);
         const auto binanceDealService = std::make_shared<BinanceDealService>(configuration.binance.host,
                                                                              configuration.binance.apiKey,
@@ -30,7 +33,7 @@ int main(int argc, char *argv[])
                                                                          configuration.bybit.secretKey,
                                                                          configuration.bybit.websocketHost);
 
-        GraphicalUserInterface userInterface(binanceDealService, bybitDealService);
+        GraphicalUserInterface userInterface(binanceDealService, bybitDealService, move(operationChainDefinitions));
         return userInterface.run();
     }
     catch (const std::exception &exception)

@@ -17,8 +17,10 @@ using namespace std;
 using namespace exception_handling;
 
 GraphicalUserInterface::GraphicalUserInterface(shared_ptr<DealService> binanceDealService,
-                                               shared_ptr<DealService> bybitDealService)
-    : binanceDealService(move(binanceDealService)), bybitDealService(move(bybitDealService))
+                                               shared_ptr<DealService> bybitDealService,
+                                               vector<OperationChainDefinition> operationChainDefinitions)
+    : binanceDealService(move(binanceDealService)), bybitDealService(move(bybitDealService)),
+      operationChainDefinitions(move(operationChainDefinitions))
 {
     throwIf(this->binanceDealService == nullptr, "Graphical user interface requires a Binance deal service");
     throwIf(this->bybitDealService == nullptr, "Graphical user interface requires a Bybit deal service");

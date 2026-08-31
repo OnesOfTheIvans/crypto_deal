@@ -12,6 +12,7 @@ add_executable(DealServiceUnitIntegrationTests
     DealServiceConcurrencyTest.cpp
     OperationFactoryTest.cpp
     OperationChainTest.cpp
+    OperationChainDefinitionLoaderTest.cpp
     OperationChainIntegrationTest.cpp
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
@@ -24,6 +25,10 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/OperationChain/ExchangerPull.cpp
     ../src/OperationChain/OperationFactory.cpp
     ../src/OperationChain/OperationChain.cpp
+    ../src/OperationChain/OperationChainBuilder.cpp
+    ../src/OperationChain/OperationChainDefinition.cpp
+    ../src/OperationChain/OperationChainDefinitionLoader.cpp
+    ../src/OperationChain/OperationDefinition.cpp
 )
 
 target_include_directories(DealServiceUnitIntegrationTests PRIVATE

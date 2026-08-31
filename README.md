@@ -14,6 +14,47 @@ The same suite can be run through CTest:
 ctest --test-dir build --output-on-failure
 ```
 
+## Operation-chain definitions
+
+Reusable proof-of-concept chains are defined in `operation_chains.json`. The file uses this versioned shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "chains": [
+    {
+      "name": "Unique chain name",
+      "initial": {
+        "exchange": "BINANCE",
+        "asset": "USDT",
+        "quantity": "0.00010"
+      },
+      "operations": [
+        {
+          "type": "BUY_CRYPTO",
+          "config": { "outAsset": "BTC" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Exchanges use `BINANCE` or `BYBIT`; sides use `BUY` or `SELL`; order types use `MARKET` or `LIMIT`. Decimal values
+must be positive fixed-decimal strings so they can be converted without binary floating-point loss. Supported
+operation configs are:
+
+- `BUY_CRYPTO` and `SELL_CRYPTO`: `outAsset`.
+- `PLACE_ORDER`: `outAsset`, `side`, `orderType`, and optional `price`, `timeInForce`, `triggerPrice`, `orderFilter`,
+  and `marketUnit`. A limit order requires `price`; a market order cannot contain `price` or `timeInForce`.
+- `PLACE_OCO`: `outAsset`, `side`, `price`, `stopPrice`, and the optional pair `stopLimitPrice` plus
+  `stopLimitTimeInForce`.
+- `SEND_TO`: `destinationExchange`, `chain`, and `address`. This remains a testnet-compatible transfer simulation.
+
+Unknown fields and invalid definitions stop application startup. OCO client identifiers are intentionally omitted;
+the exchange services generate fresh identifiers so multiple runs of one definition cannot collide. Definitions do
+not start automatically.
+
 ## End-to-end tests
 
 End-to-end tests use real Binance and Bybit endpoints and require valid credentials in `config.ini`.
