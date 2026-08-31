@@ -96,7 +96,7 @@ void CryptoDealWindow::createLayout()
     pageStack->setObjectName("primaryPageStack");
     pageStack->addWidget(new OrdersPage(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, pageStack));
     pageStack->addWidget(new OperationChainsPage(pageStack));
-    pageStack->addWidget(new AccountsPage(pageStack));
+    pageStack->addWidget(new AccountsPage(balanceCatalog, pageStack));
 
     auto *navigationGroup = new QButtonGroup(this);
     navigationGroup->setExclusive(true);

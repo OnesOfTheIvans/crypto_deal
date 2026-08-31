@@ -56,6 +56,7 @@ target_link_libraries(ApplicationUnitTests PRIVATE
 add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
 
 add_executable(GraphicalUserInterfaceTests
+    AccountsPageTest.cpp
     AsyncTaskExecutorTest.cpp
     BalanceCatalogTest.cpp
     GraphicalUserInterfaceTest.cpp

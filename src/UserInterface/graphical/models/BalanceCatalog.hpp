@@ -27,6 +27,7 @@ class BalanceCatalog final : public QObject
     {
         BalanceSnapshot balances;
         UiTaskState loadState;
+        bool hasSuccessfulSnapshot = false;
     };
 
     AsyncTaskExecutor &taskExecutor;
@@ -55,9 +56,13 @@ class BalanceCatalog final : public QObject
 
     void retryBalances(ExchangerType exchangerType);
 
+    void refreshBalances(ExchangerType exchangerType);
+
     const BalanceSnapshot &getBalances(ExchangerType exchangerType) const;
 
     const UiTaskState &getLoadState(ExchangerType exchangerType) const;
+
+    bool hasSuccessfulSnapshot(ExchangerType exchangerType) const;
 
   signals:
     void balancesChanged(ExchangerType exchangerType);

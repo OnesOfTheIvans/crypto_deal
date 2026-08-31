@@ -696,6 +696,7 @@ void OrderEntryForm::updateSelectedBalance()
 {
     const UiTaskState &loadState = balanceCatalog.getLoadState(getSelectedExchangerType());
     const QString exchangeName = getSelectedExchangeName();
+    const bool hasSuccessfulSnapshot = balanceCatalog.hasSuccessfulSnapshot(getSelectedExchangerType());
     retryBalanceButton->hide();
 
     switch (loadState.getStatus())
@@ -704,13 +705,19 @@ void OrderEntryForm::updateSelectedBalance()
         selectedBalanceStatus->setText(exchangeName + " balances are waiting for the startup load.");
         break;
     case UiTaskState::Status::LOADING:
-        selectedBalanceStatus->setText("Loading " + exchangeName + " balances required for placement...");
+        selectedBalanceStatus->setText(hasSuccessfulSnapshot
+                                           ? "Refreshing " + exchangeName +
+                                                 " balances. The last successful snapshot remains available."
+                                           : "Loading " + exchangeName + " balances required for placement...");
         break;
     case UiTaskState::Status::SUCCEEDED:
         selectedBalanceStatus->setText(exchangeName + " balances are ready for placement.");
         break;
     case UiTaskState::Status::FAILED:
-        selectedBalanceStatus->setText(exchangeName + " balances are unavailable: " + loadState.getError());
+        selectedBalanceStatus->setText(
+            hasSuccessfulSnapshot
+                ? exchangeName + " balance refresh failed; using the last successful snapshot: " + loadState.getError()
+                : exchangeName + " balances are unavailable: " + loadState.getError());
         retryBalanceButton->show();
         break;
     }
@@ -1111,7 +1118,7 @@ bool OrderEntryForm::hasUsableSelectedCatalog() const
 
 bool OrderEntryForm::hasReadySelectedBalances() const
 {
-    return balanceCatalog.getLoadState(getSelectedExchangerType()).getStatus() == UiTaskState::Status::SUCCEEDED;
+    return balanceCatalog.hasSuccessfulSnapshot(getSelectedExchangerType());
 }
 
 bool OrderEntryForm::hasActivePlaceOrderPrice() const

@@ -1,18 +1,67 @@
 #include "AccountsPage.hpp"
 
+#include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
+#include "graphical/async/UiTaskState.hpp"
+#include "graphical/models/BalanceCatalog.hpp"
 
+#include <QAbstractItemView>
+#include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
+#include <QPushButton>
+#include <QString>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QVBoxLayout>
 #include <QWidget>
 
 using namespace GuiLayoutConstants;
 
-AccountsPage::AccountsPage(QWidget *parent) : QWidget(parent)
+namespace {
+    constexpr int ACCOUNT_TAB_MARGIN = 18;
+    constexpr int ACCOUNT_TAB_SPACING = 12;
+    constexpr int ACCOUNT_REFRESH_MINIMUM_HEIGHT = 34;
+    constexpr int ACCOUNT_TABLE_MINIMUM_HEIGHT = 260;
+
+    QString getExchangeName(ExchangerType exchangerType)
+    {
+        return exchangerType == ExchangerType::BINANCE ? "Binance" : "Bybit";
+    }
+
+    QString getObjectNamePrefix(ExchangerType exchangerType)
+    {
+        return exchangerType == ExchangerType::BINANCE ? "binance" : "bybit";
+    }
+
+    QString formatBalance(Decimal value)
+    {
+        return QString::fromStdString(DecimalConverter::formatDecimal(value));
+    }
+
+    QTableWidgetItem *createBalanceItem(const QString &text, Qt::Alignment alignment)
+    {
+        auto *item = new QTableWidgetItem(text);
+        item->setTextAlignment(alignment);
+        return item;
+    }
+}
+
+AccountsPage::AccountsPage(BalanceCatalog &balanceCatalog, QWidget *parent)
+    : QWidget(parent), balanceCatalog(balanceCatalog), exchangeTabs(nullptr)
 {
     setObjectName("accountsPage");
     setProperty("primaryPage", true);
 
+    createLayout();
+    connectCatalogUpdates();
+    updateExchange(ExchangerType::BINANCE);
+    updateExchange(ExchangerType::BYBIT);
+}
+
+void AccountsPage::createLayout()
+{
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(PAGE_HORIZONTAL_MARGIN,
                                PAGE_VERTICAL_MARGIN,
@@ -23,35 +72,190 @@ AccountsPage::AccountsPage(QWidget *parent) : QWidget(parent)
     auto *title = new QLabel("Accounts", this);
     title->setProperty("pageTitle", true);
 
-    auto *description = new QLabel("Review Binance and Bybit balances side by side.", this);
+    auto *description = new QLabel("Review independently loaded Binance and Bybit balance snapshots.", this);
     description->setProperty("pageDescription", true);
 
-    auto *placeholderCard = new QWidget(this);
-    placeholderCard->setProperty("placeholderCard", true);
-    placeholderCard->setMinimumHeight(PLACEHOLDER_MINIMUM_HEIGHT);
-
-    auto *placeholderLayout = new QVBoxLayout(placeholderCard);
-    placeholderLayout->setContentsMargins(PLACEHOLDER_HORIZONTAL_MARGIN,
-                                          PLACEHOLDER_VERTICAL_MARGIN,
-                                          PLACEHOLDER_HORIZONTAL_MARGIN,
-                                          PLACEHOLDER_VERTICAL_MARGIN);
-    placeholderLayout->setSpacing(PLACEHOLDER_LAYOUT_SPACING);
-
-    auto *placeholderTitle = new QLabel("Account workspace", placeholderCard);
-    placeholderTitle->setProperty("placeholderTitle", true);
-
-    auto *placeholderDescription =
-        new QLabel("Balance loading and live updates will be added in the Accounts steps.", placeholderCard);
-    placeholderDescription->setProperty("placeholderDescription", true);
-    placeholderDescription->setWordWrap(true);
-
-    placeholderLayout->addWidget(placeholderTitle);
-    placeholderLayout->addWidget(placeholderDescription);
-    placeholderLayout->addStretch();
+    exchangeTabs = new QTabWidget(this);
+    exchangeTabs->setObjectName("accountsExchangeTabs");
+    exchangeTabs->setProperty("accountsExchangeTabs", true);
+    binanceView = createExchangeView(ExchangerType::BINANCE);
+    bybitView = createExchangeView(ExchangerType::BYBIT);
+    exchangeTabs->addTab(binanceView.page, "Binance");
+    exchangeTabs->addTab(bybitView.page, "Bybit");
+    exchangeTabs->setCurrentIndex(0);
 
     layout->addWidget(title);
     layout->addWidget(description);
-    layout->addSpacing(PAGE_PLACEHOLDER_SPACING);
-    layout->addWidget(placeholderCard);
-    layout->addStretch();
+    layout->addWidget(exchangeTabs, 1);
+}
+
+AccountsPage::ExchangeView AccountsPage::createExchangeView(ExchangerType exchangerType)
+{
+    const QString exchangeName = getExchangeName(exchangerType);
+    const QString objectNamePrefix = getObjectNamePrefix(exchangerType);
+    ExchangeView view;
+    view.page = new QWidget(exchangeTabs);
+    view.page->setObjectName(objectNamePrefix + "BalancesTab");
+
+    auto *layout = new QVBoxLayout(view.page);
+    layout->setContentsMargins(ACCOUNT_TAB_MARGIN, ACCOUNT_TAB_MARGIN, ACCOUNT_TAB_MARGIN, ACCOUNT_TAB_MARGIN);
+    layout->setSpacing(ACCOUNT_TAB_SPACING);
+
+    auto *actionLayout = new QHBoxLayout();
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *snapshotLabel = new QLabel(exchangeName + " REST balance snapshot", view.page);
+    snapshotLabel->setProperty("accountSectionTitle", true);
+    actionLayout->addWidget(snapshotLabel);
+    actionLayout->addStretch();
+
+    view.refreshButton = new QPushButton("Refresh", view.page);
+    view.refreshButton->setObjectName(objectNamePrefix + "BalancesRefreshButton");
+    view.refreshButton->setProperty("secondaryOrderAction", true);
+    view.refreshButton->setMinimumHeight(ACCOUNT_REFRESH_MINIMUM_HEIGHT);
+    actionLayout->addWidget(view.refreshButton);
+
+    view.status = new QLabel(view.page);
+    view.status->setObjectName(objectNamePrefix + "BalancesStatus");
+    view.status->setProperty("accountBalanceStatus", true);
+    view.status->setWordWrap(true);
+
+    view.emptyState = new QLabel(view.page);
+    view.emptyState->setObjectName(objectNamePrefix + "BalancesEmptyState");
+    view.emptyState->setProperty("accountBalancesEmptyState", true);
+    view.emptyState->setAlignment(Qt::AlignCenter);
+    view.emptyState->setWordWrap(true);
+
+    view.table = new QTableWidget(view.page);
+    view.table->setObjectName(objectNamePrefix + "BalancesTable");
+    view.table->setProperty("accountBalancesTable", true);
+    view.table->setColumnCount(4);
+    view.table->setHorizontalHeaderLabels({"Asset", "Free", "Locked", "Total"});
+    view.table->setAlternatingRowColors(true);
+    view.table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    view.table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    view.table->setSelectionMode(QAbstractItemView::SingleSelection);
+    view.table->setShowGrid(false);
+    view.table->setMinimumHeight(ACCOUNT_TABLE_MINIMUM_HEIGHT);
+    view.table->verticalHeader()->hide();
+    view.table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+
+    layout->addLayout(actionLayout);
+    layout->addWidget(view.status);
+    layout->addWidget(view.emptyState, 1);
+    layout->addWidget(view.table, 1);
+
+    return view;
+}
+
+AccountsPage::ExchangeView &AccountsPage::getExchangeView(ExchangerType exchangerType)
+{
+    return exchangerType == ExchangerType::BINANCE ? binanceView : bybitView;
+}
+
+void AccountsPage::connectCatalogUpdates()
+{
+    for (const ExchangerType exchangerType : {ExchangerType::BINANCE, ExchangerType::BYBIT})
+    {
+        connect(&balanceCatalog.getLoadState(exchangerType),
+                &UiTaskState::statusChanged,
+                this,
+                [this, exchangerType](UiTaskState::Status) { updateExchange(exchangerType); });
+    }
+
+    connect(&balanceCatalog,
+            &BalanceCatalog::balancesChanged,
+            this,
+            [this](ExchangerType exchangerType) { updateExchange(exchangerType); });
+    connect(binanceView.refreshButton,
+            &QPushButton::clicked,
+            this,
+            [this]() { balanceCatalog.refreshBalances(ExchangerType::BINANCE); });
+    connect(bybitView.refreshButton,
+            &QPushButton::clicked,
+            this,
+            [this]() { balanceCatalog.refreshBalances(ExchangerType::BYBIT); });
+}
+
+void AccountsPage::updateExchange(ExchangerType exchangerType)
+{
+    ExchangeView &view = getExchangeView(exchangerType);
+    const UiTaskState &loadState = balanceCatalog.getLoadState(exchangerType);
+    const QString exchangeName = getExchangeName(exchangerType);
+    const bool hasSuccessfulSnapshot = balanceCatalog.hasSuccessfulSnapshot(exchangerType);
+    view.refreshButton->setEnabled(!loadState.isLoading());
+
+    switch (loadState.getStatus())
+    {
+    case UiTaskState::Status::IDLE:
+        view.status->setText(exchangeName + " balances are waiting for the startup load.");
+        break;
+    case UiTaskState::Status::LOADING:
+        view.status->setText(hasSuccessfulSnapshot ? "Refreshing " + exchangeName +
+                                                         " balances. The last successful snapshot remains visible."
+                                                   : "Loading " + exchangeName + " balances...");
+        break;
+    case UiTaskState::Status::SUCCEEDED:
+        view.status->setText(balanceCatalog.getBalances(exchangerType).empty()
+                                 ? exchangeName + " returned an empty balance snapshot."
+                                 : exchangeName + " balances are ready.");
+        break;
+    case UiTaskState::Status::FAILED:
+        view.status->setText(hasSuccessfulSnapshot
+                                 ? exchangeName + " balance refresh failed. Showing the last successful snapshot: " +
+                                       loadState.getError()
+                                 : exchangeName + " balances are unavailable: " + loadState.getError());
+        break;
+    }
+
+    updateBalanceRows(exchangerType);
+}
+
+void AccountsPage::updateBalanceRows(ExchangerType exchangerType)
+{
+    ExchangeView &view = getExchangeView(exchangerType);
+    const QString exchangeName = getExchangeName(exchangerType);
+    const bool hasSuccessfulSnapshot = balanceCatalog.hasSuccessfulSnapshot(exchangerType);
+    const BalanceCatalog::BalanceSnapshot &balances = balanceCatalog.getBalances(exchangerType);
+    view.table->setRowCount(0);
+
+    if (!hasSuccessfulSnapshot)
+    {
+        view.table->hide();
+        view.emptyState->setText("A successful " + exchangeName + " balance snapshot is not available yet.");
+        view.emptyState->show();
+        return;
+    }
+
+    for (const auto &[asset, balance] : balances)
+    {
+        if (balance.free == Decimal{} && balance.locked == Decimal{})
+        {
+            continue;
+        }
+
+        const int row = view.table->rowCount();
+        view.table->insertRow(row);
+        view.table->setItem(row, 0, createBalanceItem(QString::fromStdString(asset), Qt::AlignLeft | Qt::AlignVCenter));
+        view.table->setItem(row, 1, createBalanceItem(formatBalance(balance.free), Qt::AlignRight | Qt::AlignVCenter));
+        view.table->setItem(row,
+                            2,
+                            createBalanceItem(formatBalance(balance.locked), Qt::AlignRight | Qt::AlignVCenter));
+        view.table->setItem(
+            row,
+            3,
+            createBalanceItem(formatBalance(balance.free + balance.locked), Qt::AlignRight | Qt::AlignVCenter));
+    }
+
+    if (view.table->rowCount() > 0)
+    {
+        view.emptyState->hide();
+        view.table->show();
+        return;
+    }
+
+    view.table->hide();
+    view.emptyState->setText(balances.empty() ? "No balances were returned for " + exchangeName + "."
+                                              : "No non-zero balances were returned for " + exchangeName + ".");
+    view.emptyState->show();
 }

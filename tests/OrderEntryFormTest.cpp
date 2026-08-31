@@ -402,3 +402,73 @@ TEST(OrderEntryFormTest, GatesPlacementUntilSelectedBalancesLoadAndRetriesAnExac
     EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
     EXPECT_EQ(binanceService->getBalanceRequestCount(), 2u);
 }
+
+TEST(OrderEntryFormTest, KeepsPlacementReadyWhileASuccessfulBalanceSnapshotIsRefreshedOrRetained)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    PairCatalog pairCatalog;
+    promise<void> releaseRefreshPromise;
+    const shared_future<void> releaseRefresh = releaseRefreshPromise.get_future().share();
+    atomic<int> balanceAttempts = 0;
+    auto binanceService = make_shared<TestDealService>(
+        ExchangerType::BINANCE,
+        []() { return vector<TradablePair>{{"BTCUSDT", "BTC", "USDT"}}; },
+        [](const string &symbol) { return createBtcSymbolInfo(symbol); },
+        [&balanceAttempts, releaseRefresh]()
+        {
+            if (++balanceAttempts > 1)
+            {
+                releaseRefresh.wait();
+                throw runtime_error("later balance refresh failure");
+            }
+            return BalanceCatalog::BalanceSnapshot{};
+        });
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+    SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
+    auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
+    auto *balanceStatus = window.findChild<QLabel *>("selectedBalanceStatus");
+    auto *retryBalanceButton = window.findChild<QPushButton *>("retryBalanceButton");
+    auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
+    auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
+
+    ASSERT_NE(entryFormWidget, nullptr);
+    auto &entryForm = static_cast<OrderEntryForm &>(*entryFormWidget);
+    ASSERT_NE(symbolStatus, nullptr);
+    ASSERT_NE(balanceStatus, nullptr);
+    ASSERT_NE(retryBalanceButton, nullptr);
+    ASSERT_NE(amountInput, nullptr);
+    ASSERT_NE(proceedButton, nullptr);
+
+    window.show();
+    pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
+    balanceCatalog.loadBalances();
+    QTRY_COMPARE_WITH_TIMEOUT(symbolStatus->text(), QString("Trading rules are ready for BTCUSDT."), 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceStatus->text(), QString("Binance balances are ready for placement."), 1000);
+    amountInput->setText("0.010");
+    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
+
+    balanceCatalog.refreshBalances(ExchangerType::BINANCE);
+
+    QTRY_COMPARE_WITH_TIMEOUT(balanceAttempts.load(), 2, 1000);
+    EXPECT_EQ(balanceStatus->text(),
+              QString("Refreshing Binance balances. The last successful snapshot remains available."));
+    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
+
+    releaseRefreshPromise.set_value();
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BINANCE).getStatus(),
+                              UiTaskState::Status::FAILED,
+                              1000);
+    EXPECT_EQ(balanceStatus->text(),
+              QString("Binance balance refresh failed; using the last successful snapshot: "
+                      "later balance refresh failure"));
+    EXPECT_TRUE(retryBalanceButton->isVisible());
+    EXPECT_TRUE(proceedButton->isEnabled());
+    EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
+}

@@ -150,6 +150,27 @@ QLabel[sessionOrdersEmptyState="true"] {
     padding: 10px 2px;
 }
 
+QLabel[accountSectionTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[accountBalanceStatus="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+QLabel[accountBalancesEmptyState="true"] {
+    color: #7f899b;
+    font-size: 13px;
+    padding: 20px;
+}
+
 QWidget[sessionOrderActionBar="true"] {
     background-color: #151a23;
     border: 1px solid #2a3342;
@@ -163,14 +184,16 @@ QLabel[sessionOrderActionContext="true"] {
 }
 
 QTabWidget[ordersWorkspaceTabs="true"]::pane,
-QTabWidget[sessionOrdersTabs="true"]::pane {
+QTabWidget[sessionOrdersTabs="true"]::pane,
+QTabWidget[accountsExchangeTabs="true"]::pane {
     border: 1px solid #2a3342;
     border-radius: 6px;
     background-color: #151a23;
 }
 
 QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab,
-QTabWidget[sessionOrdersTabs="true"] QTabBar::tab {
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab {
     background-color: #202631;
     border: 1px solid #2a3342;
     border-bottom: 0;
@@ -183,12 +206,19 @@ QTabWidget[sessionOrdersTabs="true"] QTabBar::tab {
 }
 
 QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:selected,
-QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected {
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:selected {
     background-color: #151a23;
     color: #e3e9f2;
 }
 
-QTreeWidget[sessionOrdersTable="true"] {
+QWidget#binanceBalancesTab,
+QWidget#bybitBalancesTab {
+    background-color: #151a23;
+}
+
+QTreeWidget[sessionOrdersTable="true"],
+QTableWidget[accountBalancesTable="true"] {
     alternate-background-color: #181e28;
     background-color: #151a23;
     border: 0;
@@ -202,7 +232,13 @@ QTreeWidget[sessionOrdersTable="true"]::item {
     padding: 5px;
 }
 
-QTreeWidget[sessionOrdersTable="true"]::item:selected {
+QTableWidget[accountBalancesTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 6px;
+}
+
+QTreeWidget[sessionOrdersTable="true"]::item:selected,
+QTableWidget[accountBalancesTable="true"]::item:selected {
     background-color: #273b60;
 }
 

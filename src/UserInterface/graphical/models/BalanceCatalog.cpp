@@ -40,6 +40,14 @@ void BalanceCatalog::retryBalances(ExchangerType exchangerType)
     }
 }
 
+void BalanceCatalog::refreshBalances(ExchangerType exchangerType)
+{
+    if (!getEntry(exchangerType).loadState.isLoading())
+    {
+        startLoad(exchangerType);
+    }
+}
+
 const BalanceCatalog::BalanceSnapshot &BalanceCatalog::getBalances(ExchangerType exchangerType) const
 {
     return getEntry(exchangerType).balances;
@@ -48,6 +56,11 @@ const BalanceCatalog::BalanceSnapshot &BalanceCatalog::getBalances(ExchangerType
 const UiTaskState &BalanceCatalog::getLoadState(ExchangerType exchangerType) const
 {
     return getEntry(exchangerType).loadState;
+}
+
+bool BalanceCatalog::hasSuccessfulSnapshot(ExchangerType exchangerType) const
+{
+    return getEntry(exchangerType).hasSuccessfulSnapshot;
 }
 
 BalanceCatalog::BalanceEntry &BalanceCatalog::getEntry(ExchangerType exchangerType)
@@ -84,6 +97,8 @@ void BalanceCatalog::startLoad(ExchangerType exchangerType)
 
 void BalanceCatalog::storeBalances(ExchangerType exchangerType, BalanceSnapshot balances)
 {
-    getEntry(exchangerType).balances = move(balances);
+    BalanceEntry &entry = getEntry(exchangerType);
+    entry.balances = move(balances);
+    entry.hasSuccessfulSnapshot = true;
     emit balancesChanged(exchangerType);
 }
