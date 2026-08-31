@@ -72,7 +72,8 @@ void AccountsPage::createLayout()
     auto *title = new QLabel("Accounts", this);
     title->setProperty("pageTitle", true);
 
-    auto *description = new QLabel("Review independently loaded Binance and Bybit balance snapshots.", this);
+    auto *description =
+        new QLabel("Review Binance and Bybit balances with independent REST refresh and live updates.", this);
     description->setProperty("pageDescription", true);
 
     exchangeTabs = new QTabWidget(this);
@@ -120,6 +121,11 @@ AccountsPage::ExchangeView AccountsPage::createExchangeView(ExchangerType exchan
     view.status->setProperty("accountBalanceStatus", true);
     view.status->setWordWrap(true);
 
+    view.liveStatus = new QLabel(view.page);
+    view.liveStatus->setObjectName(objectNamePrefix + "BalancesLiveStatus");
+    view.liveStatus->setProperty("accountBalanceStatus", true);
+    view.liveStatus->setWordWrap(true);
+
     view.emptyState = new QLabel(view.page);
     view.emptyState->setObjectName(objectNamePrefix + "BalancesEmptyState");
     view.emptyState->setProperty("accountBalancesEmptyState", true);
@@ -142,6 +148,7 @@ AccountsPage::ExchangeView AccountsPage::createExchangeView(ExchangerType exchan
 
     layout->addLayout(actionLayout);
     layout->addWidget(view.status);
+    layout->addWidget(view.liveStatus);
     layout->addWidget(view.emptyState, 1);
     layout->addWidget(view.table, 1);
 
@@ -167,6 +174,10 @@ void AccountsPage::connectCatalogUpdates()
             &BalanceCatalog::balancesChanged,
             this,
             [this](ExchangerType exchangerType) { updateExchange(exchangerType); });
+    connect(&balanceCatalog,
+            &BalanceCatalog::liveUpdateStatusChanged,
+            this,
+            [this](ExchangerType exchangerType) { updateLiveStatus(exchangerType); });
     connect(binanceView.refreshButton,
             &QPushButton::clicked,
             this,
@@ -192,7 +203,7 @@ void AccountsPage::updateExchange(ExchangerType exchangerType)
         break;
     case UiTaskState::Status::LOADING:
         view.status->setText(hasSuccessfulSnapshot ? "Refreshing " + exchangeName +
-                                                         " balances. The last successful snapshot remains visible."
+                                                         " balances. The latest cached snapshot remains visible."
                                                    : "Loading " + exchangeName + " balances...");
         break;
     case UiTaskState::Status::SUCCEEDED:
@@ -201,14 +212,48 @@ void AccountsPage::updateExchange(ExchangerType exchangerType)
                                  : exchangeName + " balances are ready.");
         break;
     case UiTaskState::Status::FAILED:
-        view.status->setText(hasSuccessfulSnapshot
-                                 ? exchangeName + " balance refresh failed. Showing the last successful snapshot: " +
-                                       loadState.getError()
-                                 : exchangeName + " balances are unavailable: " + loadState.getError());
+        view.status->setText(
+            hasSuccessfulSnapshot
+                ? exchangeName + " balance refresh failed. Showing the latest cached snapshot: " + loadState.getError()
+                : exchangeName + " balances are unavailable: " + loadState.getError());
         break;
     }
 
+    updateLiveStatus(exchangerType);
     updateBalanceRows(exchangerType);
+}
+
+void AccountsPage::updateLiveStatus(ExchangerType exchangerType)
+{
+    ExchangeView &view = getExchangeView(exchangerType);
+    const QString exchangeName = getExchangeName(exchangerType);
+    const QString error = balanceCatalog.getLiveUpdateError(exchangerType);
+    switch (balanceCatalog.getLiveUpdateStatus(exchangerType))
+    {
+    case BalanceCatalog::LiveUpdateStatus::IDLE:
+        view.liveStatus->setText(exchangeName + " live balance updates are waiting to start.");
+        break;
+    case BalanceCatalog::LiveUpdateStatus::STARTING:
+        view.liveStatus->setText(error.isEmpty()
+                                     ? "Starting " + exchangeName + " live balance updates..."
+                                     : "Restarting " + exchangeName + " live balance updates after: " + error);
+        break;
+    case BalanceCatalog::LiveUpdateStatus::CONNECTING:
+        view.liveStatus->setText("Connecting " + exchangeName + " live balance updates...");
+        break;
+    case BalanceCatalog::LiveUpdateStatus::CONNECTED:
+        view.liveStatus->setText(exchangeName + " live balance updates are connected.");
+        break;
+    case BalanceCatalog::LiveUpdateStatus::RETRY_WAITING:
+        view.liveStatus->setText(
+            error.isEmpty()
+                ? exchangeName + " live balance updates stopped unexpectedly. Reconnecting automatically..."
+                : exchangeName + " live balance updates are unavailable: " + error + ". Reconnecting automatically...");
+        break;
+    case BalanceCatalog::LiveUpdateStatus::STOPPED:
+        view.liveStatus->setText(exchangeName + " live balance updates are stopped.");
+        break;
+    }
 }
 
 void AccountsPage::updateBalanceRows(ExchangerType exchangerType)

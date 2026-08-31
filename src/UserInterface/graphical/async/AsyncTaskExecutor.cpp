@@ -1,5 +1,6 @@
 #include "AsyncTaskExecutor.hpp"
 
+#include <QDebug>
 #include <QMetaObject>
 
 #include <exception>
@@ -25,6 +26,19 @@ namespace AsyncTaskDetail {
         catch (...)
         {
             return "Asynchronous task failed with a non-standard exception";
+        }
+    }
+
+    void deliverFailureSafely(TaskCompletionBase &completion, const QString &error)
+    {
+        try
+        {
+            completion.deliverFailure(error);
+        }
+        catch (...)
+        {
+            qCritical().noquote() << "Asynchronous UI failure handler failed:"
+                                  << getFailureMessage(current_exception());
         }
     }
 }
@@ -76,14 +90,7 @@ void AsyncTaskExecutor::deliverTaskCompletion(AsyncTaskDetail::TaskCompletionBas
         }
         if (completion.receiver != nullptr)
         {
-            try
-            {
-                completion.deliverFailure(error);
-            }
-            catch (...)
-            {
-                // A UI failure handler must not unwind into Qt's event dispatch.
-            }
+            AsyncTaskDetail::deliverFailureSafely(completion, error);
         }
         return;
     }
@@ -108,14 +115,7 @@ void AsyncTaskExecutor::deliverTaskCompletion(AsyncTaskDetail::TaskCompletionBas
         }
         if (completion.receiver != nullptr)
         {
-            try
-            {
-                completion.deliverFailure(error);
-            }
-            catch (...)
-            {
-                // A UI failure handler must not unwind into Qt's event dispatch.
-            }
+            AsyncTaskDetail::deliverFailureSafely(completion, error);
         }
     }
 }

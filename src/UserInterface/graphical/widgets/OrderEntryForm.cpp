@@ -707,7 +707,7 @@ void OrderEntryForm::updateSelectedBalance()
     case UiTaskState::Status::LOADING:
         selectedBalanceStatus->setText(hasSuccessfulSnapshot
                                            ? "Refreshing " + exchangeName +
-                                                 " balances. The last successful snapshot remains available."
+                                                 " balances. The latest cached snapshot remains available."
                                            : "Loading " + exchangeName + " balances required for placement...");
         break;
     case UiTaskState::Status::SUCCEEDED:
@@ -716,7 +716,7 @@ void OrderEntryForm::updateSelectedBalance()
     case UiTaskState::Status::FAILED:
         selectedBalanceStatus->setText(
             hasSuccessfulSnapshot
-                ? exchangeName + " balance refresh failed; using the last successful snapshot: " + loadState.getError()
+                ? exchangeName + " balance refresh failed; using the latest cached snapshot: " + loadState.getError()
                 : exchangeName + " balances are unavailable: " + loadState.getError());
         retryBalanceButton->show();
         break;

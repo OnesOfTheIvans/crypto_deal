@@ -682,6 +682,8 @@ TEST_F(BybitDealServiceIntegrationTest, CeilQuantityToStep)
 TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageUpdatesBalanceCache)
 {
     auto service = createService();
+    int balanceNotifications = 0;
+    service.setUserStreamEventHandlers({[&balanceNotifications]() { ++balanceNotifications; }, {}});
 
     test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage("1000", "25", "2", "0.5"));
 
@@ -694,11 +696,14 @@ TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageUpdatesBalanceCache)
     ASSERT_TRUE(btc.has_value());
     EXPECT_EQ(btc->free, DecimalConverter::parseDecimal("1.5"));
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.5"));
+    EXPECT_EQ(balanceNotifications, 1);
 }
 
 TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageOverwritesCachedBalance)
 {
     auto service = createService();
+    int balanceNotifications = 0;
+    service.setUserStreamEventHandlers({[&balanceNotifications]() { ++balanceNotifications; }, {}});
 
     test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage("1000", "0", "1", "0"));
     test_private_access::dispatchBybitUserStreamMessage(service,
@@ -713,6 +718,7 @@ TEST_F(BybitDealServiceIntegrationTest, WalletStreamMessageOverwritesCachedBalan
     ASSERT_TRUE(btc.has_value());
     EXPECT_EQ(btc->free, DecimalConverter::parseDecimal("0.20"));
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
+    EXPECT_EQ(balanceNotifications, 2);
 }
 
 TEST_F(BybitDealServiceIntegrationTest, GetBalancesRest_BlankOptionalFields)

@@ -37,11 +37,11 @@ int GraphicalUserInterface::run()
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
     balanceCatalog.loadBalances();
+    balanceCatalog.startLiveUpdates();
 
     const int exitCode = QApplication::exec();
     taskExecutor.requestStop();
-    binanceDealService->stopUserStream();
-    bybitDealService->stopUserStream();
+    balanceCatalog.stopLiveUpdates();
     taskExecutor.stopAndWait();
     return exitCode;
 }

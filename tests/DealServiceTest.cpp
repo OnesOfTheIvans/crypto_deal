@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <stdexcept>
+#include <string>
 
 #include <gtest/gtest.h>
 
@@ -15,6 +17,16 @@ namespace {
         std::string hmac(const std::string &key, const std::string &data) const
         {
             return hmac_sha256(key, data);
+        }
+
+        void publishBalanceCacheEvent()
+        {
+            notifyBalanceCacheChanged();
+        }
+
+        void publishStreamStatusEvent()
+        {
+            notifyUserStreamStatusChanged();
         }
 
         OrderInfo buyCrypto(const std::string &, const std::string &, Decimal) override
@@ -137,4 +149,32 @@ TEST(DealServiceHelpersTest, GeneratesUniqueOcoId)
                             firstId.end(),
                             [](unsigned char c) { return std::islower(c) || std::isdigit(c); }));
     EXPECT_NE(firstId, secondId);
+}
+
+TEST(DealServiceHelpersTest, PublishesAndClearsUserStreamEventHandlersWithoutPropagatingHandlerFailures)
+{
+    DummyDealService service;
+    int balanceNotifications = 0;
+    int statusNotifications = 0;
+    service.setUserStreamEventHandlers(
+        {[&balanceNotifications]() { ++balanceNotifications; }, [&statusNotifications]() { ++statusNotifications; }});
+
+    EXPECT_NO_THROW(service.publishBalanceCacheEvent());
+    EXPECT_NO_THROW(service.publishStreamStatusEvent());
+    EXPECT_EQ(balanceNotifications, 1);
+    EXPECT_EQ(statusNotifications, 1);
+
+    service.setUserStreamEventHandlers({[]() { throw 7; }, []() { throw std::runtime_error("observer failure"); }});
+    testing::internal::CaptureStderr();
+    EXPECT_NO_THROW(service.publishBalanceCacheEvent());
+    EXPECT_NO_THROW(service.publishStreamStatusEvent());
+    const std::string observerErrors = testing::internal::GetCapturedStderr();
+    EXPECT_NE(observerErrors.find("Balance cache observer failed with a non-standard exception"), std::string::npos);
+    EXPECT_NE(observerErrors.find("User stream status observer failed: observer failure"), std::string::npos);
+
+    service.clearUserStreamEventHandlers();
+    service.publishBalanceCacheEvent();
+    service.publishStreamStatusEvent();
+    EXPECT_EQ(balanceNotifications, 1);
+    EXPECT_EQ(statusNotifications, 1);
 }

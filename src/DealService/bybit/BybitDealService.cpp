@@ -616,6 +616,7 @@ void BybitDealService::setStreamStatus(StreamStatus status)
         }
     }
     orderUpdateCondition.notify_all();
+    notifyUserStreamStatusChanged();
 }
 
 void BybitDealService::setStreamError(const string &error)
@@ -626,6 +627,7 @@ void BybitDealService::setStreamError(const string &error)
         streamLastError = error;
     }
     orderUpdateCondition.notify_all();
+    notifyUserStreamStatusChanged();
 }
 
 bool BybitDealService::isTimeSyncRecent() const
@@ -921,14 +923,6 @@ void BybitDealService::prepareUserStreamThread()
                 auto websocketStreamCopy = prepareUserWebsocketStream();
 
                 setStreamStatus(StreamStatus::CONNECTED);
-                try
-                {
-                    getBalancesRest();
-                }
-                catch (const exception &exception)
-                {
-                    cerr << "Bybit: initial balance refresh failed: " << exception.what() << endl;
-                }
 
                 while (userStream)
                 {
@@ -992,15 +986,6 @@ void BybitDealService::startUserStreamConcurrent()
     if (runner.joinable())
     {
         stopUserStreamConcurrent();
-    }
-
-    try
-    {
-        getBalancesRest();
-    }
-    catch (const exception &e)
-    {
-        cerr << "Bybit REST balances seed failed (continuing): " << e.what() << endl;
     }
 
     userStream = true;
@@ -2116,6 +2101,7 @@ void BybitDealService::handleWalletUpdate(const StreamMessageDto &message)
         return;
     }
 
+    bool cacheChanged = false;
     for (const WalletAccountDto &item : message.data.value())
     {
         if (item.coin.has_value())
@@ -2124,8 +2110,14 @@ void BybitDealService::handleWalletUpdate(const StreamMessageDto &message)
             {
                 AssetBalance balance = parseBalance(coin);
                 updateBalanceCache(balance.asset, balance.free, balance.locked);
+                cacheChanged = true;
             }
         }
+    }
+
+    if (cacheChanged)
+    {
+        notifyBalanceCacheChanged();
     }
 }
 

@@ -39,6 +39,11 @@ namespace {
         usdtBalance.free = DecimalConverter::parseDecimal("100");
         return {{"USDT", usdtBalance}};
     }
+
+    AssetBalance createBalance(const string &asset, const string &free, const string &locked = "0")
+    {
+        return {asset, DecimalConverter::parseDecimal(free), DecimalConverter::parseDecimal(locked)};
+    }
 }
 
 TEST(BalanceCatalogTest, KeepsSuccessfulAndFailedExchangeResultsIndependent)
@@ -248,4 +253,134 @@ TEST(BalanceCatalogTest, KeepsSnapshotVisibleAndSuppressesOverlappingRefreshes)
                               1000);
     EXPECT_EQ(balanceCatalog.getBalances(ExchangerType::BINANCE).at("USDT").free,
               DecimalConverter::parseDecimal("300"));
+}
+
+TEST(BalanceCatalogTest, AppliesLiveCacheUpdatesAfterFullSnapshotsAndKeepsExchangesIndependent)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE,
+                                                       TestDealService::TradablePairLoader{},
+                                                       TestDealService::SymbolInfoLoader{},
+                                                       []() { return createBalances(); });
+    auto bybitService = make_shared<TestDealService>(
+        ExchangerType::BYBIT,
+        TestDealService::TradablePairLoader{},
+        TestDealService::SymbolInfoLoader{},
+        []() { return BalanceCatalog::BalanceSnapshot{{"BTC", createBalance("BTC", "2")}}; });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+
+    balanceCatalog.loadBalances();
+    balanceCatalog.startLiveUpdates();
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BINANCE).getStatus(),
+                              UiTaskState::Status::SUCCEEDED,
+                              1000);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BYBIT).getStatus(),
+                              UiTaskState::Status::SUCCEEDED,
+                              1000);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLiveUpdateStatus(ExchangerType::BINANCE),
+                              BalanceCatalog::LiveUpdateStatus::CONNECTED,
+                              1000);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLiveUpdateStatus(ExchangerType::BYBIT),
+                              BalanceCatalog::LiveUpdateStatus::CONNECTED,
+                              1000);
+
+    binanceService->publishBalanceUpdate(createBalance("USDT", "125", "5"));
+
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getBalances(ExchangerType::BINANCE).at("USDT").free,
+                              DecimalConverter::parseDecimal("125"),
+                              1000);
+    EXPECT_EQ(balanceCatalog.getBalances(ExchangerType::BINANCE).at("USDT").locked,
+              DecimalConverter::parseDecimal("5"));
+    EXPECT_EQ(balanceCatalog.getBalances(ExchangerType::BYBIT).at("BTC").free, DecimalConverter::parseDecimal("2"));
+    EXPECT_EQ(binanceService->getUserStreamStartCount(), 1u);
+    EXPECT_EQ(bybitService->getUserStreamStartCount(), 1u);
+    EXPECT_EQ(binanceService->getBalanceRequestCount(), 1u);
+    EXPECT_EQ(bybitService->getBalanceRequestCount(), 1u);
+}
+
+TEST(BalanceCatalogTest, DoesNotPromotePartialLiveUpdateBeforeSuccessfulRestSnapshot)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    atomic<int> binanceLoadAttempts = 0;
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE,
+                                                       TestDealService::TradablePairLoader{},
+                                                       TestDealService::SymbolInfoLoader{},
+                                                       [&binanceLoadAttempts]()
+                                                       {
+                                                           if (++binanceLoadAttempts == 1)
+                                                           {
+                                                               throw runtime_error("initial snapshot unavailable");
+                                                           }
+                                                           return createBalances();
+                                                       });
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+
+    balanceCatalog.loadBalances();
+    balanceCatalog.startLiveUpdates();
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BINANCE).getStatus(),
+                              UiTaskState::Status::FAILED,
+                              1000);
+    binanceService->publishBalanceUpdate(createBalance("BTC", "0.5"));
+    QTest::qWait(20);
+
+    EXPECT_FALSE(balanceCatalog.hasSuccessfulSnapshot(ExchangerType::BINANCE));
+    EXPECT_TRUE(balanceCatalog.getBalances(ExchangerType::BINANCE).empty());
+
+    balanceCatalog.retryBalances(ExchangerType::BINANCE);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BINANCE).getStatus(),
+                              UiTaskState::Status::SUCCEEDED,
+                              1000);
+    EXPECT_TRUE(balanceCatalog.hasSuccessfulSnapshot(ExchangerType::BINANCE));
+    EXPECT_TRUE(balanceCatalog.getBalances(ExchangerType::BINANCE).contains("USDT"));
+    EXPECT_FALSE(balanceCatalog.getBalances(ExchangerType::BINANCE).contains("BTC"));
+}
+
+TEST(BalanceCatalogTest, RetriesOnlyTheFailedLiveStreamAndStopsBothStreamsSafely)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    atomic<int> binanceStreamAttempts = 0;
+    auto binanceService = make_shared<TestDealService>(
+        ExchangerType::BINANCE,
+        TestDealService::TradablePairLoader{},
+        TestDealService::SymbolInfoLoader{},
+        TestDealService::BalanceLoader{},
+        [&binanceStreamAttempts](TestDealService &service)
+        {
+            if (++binanceStreamAttempts == 1)
+            {
+                service.publishUserStreamStatus(StreamStatus::ERROR, "temporary Binance stream failure");
+                return;
+            }
+            service.publishUserStreamStatus(StreamStatus::CONNECTED);
+        });
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+
+    balanceCatalog.startLiveUpdates();
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLiveUpdateStatus(ExchangerType::BINANCE),
+                              BalanceCatalog::LiveUpdateStatus::RETRY_WAITING,
+                              1000);
+    EXPECT_EQ(balanceCatalog.getLiveUpdateError(ExchangerType::BINANCE), QString("temporary Binance stream failure"));
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLiveUpdateStatus(ExchangerType::BYBIT),
+                              BalanceCatalog::LiveUpdateStatus::CONNECTED,
+                              1000);
+    EXPECT_EQ(bybitService->getUserStreamStartCount(), 1u);
+
+    QTRY_COMPARE_WITH_TIMEOUT(binanceService->getUserStreamStartCount(), 2u, 2500);
+    QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLiveUpdateStatus(ExchangerType::BINANCE),
+                              BalanceCatalog::LiveUpdateStatus::CONNECTED,
+                              1000);
+    EXPECT_EQ(bybitService->getUserStreamStartCount(), 1u);
+
+    taskExecutor.requestStop();
+    balanceCatalog.stopLiveUpdates();
+    taskExecutor.stopAndWait();
+    EXPECT_EQ(binanceService->getUserStreamStopCount(), 1u);
+    EXPECT_EQ(bybitService->getUserStreamStopCount(), 1u);
+    EXPECT_EQ(balanceCatalog.getLiveUpdateStatus(ExchangerType::BINANCE), BalanceCatalog::LiveUpdateStatus::STOPPED);
+    EXPECT_EQ(balanceCatalog.getLiveUpdateStatus(ExchangerType::BYBIT), BalanceCatalog::LiveUpdateStatus::STOPPED);
 }

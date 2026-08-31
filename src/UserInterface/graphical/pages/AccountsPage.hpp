@@ -18,6 +18,7 @@ class AccountsPage final : public QWidget
     {
         QWidget *page = nullptr;
         QLabel *status = nullptr;
+        QLabel *liveStatus = nullptr;
         QPushButton *refreshButton = nullptr;
         QTableWidget *table = nullptr;
         QLabel *emptyState = nullptr;
@@ -37,6 +38,8 @@ class AccountsPage final : public QWidget
     void connectCatalogUpdates();
 
     void updateExchange(ExchangerType exchangerType);
+
+    void updateLiveStatus(ExchangerType exchangerType);
 
     void updateBalanceRows(ExchangerType exchangerType);
 

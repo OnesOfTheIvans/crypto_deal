@@ -17,6 +17,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <stop_token>
+#include <string>
 #include <vector>
 
 using namespace std;
@@ -98,6 +99,28 @@ TEST(AsyncTaskExecutorTest, DeliversExactFailureAndClearsItBeforeRetry)
 
     QTRY_VERIFY_WITH_TIMEOUT(retriedSuccessfully, 1000);
     EXPECT_EQ(state.getStatus(), UiTaskState::Status::SUCCEEDED);
+}
+
+TEST(AsyncTaskExecutorTest, ReportsFailureHandlerExceptionsWithoutUnwindingIntoQt)
+{
+    getApplication();
+    AsyncTaskExecutor executor;
+    UiTaskState state;
+    QObject receiver;
+
+    testing::internal::CaptureStderr();
+    EXPECT_TRUE(executor.startTask(
+        state,
+        receiver,
+        []() -> int { throw runtime_error("task failure"); },
+        [](int) {},
+        [](const QString &) { throw 7; }));
+
+    QTRY_COMPARE_WITH_TIMEOUT(state.getStatus(), UiTaskState::Status::FAILED, 1000);
+    const string handlerError = testing::internal::GetCapturedStderr();
+    EXPECT_NE(handlerError.find("Asynchronous UI failure handler failed: Asynchronous task failed with a non-standard "
+                                "exception"),
+              string::npos);
 }
 
 TEST(AsyncTaskExecutorTest, KeepsEventLoopResponsiveDuringIndependentOverlappingTasks)

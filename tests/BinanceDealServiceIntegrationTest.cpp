@@ -680,6 +680,8 @@ TEST_F(BinanceDealServiceIntegrationTest, StopUserStreamDoesNotLogWhenAlreadySto
 TEST_F(BinanceDealServiceIntegrationTest, UserStreamAccountPositionUpdatesBalanceCache)
 {
     auto service = createService();
+    int balanceNotifications = 0;
+    service.setUserStreamEventHandlers({[&balanceNotifications]() { ++balanceNotifications; }, {}});
 
     test_private_access::dispatchBinanceUserStreamMessage(service, R"({
         "event": {
@@ -700,11 +702,14 @@ TEST_F(BinanceDealServiceIntegrationTest, UserStreamAccountPositionUpdatesBalanc
     ASSERT_TRUE(btc.has_value());
     EXPECT_EQ(btc->free, DecimalConverter::parseDecimal("0.25"));
     EXPECT_EQ(btc->locked, DecimalConverter::parseDecimal("0.05"));
+    EXPECT_EQ(balanceNotifications, 1);
 }
 
 TEST_F(BinanceDealServiceIntegrationTest, UserStreamIgnoresNonBalanceEvent)
 {
     auto service = createService();
+    int balanceNotifications = 0;
+    service.setUserStreamEventHandlers({[&balanceNotifications]() { ++balanceNotifications; }, {}});
 
     test_private_access::dispatchBinanceUserStreamMessage(service, R"({
         "event": {
@@ -716,6 +721,7 @@ TEST_F(BinanceDealServiceIntegrationTest, UserStreamIgnoresNonBalanceEvent)
     })");
 
     EXPECT_FALSE(service.getBalance("USDT").has_value());
+    EXPECT_EQ(balanceNotifications, 0);
 }
 
 TEST_F(BinanceDealServiceIntegrationTest, UserStreamExecutionReportPublishesCompleteOrderUpdate)

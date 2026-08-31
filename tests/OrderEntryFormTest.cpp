@@ -457,7 +457,7 @@ TEST(OrderEntryFormTest, KeepsPlacementReadyWhileASuccessfulBalanceSnapshotIsRef
 
     QTRY_COMPARE_WITH_TIMEOUT(balanceAttempts.load(), 2, 1000);
     EXPECT_EQ(balanceStatus->text(),
-              QString("Refreshing Binance balances. The last successful snapshot remains available."));
+              QString("Refreshing Binance balances. The latest cached snapshot remains available."));
     EXPECT_TRUE(proceedButton->isEnabled());
     EXPECT_TRUE(entryForm.createBasicOrderDraft().has_value());
 
@@ -466,7 +466,7 @@ TEST(OrderEntryFormTest, KeepsPlacementReadyWhileASuccessfulBalanceSnapshotIsRef
                               UiTaskState::Status::FAILED,
                               1000);
     EXPECT_EQ(balanceStatus->text(),
-              QString("Binance balance refresh failed; using the last successful snapshot: "
+              QString("Binance balance refresh failed; using the latest cached snapshot: "
                       "later balance refresh failure"));
     EXPECT_TRUE(retryBalanceButton->isVisible());
     EXPECT_TRUE(proceedButton->isEnabled());

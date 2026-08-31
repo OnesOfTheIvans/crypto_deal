@@ -706,6 +706,11 @@ void BinanceDealService::updateCache(const vector<StreamBalanceDto> &balanceDtos
 
         updateBalanceCache(balance.a, free, locked);
     }
+
+    if (!balanceDtos.empty())
+    {
+        notifyBalanceCacheChanged();
+    }
 }
 
 void BinanceDealService::updateCache(const vector<AccountBalanceDto> &balanceDtos)
@@ -859,6 +864,7 @@ void BinanceDealService::setStreamStatus(StreamStatus status)
         }
     }
     orderUpdateCondition.notify_all();
+    notifyUserStreamStatusChanged();
 }
 
 void BinanceDealService::setStreamError(const string &error)
@@ -869,6 +875,7 @@ void BinanceDealService::setStreamError(const string &error)
         streamLastError = error;
     }
     orderUpdateCondition.notify_all();
+    notifyUserStreamStatusChanged();
 }
 
 long long BinanceDealService::getServerTime()
@@ -1064,15 +1071,6 @@ void BinanceDealService::startUserStreamConcurrent()
     if (runner.joinable())
     {
         stopUserStreamConcurrent();
-    }
-
-    try
-    {
-        getBalancesRest();
-    }
-    catch (const exception &e)
-    {
-        cerr << "Binance REST balances seed failed (continuing): " << e.what() << endl;
     }
 
     userStream = true;

@@ -247,6 +247,24 @@ TEST(DealServiceConcurrencyTest, ConcurrentStreamStopsJoinEachRunnerOnce)
     EXPECT_NO_THROW(stopConcurrently(bybit));
 }
 
+TEST(DealServiceConcurrencyTest, StreamStatusTransitionsNotifyEachServiceObserver)
+{
+    BinanceDealService binance("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    BybitDealService bybit("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    int binanceNotifications = 0;
+    int bybitNotifications = 0;
+    binance.setUserStreamEventHandlers({{}, [&binanceNotifications]() { ++binanceNotifications; }});
+    bybit.setUserStreamEventHandlers({{}, [&bybitNotifications]() { ++bybitNotifications; }});
+
+    test_private_access::setBinanceStreamStatus(binance, StreamStatus::CONNECTING);
+    test_private_access::setBinanceStreamStatus(binance, StreamStatus::CONNECTED);
+    test_private_access::setBybitStreamStatus(bybit, StreamStatus::CONNECTING);
+    test_private_access::setBybitStreamStatus(bybit, StreamStatus::CONNECTED);
+
+    EXPECT_EQ(binanceNotifications, 2);
+    EXPECT_EQ(bybitNotifications, 2);
+}
+
 TEST(DealServiceConcurrencyTest, BybitRejectsConcurrentOcoGroupReuse)
 {
     MockNetwork::instance().reset();

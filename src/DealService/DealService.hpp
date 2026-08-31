@@ -3,6 +3,7 @@
 
 #include "ExchangerType.hpp"
 #include "common/StreamStatus.hpp"
+#include "common/UserStreamEventHandlers.hpp"
 #include "common/domain/AssetBalance.hpp"
 #include "common/domain/OcoInfo.hpp"
 #include "common/domain/OcoWaitResult.hpp"
@@ -22,6 +23,7 @@
 
 #include <atomic>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -32,6 +34,10 @@ template <typename K, typename V> using flat_map = boost::container::flat_map<K,
 
 class DealService
 {
+  private:
+    std::mutex userStreamEventHandlersMutex;
+    UserStreamEventHandlers userStreamEventHandlers;
+
   protected:
     boost::asio::io_context ioc;
     boost::asio::ssl::context ctx;
@@ -47,6 +53,10 @@ class DealService
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
 
     void setUrlParameters(boost::urls::url &url, const std::map<std::string, std::string> &params) const;
+
+    void notifyBalanceCacheChanged();
+
+    void notifyUserStreamStatusChanged();
 
     template <typename T>
     void setParameterIfPresent(std::map<std::string, std::string> &parameterMap,
@@ -112,6 +122,10 @@ class DealService
     virtual void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalancesRest() = 0;
+
+    void setUserStreamEventHandlers(UserStreamEventHandlers handlers);
+
+    void clearUserStreamEventHandlers();
 
     ExchangerType getExchangerType() const;
 

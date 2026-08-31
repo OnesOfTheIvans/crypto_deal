@@ -1,8 +1,13 @@
 #include "DealService.hpp"
 
 #include <algorithm>
+#include <exception>
+#include <functional>
 #include <iomanip>
+#include <iostream>
+#include <mutex>
 #include <sstream>
+#include <utility>
 
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -38,6 +43,68 @@ void DealService::setUrlParameters(boost::urls::url &url, const map<string, stri
     {
         url.params().append({key, value});
     }
+}
+
+void DealService::notifyBalanceCacheChanged()
+{
+    function<void()> handler;
+    {
+        lock_guard<mutex> lock(userStreamEventHandlersMutex);
+        handler = userStreamEventHandlers.balancesChanged;
+    }
+
+    if (handler)
+    {
+        try
+        {
+            handler();
+        }
+        catch (const exception &error)
+        {
+            cerr << "Balance cache observer failed: " << error.what() << endl;
+        }
+        catch (...)
+        {
+            cerr << "Balance cache observer failed with a non-standard exception" << endl;
+        }
+    }
+}
+
+void DealService::notifyUserStreamStatusChanged()
+{
+    function<void()> handler;
+    {
+        lock_guard<mutex> lock(userStreamEventHandlersMutex);
+        handler = userStreamEventHandlers.statusChanged;
+    }
+
+    if (handler)
+    {
+        try
+        {
+            handler();
+        }
+        catch (const exception &error)
+        {
+            cerr << "User stream status observer failed: " << error.what() << endl;
+        }
+        catch (...)
+        {
+            cerr << "User stream status observer failed with a non-standard exception" << endl;
+        }
+    }
+}
+
+void DealService::setUserStreamEventHandlers(UserStreamEventHandlers handlers)
+{
+    lock_guard<mutex> lock(userStreamEventHandlersMutex);
+    userStreamEventHandlers = move(handlers);
+}
+
+void DealService::clearUserStreamEventHandlers()
+{
+    lock_guard<mutex> lock(userStreamEventHandlersMutex);
+    userStreamEventHandlers = {};
 }
 
 ExchangerType DealService::getExchangerType() const

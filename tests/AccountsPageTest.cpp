@@ -237,7 +237,7 @@ TEST(AccountsPageTest, KeepsVisibleSnapshotThroughFailedAndOverlappingRefreshes)
                               UiTaskState::Status::FAILED,
                               1000);
     EXPECT_EQ(binanceStatus->text(),
-              QString("Binance balance refresh failed. Showing the last successful snapshot: "
+              QString("Binance balance refresh failed. Showing the latest cached snapshot: "
                       "Binance manual refresh failure"));
     EXPECT_EQ(binanceTable->item(0, 3)->text(), QString("110"));
     EXPECT_TRUE(balanceCatalog.hasSuccessfulSnapshot(ExchangerType::BINANCE));
@@ -246,7 +246,7 @@ TEST(AccountsPageTest, KeepsVisibleSnapshotThroughFailedAndOverlappingRefreshes)
 
     QTRY_COMPARE_WITH_TIMEOUT(binanceService->getBalanceRequestCount(), 3u, 1000);
     EXPECT_EQ(binanceStatus->text(),
-              QString("Refreshing Binance balances. The last successful snapshot remains visible."));
+              QString("Refreshing Binance balances. The latest cached snapshot remains visible."));
     EXPECT_FALSE(binanceRefresh->isEnabled());
     EXPECT_TRUE(bybitRefresh->isEnabled());
     EXPECT_EQ(binanceTable->item(0, 3)->text(), QString("110"));
@@ -264,4 +264,46 @@ TEST(AccountsPageTest, KeepsVisibleSnapshotThroughFailedAndOverlappingRefreshes)
     EXPECT_EQ(binanceTable->item(0, 1)->text(), QString("250"));
     EXPECT_EQ(binanceTable->item(0, 2)->text(), QString("25"));
     EXPECT_EQ(binanceTable->item(0, 3)->text(), QString("275"));
+}
+
+TEST(AccountsPageTest, AppliesLiveRowsAndPresentsIndependentStreamFailure)
+{
+    getApplication();
+    AsyncTaskExecutor taskExecutor;
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE,
+                                                       TestDealService::TradablePairLoader{},
+                                                       TestDealService::SymbolInfoLoader{},
+                                                       []() { return createBinanceBalances(); });
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT,
+                                                     TestDealService::TradablePairLoader{},
+                                                     TestDealService::SymbolInfoLoader{},
+                                                     []() { return createBybitBalances(); });
+    BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
+    AccountsPage page(balanceCatalog);
+    page.show();
+
+    auto *binanceLiveStatus = page.findChild<QLabel *>("binanceBalancesLiveStatus");
+    auto *bybitLiveStatus = page.findChild<QLabel *>("bybitBalancesLiveStatus");
+    auto *binanceTable = page.findChild<QTableWidget *>("binanceBalancesTable");
+    ASSERT_NE(binanceLiveStatus, nullptr);
+    ASSERT_NE(bybitLiveStatus, nullptr);
+    ASSERT_NE(binanceTable, nullptr);
+
+    balanceCatalog.loadBalances();
+    balanceCatalog.startLiveUpdates();
+    QTRY_COMPARE_WITH_TIMEOUT(binanceLiveStatus->text(), QString("Binance live balance updates are connected."), 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(bybitLiveStatus->text(), QString("Bybit live balance updates are connected."), 1000);
+
+    binanceService->publishBalanceUpdate(createBalance("BTC", "0", "0"));
+    binanceService->publishBalanceUpdate(createBalance("ETH", "3.5", "0.25"));
+    QTRY_COMPARE_WITH_TIMEOUT(binanceTable->rowCount(), 1, 1000);
+    QTRY_COMPARE_WITH_TIMEOUT(binanceTable->item(0, 0)->text(), QString("ETH"), 1000);
+    EXPECT_EQ(binanceTable->item(0, 3)->text(), QString("3.75"));
+
+    bybitService->publishUserStreamStatus(StreamStatus::ERROR, "Bybit socket read failed");
+    QTRY_COMPARE_WITH_TIMEOUT(
+        bybitLiveStatus->text(),
+        QString("Bybit live balance updates are unavailable: Bybit socket read failed. Reconnecting automatically..."),
+        1000);
+    EXPECT_EQ(binanceLiveStatus->text(), QString("Binance live balance updates are connected."));
 }
