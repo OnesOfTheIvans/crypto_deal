@@ -1220,7 +1220,7 @@ TEST_F(BybitDealServiceIntegrationTest, CancelOco_Success)
     EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 2u);
 }
 
-TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateCancelsSiblingAndPublishesBothTerminalOrders)
+TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateWaitsForSiblingTerminalStreamUpdate)
 {
     auto service = createService();
     test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
@@ -1282,7 +1282,7 @@ TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateCancelsSiblingAndPublishe
     request.listClientOrderId = "GROUP";
     const OcoInfo ocoInfo = service.placeOco(request);
 
-    std::future<OrderInfo> result =
+    std::future<OcoWaitResult> result =
         std::async(std::launch::async, [&service, &ocoInfo]() { return service.waitUntilOcoOrderFilled(ocoInfo); });
     for (int attempts = 0; attempts < 100 && countRequestsContaining("/v5/order/realtime") < 2; ++attempts)
     {
@@ -1307,10 +1307,36 @@ TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateCancelsSiblingAndPublishe
     test_private_access::dispatchBybitUserStreamMessage(service, filledMessage);
     test_private_access::dispatchBybitUserStreamMessage(service, filledMessage);
 
+    for (int attempts = 0; attempts < 100 && countRequestsContaining("/v5/order/cancel") < 1; ++attempts)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
+    EXPECT_EQ(result.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+
+    const std::string cancelledMessage = R"({
+        "topic": "order",
+        "data": [{
+            "category": "spot",
+            "symbol": "BTCUSDT",
+            "orderId": "SL_ID",
+            "orderLinkId": "GROUP_SL",
+            "orderStatus": "Cancelled",
+            "qty": "0.5",
+            "cumExecQty": "0",
+            "cumExecValue": "0",
+            "leavesQty": "0",
+            "avgPrice": "0"
+        }]
+    })";
+    test_private_access::dispatchBybitUserStreamMessage(service, cancelledMessage);
+
     ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
-    const OrderInfo filledOrder = result.get();
-    EXPECT_EQ(filledOrder.orderId, "TP_ID");
-    EXPECT_EQ(filledOrder.status, "Filled");
+    const OcoWaitResult completedOco = result.get();
+    EXPECT_EQ(completedOco.filledOrder.orderId, "TP_ID");
+    EXPECT_EQ(completedOco.filledOrder.status, "Filled");
+    EXPECT_EQ(completedOco.siblingTerminalOrder.orderId, "SL_ID");
+    EXPECT_EQ(completedOco.siblingTerminalOrder.status, "Cancelled");
     EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
 }
 
@@ -1354,10 +1380,37 @@ TEST_F(BybitDealServiceIntegrationTest, ReconciledOcoFillCancelsSiblingBeforeRet
     request.listClientOrderId = "GROUP";
     const OcoInfo ocoInfo = service.placeOco(request);
 
-    const OrderInfo filledOrder = service.waitUntilOcoOrderFilled(ocoInfo);
+    std::future<OcoWaitResult> result =
+        std::async(std::launch::async, [&service, &ocoInfo]() { return service.waitUntilOcoOrderFilled(ocoInfo); });
+    for (int attempts = 0; attempts < 100 && countRequestsContaining("/v5/order/cancel") < 1; ++attempts)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
 
-    EXPECT_EQ(filledOrder.orderId, "TP_ID");
-    EXPECT_EQ(filledOrder.status, "Filled");
+    test_private_access::dispatchBybitUserStreamMessage(service, R"({
+        "topic": "order",
+        "data": [{
+            "category": "spot",
+            "symbol": "BTCUSDT",
+            "orderId": "SL_ID",
+            "orderLinkId": "GROUP_SL",
+            "orderStatus": "Cancelled",
+            "qty": "0.5",
+            "cumExecQty": "0",
+            "cumExecValue": "0",
+            "leavesQty": "0",
+            "avgPrice": "0"
+        }]
+    })");
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const OcoWaitResult completedOco = result.get();
+
+    EXPECT_EQ(completedOco.filledOrder.orderId, "TP_ID");
+    EXPECT_EQ(completedOco.filledOrder.status, "Filled");
+    EXPECT_EQ(completedOco.siblingTerminalOrder.orderId, "SL_ID");
+    EXPECT_EQ(completedOco.siblingTerminalOrder.status, "Cancelled");
     EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 1u);
 }
 

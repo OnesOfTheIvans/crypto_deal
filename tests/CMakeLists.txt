@@ -59,7 +59,7 @@ add_executable(GraphicalUserInterfaceTests
     GraphicalUserInterfaceTest.cpp
     OrderEntryFormTest.cpp
     OrderInputValidationTest.cpp
-    OrderPlacementModelTest.cpp
+    OrderSessionModelTest.cpp
     PairCatalogTest.cpp
     SymbolInfoCatalogTest.cpp
 )

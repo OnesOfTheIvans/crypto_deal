@@ -87,7 +87,7 @@ class TestDealService : public DealService
         return {};
     }
 
-    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &) override
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &) override
     {
         return {};
     }

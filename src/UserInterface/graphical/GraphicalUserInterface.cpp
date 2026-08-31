@@ -5,7 +5,7 @@
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
 #include "models/BalanceCatalog.hpp"
-#include "models/OrderPlacementModel.hpp"
+#include "models/OrderSessionModel.hpp"
 #include "models/PairCatalog.hpp"
 #include "models/SymbolInfoCatalog.hpp"
 
@@ -32,8 +32,8 @@ int GraphicalUserInterface::run()
     PairCatalog pairCatalog;
     BalanceCatalog balanceCatalog(taskExecutor, binanceDealService, bybitDealService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceDealService, bybitDealService);
-    OrderPlacementModel orderPlacementModel(taskExecutor, binanceDealService, bybitDealService);
-    CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceDealService, bybitDealService);
+    CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
     balanceCatalog.loadBalances();

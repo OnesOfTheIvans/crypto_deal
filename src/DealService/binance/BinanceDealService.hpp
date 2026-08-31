@@ -188,11 +188,13 @@ class BinanceDealService : public DealService
                                   PendingOrderUpdate &takeProfitUpdate,
                                   PendingOrderUpdate &stopLossUpdate);
 
-    OrderInfo processOcoOrdersUpdate(const OcoInfo &ocoInfo,
-                                     const PendingOrderUpdate &takeProfitUpdate,
-                                     const PendingOrderUpdate &stopLossUpdate);
+    PendingOrderUpdate waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo);
 
-    OrderInfo reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+    OcoWaitResult processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderUpdate &takeProfitUpdate,
+                                         const PendingOrderUpdate &stopLossUpdate);
+
+    OcoWaitResult reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
     std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
@@ -202,6 +204,8 @@ class BinanceDealService : public DealService
                                                              const std::optional<std::string> &reconciliationError);
 
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
+
+    OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -238,7 +242,7 @@ class BinanceDealService : public DealService
 
     OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
-    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 

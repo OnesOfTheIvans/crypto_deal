@@ -4,7 +4,7 @@
 #include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
-#include "graphical/models/OrderPlacementModel.hpp"
+#include "graphical/models/OrderSessionModel.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 
@@ -86,8 +86,8 @@ TEST(OrderEntryFormTest, ShowsLimitsAndGatesProceedWithExplicitQuantityAndPriceC
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *limits = window.findChild<QLabel *>("orderTradingLimits");
@@ -208,8 +208,8 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
     auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
@@ -218,7 +218,6 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     auto *useStopLimit = window.findChild<QCheckBox *>("placeOcoUseStopLimit");
     auto *stopLimitPriceInput = window.findChild<QLineEdit *>("placeOcoStopLimitPriceInput");
     auto *formError = window.findChild<QLabel *>("orderFormValidationError");
-    auto *placementAvailability = window.findChild<QLabel *>("orderPlacementAvailability");
     auto *proceedButton = window.findChild<QPushButton *>("orderProceedButton");
 
     ASSERT_NE(symbolStatus, nullptr);
@@ -229,7 +228,6 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     ASSERT_NE(useStopLimit, nullptr);
     ASSERT_NE(stopLimitPriceInput, nullptr);
     ASSERT_NE(formError, nullptr);
-    ASSERT_NE(placementAvailability, nullptr);
     ASSERT_NE(proceedButton, nullptr);
 
     window.show();
@@ -259,7 +257,6 @@ TEST(OrderEntryFormTest, ValidatesOnlyActiveOcoFieldsAndExplicitNotionalLimits)
     EXPECT_FALSE(proceedButton->isEnabled());
 
     stopPriceInput->setText("5000");
-    EXPECT_FALSE(placementAvailability->isVisible());
     EXPECT_TRUE(proceedButton->isEnabled());
 
     useStopLimit->setChecked(true);
@@ -297,8 +294,8 @@ TEST(OrderEntryFormTest, ShowsExactSymbolFailureAndRetriesWithoutChangingTheSele
     auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");
     auto *retryButton = window.findChild<QPushButton *>("retrySymbolInfoButton");
     auto *amountInput = window.findChild<QLineEdit *>("orderAmountInput");
@@ -350,8 +347,8 @@ TEST(OrderEntryFormTest, GatesPlacementUntilSelectedBalancesLoadAndRetriesAnExac
         [](const string &symbol) { return createBtcSymbolInfo(symbol); });
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
-    OrderPlacementModel orderPlacementModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderPlacementModel);
+    OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *symbolStatus = window.findChild<QLabel *>("selectedSymbolInfoStatus");

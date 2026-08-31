@@ -37,7 +37,7 @@ namespace {
             return filledOrder;
         }
 
-        OrderInfo waitUntilOcoOrderFilled(const OcoInfo &) override
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &) override
         {
             ++ocoWaitCalls;
             if (failOcoWait)
@@ -45,7 +45,7 @@ namespace {
                 throw std::runtime_error("OCO failed");
             }
 
-            return filledOrder;
+            return {filledOrder, {}};
         }
 
         flat_map<std::string, AssetBalance> getBalances() const override

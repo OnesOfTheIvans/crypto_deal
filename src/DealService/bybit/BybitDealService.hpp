@@ -209,11 +209,13 @@ class BybitDealService : public DealService
     void
     waitForOcoTerminalStatus(const OcoInfo &ocoInfo, PendingOrderWait &takeProfitWait, PendingOrderWait &stopLossWait);
 
-    OrderInfo processOcoOrdersUpdate(const OcoInfo &ocoInfo,
-                                     const PendingOrderWait &takeProfitWait,
-                                     const PendingOrderWait &stopLossWait);
+    PendingOrderWait waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo);
 
-    OrderInfo reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+    OcoWaitResult processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderWait &takeProfitWait,
+                                         const PendingOrderWait &stopLossWait);
+
+    OcoWaitResult reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
     std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
@@ -224,7 +226,7 @@ class BybitDealService : public DealService
 
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
 
-    OrderInfo completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder);
+    OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -237,7 +239,7 @@ class BybitDealService : public DealService
 
     std::optional<std::string> cancelOcoGroupOrder(const OrderQuery &order, OrderInfo &cancelInfo);
 
-    std::optional<std::string> cancelOcoOtherLegFromUpdate(const OrderQuery &order, OrderInfo &cancelInfo);
+    std::optional<std::string> requestOcoOtherLegCancellation(const OrderQuery &order);
 
     flat_map<std::string, std::string>
     createHeaders(const std::string &apiKey, const std::string &signature, const msec &timestamp);
@@ -284,8 +286,7 @@ class BybitDealService : public DealService
 
     void handleOrderUpdate(const bybit::StreamOrderMessageDto &message);
 
-    std::optional<std::string> processOcoUpdate(const std::string &orderLinkId,
-                                                std::optional<OrderInfo> &cancelledOrder);
+    std::optional<std::string> processOcoUpdate(const std::string &orderLinkId);
 
     void publishOcoError(const std::string &orderLinkId, const std::string &error);
 
@@ -329,7 +330,7 @@ class BybitDealService : public DealService
 
     OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
-    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
 
     Decimal getTickerPrice(const std::string &symbol);
 

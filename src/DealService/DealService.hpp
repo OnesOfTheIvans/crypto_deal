@@ -5,6 +5,7 @@
 #include "common/StreamStatus.hpp"
 #include "common/domain/AssetBalance.hpp"
 #include "common/domain/OcoInfo.hpp"
+#include "common/domain/OcoWaitResult.hpp"
 #include "common/domain/OrderInfo.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderQuery.hpp"
@@ -77,7 +78,7 @@ class DealService
 
     virtual OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
 
-    virtual OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
+    virtual OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 

@@ -62,9 +62,7 @@ class OrderEntryForm final : public QWidget
     DecimalInputField *ocoStopPriceField;
     DecimalInputField *ocoStopLimitPriceField;
     QLabel *formValidationError;
-    QLabel *placementAvailabilityMessage;
     QPushButton *proceedButton;
-    bool placementActive;
 
     void createLayout();
 
@@ -103,8 +101,6 @@ class OrderEntryForm final : public QWidget
     void updateInputAvailability(bool enabled);
 
     void validateForm();
-
-    void updatePlacementAvailability();
 
     bool showFieldValidation(DecimalInputField &field, const DecimalInputValidation &validation, Decimal increment);
 
@@ -146,8 +142,6 @@ class OrderEntryForm final : public QWidget
     std::optional<BasicOrderDraft> createBasicOrderDraft() const;
 
     std::optional<OcoOrderDraft> createOcoOrderDraft() const;
-
-    void setPlacementActive(bool active);
 
   signals:
     void requestConfirmation();

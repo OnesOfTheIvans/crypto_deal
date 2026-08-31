@@ -232,13 +232,14 @@ optional<string> BinanceDealService::cancelOcoAfterFailure(const OcoInfo &ocoInf
     }
 }
 
-OrderInfo BinanceDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
+OcoWaitResult BinanceDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo,
+                                                                         bool isTakeProfitFailed)
 {
     const optional<string> reconciliationError = reconcileOcoSiblingOrder(ocoInfo, isTakeProfitFailed);
     const optional<OrderInfo> filledOrder = getFilledOcoOrder(ocoInfo);
     if (filledOrder.has_value())
     {
-        return filledOrder.value();
+        return completeOcoWait(ocoInfo, filledOrder.value());
     }
 
     throwOcoWaitAfterReconciliationFailure(ocoInfo, reconciliationError);
@@ -409,9 +410,51 @@ void BinanceDealService::waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
     stopLossUpdate = getPendingOrderUpdate(stopLossKey);
 }
 
-OrderInfo BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
-                                                     const PendingOrderUpdate &takeProfitUpdate,
-                                                     const PendingOrderUpdate &stopLossUpdate)
+BinanceDealService::PendingOrderUpdate BinanceDealService::waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder,
+                                                                                           const OcoInfo &ocoInfo)
+{
+    const OrderInfo &siblingOrder =
+        filledOrder.orderId == ocoInfo.takeProfitOrder.orderId ? ocoInfo.stopLossOrder : ocoInfo.takeProfitOrder;
+    const OrderKey siblingKey = getOrderKey(siblingOrder.symbol, siblingOrder.orderId);
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    orderUpdateCondition.wait(lock,
+                              [this, &siblingKey]()
+                              {
+                                  const PendingOrderUpdate &siblingUpdate = getPendingOrderUpdate(siblingKey);
+                                  return (siblingUpdate.has_value() && isOrderTerminal(siblingUpdate->status)) ||
+                                         getUserStreamStatus() != StreamStatus::CONNECTED;
+                              });
+
+    return getPendingOrderUpdate(siblingKey);
+}
+
+OcoWaitResult BinanceDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder)
+{
+    const PendingOrderUpdate siblingUpdate = waitForOcoSiblingTerminalStatus(filledOrder, ocoInfo);
+    if (!siblingUpdate.has_value())
+    {
+        const string streamError = getUserStreamLastError();
+        throwOcoWaitFailure(ocoInfo,
+                            "user stream stopped before the sibling child reached a terminal status" +
+                                (streamError.empty() ? "" : ": " + streamError),
+                            nullopt);
+    }
+    if (isOrderFilled(siblingUpdate->status))
+    {
+        const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+        throwOcoWaitFailure(ocoInfo, "both child orders were filled", cleanupError);
+    }
+    if (!isOrderTerminal(siblingUpdate->status))
+    {
+        throwOcoWaitFailure(ocoInfo, "the sibling child did not reach a terminal status", nullopt);
+    }
+
+    return {filledOrder, siblingUpdate.value()};
+}
+
+OcoWaitResult BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                                         const PendingOrderUpdate &takeProfitUpdate,
+                                                         const PendingOrderUpdate &stopLossUpdate)
 {
     const bool takeProfitFilled = takeProfitUpdate.has_value() && isOrderFilled(takeProfitUpdate->status);
     const bool stopLossFilled = stopLossUpdate.has_value() && isOrderFilled(stopLossUpdate->status);
@@ -423,11 +466,11 @@ OrderInfo BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
     }
     if (takeProfitFilled)
     {
-        return takeProfitUpdate.value();
+        return completeOcoWait(ocoInfo, takeProfitUpdate.value());
     }
     if (stopLossFilled)
     {
-        return stopLossUpdate.value();
+        return completeOcoWait(ocoInfo, stopLossUpdate.value());
     }
 
     const bool isTakeProfitFailed = takeProfitUpdate.has_value() && !isOrderFilled(takeProfitUpdate->status) &&
@@ -446,7 +489,7 @@ OrderInfo BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
                         cleanupError);
 }
 
-OrderInfo BinanceDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
+OcoWaitResult BinanceDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
 {
     const OrderInfo &takeProfitOrder = ocoInfo.takeProfitOrder;
     const OrderInfo &stopLossOrder = ocoInfo.stopLossOrder;

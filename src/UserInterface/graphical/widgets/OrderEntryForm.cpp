@@ -66,8 +66,7 @@ OrderEntryForm::OrderEntryForm(PairCatalog &pairCatalog,
       placeOrderLimitFields(nullptr), placeOrderPriceLabel(nullptr), placeOrderPriceField(nullptr),
       ocoSideSelector(nullptr), useOcoStopLimit(nullptr), ocoStopLimitFields(nullptr), ocoLimitPriceLabel(nullptr),
       ocoStopPriceLabel(nullptr), ocoStopLimitPriceLabel(nullptr), ocoLimitPriceField(nullptr),
-      ocoStopPriceField(nullptr), ocoStopLimitPriceField(nullptr), formValidationError(nullptr),
-      placementAvailabilityMessage(nullptr), proceedButton(nullptr), placementActive(false)
+      ocoStopPriceField(nullptr), ocoStopLimitPriceField(nullptr), formValidationError(nullptr), proceedButton(nullptr)
 {
     setObjectName("orderEntryForm");
     createLayout();
@@ -226,12 +225,6 @@ optional<OcoOrderDraft> OrderEntryForm::createOcoOrderDraft() const
     return draft;
 }
 
-void OrderEntryForm::setPlacementActive(bool active)
-{
-    placementActive = active;
-    validateForm();
-}
-
 void OrderEntryForm::createLayout()
 {
     auto *layout = new QVBoxLayout(this);
@@ -383,13 +376,6 @@ void OrderEntryForm::createLayout()
     formValidationError->setWordWrap(true);
     formValidationError->hide();
 
-    placementAvailabilityMessage = new QLabel(pairDependentControls);
-    placementAvailabilityMessage->setObjectName("orderPlacementAvailability");
-    placementAvailabilityMessage->setProperty("placementAvailability", true);
-    placementAvailabilityMessage->setTextFormat(Qt::PlainText);
-    placementAvailabilityMessage->setWordWrap(true);
-    placementAvailabilityMessage->hide();
-
     proceedButton = new QPushButton("Proceed to confirmation", pairDependentControls);
     proceedButton->setObjectName("orderProceedButton");
     proceedButton->setProperty("primaryOrderAction", true);
@@ -403,7 +389,6 @@ void OrderEntryForm::createLayout()
     pairDependentLayout->addLayout(amountLayout);
     pairDependentLayout->addWidget(operationFormStack);
     pairDependentLayout->addWidget(formValidationError);
-    pairDependentLayout->addWidget(placementAvailabilityMessage);
     pairDependentLayout->addWidget(proceedButton, 0, Qt::AlignRight);
 
     layout->addLayout(contextLayout);
@@ -940,7 +925,6 @@ void OrderEntryForm::updateInputAvailability(bool enabled)
 
 void OrderEntryForm::validateForm()
 {
-    updatePlacementAvailability();
     const SymbolInfo *symbolInfo = getSelectedSymbolInfo();
     if (symbolInfo == nullptr)
     {
@@ -1015,20 +999,7 @@ void OrderEntryForm::validateForm()
                                                          ocoStopLimitPriceValidation);
     formValidationError->setText(notionalError);
     formValidationError->setVisible(shouldShowNotionalValidation(notionalError));
-    proceedButton->setEnabled(formIsValid && notionalError.isEmpty() && hasReadySelectedBalances() && !placementActive);
-}
-
-void OrderEntryForm::updatePlacementAvailability()
-{
-    if (placementActive)
-    {
-        placementAvailabilityMessage->setText(
-            "Finish monitoring the current order before placing another. Session order tracking will remove this "
-            "temporary limitation.");
-        placementAvailabilityMessage->show();
-        return;
-    }
-    placementAvailabilityMessage->hide();
+    proceedButton->setEnabled(formIsValid && notionalError.isEmpty() && hasReadySelectedBalances());
 }
 
 bool OrderEntryForm::showFieldValidation(DecimalInputField &field,

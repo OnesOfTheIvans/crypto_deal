@@ -279,7 +279,7 @@ optional<string> BybitDealService::cancelOcoAfterFailure(const OcoInfo &ocoInfo)
     return nullopt;
 }
 
-OrderInfo BybitDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
+OcoWaitResult BybitDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
 {
     const optional<string> reconciliationError = reconcileOcoSiblingOrder(ocoInfo, isTakeProfitFailed);
     const optional<OrderInfo> filledOrder = getFilledOcoOrder(ocoInfo);
@@ -348,25 +348,45 @@ void BybitDealService::throwOcoWaitAfterReconciliationFailure(const OcoInfo &oco
     throwOcoWaitFailure(ocoInfo, reason, cleanupError);
 }
 
-OrderInfo BybitDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder)
+OcoWaitResult BybitDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder)
 {
     throwIf(filledOrder.clientOrderId.empty(),
             "Bybit OCO filled order " + filledOrder.orderId + " is missing its client order id");
 
-    optional<OrderInfo> cancelledOrder;
-    const optional<string> cancellationError = processOcoUpdate(filledOrder.clientOrderId, cancelledOrder);
+    const optional<string> cancellationError = processOcoUpdate(filledOrder.clientOrderId);
     if (cancellationError.has_value())
     {
         publishOcoError(filledOrder.clientOrderId, cancellationError.value());
         const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
         throwOcoWaitFailure(ocoInfo, "failed to cancel the unfilled child: " + cancellationError.value(), cleanupError);
     }
-    if (cancelledOrder.has_value())
+    const PendingOrderWait siblingWait = waitForOcoSiblingTerminalStatus(filledOrder, ocoInfo);
+    if (siblingWait.error.has_value())
     {
-        publishOrderUpdate(cancelledOrder.value());
+        throwOcoWaitFailure(ocoInfo,
+                            "failed while waiting for the sibling child to reach a terminal status: " +
+                                siblingWait.error.value(),
+                            nullopt);
+    }
+    if (!siblingWait.orderInfo.has_value())
+    {
+        const string streamError = getUserStreamLastError();
+        throwOcoWaitFailure(ocoInfo,
+                            "user stream stopped before the sibling child reached a terminal status" +
+                                (streamError.empty() ? "" : ": " + streamError),
+                            nullopt);
+    }
+    if (isOrderFilled(siblingWait.orderInfo->status))
+    {
+        const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
+        throwOcoWaitFailure(ocoInfo, "both child orders were filled", cleanupError);
+    }
+    if (!isOrderTerminal(siblingWait.orderInfo->status))
+    {
+        throwOcoWaitFailure(ocoInfo, "the sibling child did not reach a terminal status", nullopt);
     }
 
-    return filledOrder;
+    return {filledOrder, siblingWait.orderInfo.value()};
 }
 
 void BybitDealService::throwOrderWaitFailure(const OrderInfo &orderInfo) const
@@ -494,9 +514,29 @@ void BybitDealService::waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
     stopLossWait = getPendingOrderWait(stopLossKey);
 }
 
-OrderInfo BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
-                                                   const PendingOrderWait &takeProfitWait,
-                                                   const PendingOrderWait &stopLossWait)
+BybitDealService::PendingOrderWait BybitDealService::waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder,
+                                                                                     const OcoInfo &ocoInfo)
+{
+    const OrderInfo &siblingOrder =
+        filledOrder.orderId == ocoInfo.takeProfitOrder.orderId ? ocoInfo.stopLossOrder : ocoInfo.takeProfitOrder;
+    const OrderKey siblingKey = getOrderKey(siblingOrder.symbol, siblingOrder.orderId);
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    orderUpdateCondition.wait(lock,
+                              [this, &siblingKey]()
+                              {
+                                  const PendingOrderWait &siblingWait = getPendingOrderWait(siblingKey);
+                                  return siblingWait.error.has_value() ||
+                                         (siblingWait.orderInfo.has_value() &&
+                                          isOrderTerminal(siblingWait.orderInfo->status)) ||
+                                         getUserStreamStatus() != StreamStatus::CONNECTED;
+                              });
+
+    return getPendingOrderWait(siblingKey);
+}
+
+OcoWaitResult BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                                       const PendingOrderWait &takeProfitWait,
+                                                       const PendingOrderWait &stopLossWait)
 {
     const bool takeProfitFilled =
         takeProfitWait.orderInfo.has_value() && isOrderFilled(takeProfitWait.orderInfo->status);
@@ -540,7 +580,7 @@ OrderInfo BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
                         cleanupError);
 }
 
-OrderInfo BybitDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
+OcoWaitResult BybitDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
 {
     const OrderInfo &takeProfitOrder = ocoInfo.takeProfitOrder;
     const OrderInfo &stopLossOrder = ocoInfo.stopLossOrder;
@@ -1881,9 +1921,10 @@ optional<string> BybitDealService::cancelOcoGroupOrder(const OrderQuery &order, 
     }
 }
 
-optional<string> BybitDealService::cancelOcoOtherLegFromUpdate(const OrderQuery &order, OrderInfo &cancelInfo)
+optional<string> BybitDealService::requestOcoOtherLegCancellation(const OrderQuery &order)
 {
     string cancelError;
+    OrderInfo cancelInfo;
 
     try
     {
@@ -1971,8 +2012,7 @@ OcoInfo BybitDealService::placeOco(const PlaceOcoRequest &request)
 
     if (pendingFilledOrderLinkId.has_value())
     {
-        optional<OrderInfo> cancelledOrder;
-        const optional<string> pendingOcoError = processOcoUpdate(pendingFilledOrderLinkId.value(), cancelledOrder);
+        const optional<string> pendingOcoError = processOcoUpdate(pendingFilledOrderLinkId.value());
         throwIf(pendingOcoError.has_value(),
                 "Bybit OCO " + groupId +
                     " failed while cancelling the unfilled child: " + pendingOcoError.value_or(""));
@@ -2106,15 +2146,10 @@ void BybitDealService::handleOrderUpdate(const StreamOrderMessageDto &message)
         const OrderInfo orderInfo = createOrderInfo(order);
         if (isOrderFilled(orderInfo.status) && !orderInfo.clientOrderId.empty())
         {
-            optional<OrderInfo> cancelledOrder;
-            const optional<string> ocoError = processOcoUpdate(orderInfo.clientOrderId, cancelledOrder);
+            const optional<string> ocoError = processOcoUpdate(orderInfo.clientOrderId);
             if (!ocoError.has_value())
             {
                 publishOrderUpdate(orderInfo);
-                if (cancelledOrder.has_value())
-                {
-                    publishOrderUpdate(cancelledOrder.value());
-                }
             }
             else
             {
@@ -2128,7 +2163,7 @@ void BybitDealService::handleOrderUpdate(const StreamOrderMessageDto &message)
     }
 }
 
-optional<string> BybitDealService::processOcoUpdate(const string &orderLinkId, optional<OrderInfo> &cancelledOrder)
+optional<string> BybitDealService::processOcoUpdate(const string &orderLinkId)
 {
     string groupId;
     OrderQuery otherLegQuery;
@@ -2169,12 +2204,7 @@ optional<string> BybitDealService::processOcoUpdate(const string &orderLinkId, o
         }
     }
 
-    OrderInfo cancelInfo;
-    const optional<string> cancelError = cancelOcoOtherLegFromUpdate(otherLegQuery, cancelInfo);
-    if (!cancelError.has_value())
-    {
-        cancelledOrder = cancelInfo;
-    }
+    const optional<string> cancelError = requestOcoOtherLegCancellation(otherLegQuery);
 
     {
         lock_guard<mutex> lock(ocoMutex);

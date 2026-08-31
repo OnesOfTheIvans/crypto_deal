@@ -136,9 +136,9 @@ OperationFactory::OperationFactory()
                               request.stopClientOrderId = preset.stopClientOrderId;
                               OcoInfo ocoInfo = service->placeOco(request);
 
-                              const OrderInfo filledOrder = service->waitUntilOcoOrderFilled(ocoInfo);
+                              const OcoWaitResult result = service->waitUntilOcoOrderFilled(ocoInfo);
 
-                              context.quantity = getReceivedQuantity(filledOrder, preset.side);
+                              context.quantity = getReceivedQuantity(result.filledOrder, preset.side);
                               context.inAsset = preset.outAsset;
                           };
                       });

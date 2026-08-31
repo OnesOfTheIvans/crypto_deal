@@ -48,7 +48,7 @@ namespace {
             return filledOrder;
         }
 
-        OrderInfo waitUntilOcoOrderFilled(const OcoInfo &) override
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &) override
         {
             return {};
         }

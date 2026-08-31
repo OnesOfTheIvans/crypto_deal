@@ -833,7 +833,7 @@ TEST_F(BinanceDealServiceIntegrationTest, FailedWaitRemovesOrderRegistration)
     EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 2u);
 }
 
-TEST_F(BinanceDealServiceIntegrationTest, OcoWaitUsesNamedLegsAndReturnsFilledSibling)
+TEST_F(BinanceDealServiceIntegrationTest, OcoWaitUsesNamedLegsAndReturnsBothTerminalChildren)
 {
     auto service = createService();
     test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
@@ -848,10 +848,12 @@ TEST_F(BinanceDealServiceIntegrationTest, OcoWaitUsesNamedLegsAndReturnsFilledSi
     ocoInfo.stopLossOrder.symbol = "BTCUSDT";
     ocoInfo.stopLossOrder.orderId = "811";
 
-    const OrderInfo filledOrder = service.waitUntilOcoOrderFilled(ocoInfo);
+    const OcoWaitResult result = service.waitUntilOcoOrderFilled(ocoInfo);
 
-    EXPECT_EQ(filledOrder.orderId, "811");
-    EXPECT_EQ(filledOrder.status, "FILLED");
+    EXPECT_EQ(result.filledOrder.orderId, "811");
+    EXPECT_EQ(result.filledOrder.status, "FILLED");
+    EXPECT_EQ(result.siblingTerminalOrder.orderId, "810");
+    EXPECT_EQ(result.siblingTerminalOrder.status, "CANCELED");
     EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 2u);
 }
 

@@ -8,9 +8,10 @@
 class QLabel;
 class BalanceCatalog;
 class OrderEntryForm;
-class OrderPlacementModel;
+class OrderSessionModel;
 class PairCatalog;
 class QString;
+class QTreeWidget;
 class SymbolInfoCatalog;
 class QWidget;
 
@@ -20,26 +21,28 @@ class OrdersPage final : public QWidget
     PairCatalog &pairCatalog;
     BalanceCatalog &balanceCatalog;
     SymbolInfoCatalog &symbolInfoCatalog;
-    OrderPlacementModel &orderPlacementModel;
+    OrderSessionModel &orderSessionModel;
     QLabel *binanceCatalogStatus;
     QLabel *bybitCatalogStatus;
     OrderEntryForm *orderEntryForm;
-    QWidget *placementStatusPanel;
-    QLabel *placementStatusTitle;
-    QLabel *placementStatusDetails;
-    QLabel *placementStatusError;
+    QLabel *activeOrdersEmptyState;
+    QLabel *allSessionOrdersEmptyState;
+    QTreeWidget *activeOrdersTable;
+    QTreeWidget *allSessionOrdersTable;
 
     void updateCatalogStatus(ExchangerType exchangerType, QLabel &statusLabel, const QString &exchangeName);
 
     void requestOrderConfirmation();
 
-    void updatePlacementStatus();
+    void updateSessionOrderTables();
+
+    void updateSessionOrderTable(QTreeWidget &table, QLabel &emptyState, bool showOnlyActiveOrders);
 
   public:
     OrdersPage(PairCatalog &pairCatalog,
                BalanceCatalog &balanceCatalog,
                SymbolInfoCatalog &symbolInfoCatalog,
-               OrderPlacementModel &orderPlacementModel,
+               OrderSessionModel &orderSessionModel,
                QWidget *parent = nullptr);
 };
 

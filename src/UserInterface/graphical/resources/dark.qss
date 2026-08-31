@@ -123,25 +123,18 @@ QLabel[tradingLimits="true"] {
     padding: 9px 10px;
 }
 
-QWidget[placementStatusPanel="true"],
 QLabel[confirmationSummary="true"] {
     background-color: #151a23;
     border: 1px solid #2a3342;
     border-radius: 6px;
 }
 
-QWidget[placementStatusPanel="true"] {
-    margin-top: 8px;
-}
-
-QLabel[placementStatusTitle="true"],
 QLabel[confirmationTitle="true"] {
     color: #dbe2ed;
     font-size: 15px;
     font-weight: 600;
 }
 
-QLabel[placementStatusDetails="true"],
 QLabel[confirmationSummary="true"] {
     color: #aeb7c7;
     font-size: 12px;
@@ -151,9 +144,64 @@ QLabel[confirmationSummary="true"] {
     padding: 12px;
 }
 
-QLabel[placementAvailability="true"] {
-    color: #e2bd73;
+QLabel[sessionOrdersEmptyState="true"] {
+    color: #7f899b;
     font-size: 12px;
+    padding: 10px 2px;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"]::pane,
+QTabWidget[sessionOrdersTabs="true"]::pane {
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    background-color: #151a23;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab {
+    background-color: #202631;
+    border: 1px solid #2a3342;
+    border-bottom: 0;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    margin-right: 3px;
+    padding: 7px 11px;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:selected,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected {
+    background-color: #151a23;
+    color: #e3e9f2;
+}
+
+QTreeWidget[sessionOrdersTable="true"] {
+    alternate-background-color: #181e28;
+    background-color: #151a23;
+    border: 0;
+    color: #c8d0dc;
+    font-size: 12px;
+    gridline-color: #2a3342;
+}
+
+QTreeWidget[sessionOrdersTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 5px;
+}
+
+QTreeWidget[sessionOrdersTable="true"]::item:selected {
+    background-color: #273b60;
+}
+
+QHeaderView::section {
+    background-color: #202631;
+    border: 0;
+    border-bottom: 1px solid #2a3342;
+    color: #9da8b9;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px;
 }
 
 QDialog#orderConfirmationDialog {

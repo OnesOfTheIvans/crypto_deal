@@ -11,7 +11,7 @@ class QString;
 class QWidget;
 class BalanceCatalog;
 class PairCatalog;
-class OrderPlacementModel;
+class OrderSessionModel;
 class SymbolInfoCatalog;
 
 class CryptoDealWindow final : public QMainWindow
@@ -20,7 +20,7 @@ class CryptoDealWindow final : public QMainWindow
     PairCatalog &pairCatalog;
     BalanceCatalog &balanceCatalog;
     SymbolInfoCatalog &symbolInfoCatalog;
-    OrderPlacementModel &orderPlacementModel;
+    OrderSessionModel &orderSessionModel;
     QStackedWidget *pageStack;
 
     void createLayout();
@@ -35,7 +35,7 @@ class CryptoDealWindow final : public QMainWindow
     CryptoDealWindow(PairCatalog &pairCatalog,
                      BalanceCatalog &balanceCatalog,
                      SymbolInfoCatalog &symbolInfoCatalog,
-                     OrderPlacementModel &orderPlacementModel,
+                     OrderSessionModel &orderSessionModel,
                      QWidget *parent = nullptr);
 };
 
