@@ -14,6 +14,7 @@ add_executable(DealServiceUnitIntegrationTests
     OperationChainTest.cpp
     OperationChainDefinitionLoaderTest.cpp
     OperationChainIntegrationTest.cpp
+    OperationChainRunManagerTest.cpp
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
@@ -28,6 +29,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/OperationChain/OperationChainBuilder.cpp
     ../src/OperationChain/OperationChainDefinition.cpp
     ../src/OperationChain/OperationChainDefinitionLoader.cpp
+    ../src/OperationChain/OperationChainRunManager.cpp
     ../src/OperationChain/OperationDefinition.cpp
 )
 

@@ -3,6 +3,7 @@ add_library(OperationChainLib
     OperationChainBuilder.cpp
     OperationChainDefinition.cpp
     OperationChainDefinitionLoader.cpp
+    OperationChainRunManager.cpp
     OperationDefinition.cpp
     ExchangerPull.cpp
     OperationFactory.cpp

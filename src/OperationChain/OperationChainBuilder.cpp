@@ -2,13 +2,14 @@
 
 #include "OperationFactory.hpp"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
 using namespace std;
 
-OperationChain OperationChainBuilder::build(const OperationChainDefinition &definition,
-                                            const vector<Exchanger> &exchangers) const
+unique_ptr<OperationChain> OperationChainBuilder::build(const OperationChainDefinition &definition,
+                                                        const vector<Exchanger> &exchangers) const
 {
     const OperationFactory operationFactory;
     vector<operation> operations;
@@ -19,5 +20,5 @@ OperationChain OperationChainBuilder::build(const OperationChainDefinition &defi
         operations.push_back(operationFactory.create(operationDefinition.getType(), operationDefinition.getConfig()));
     }
 
-    return OperationChain(definition, move(operations), exchangers);
+    return make_unique<OperationChain>(definition, move(operations), exchangers);
 }

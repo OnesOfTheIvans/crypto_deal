@@ -2,6 +2,7 @@
 
 #include "CryptoDealWindow.hpp"
 #include "DealService.hpp"
+#include "OperationChainRunManager.hpp"
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
 #include "models/BalanceCatalog.hpp"
@@ -35,6 +36,7 @@ int GraphicalUserInterface::run()
     BalanceCatalog balanceCatalog(taskExecutor, binanceDealService, bybitDealService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceDealService, bybitDealService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceDealService, bybitDealService);
+    OperationChainRunManager chainRunManager(operationChainDefinitions, binanceDealService, bybitDealService);
     CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
@@ -42,8 +44,10 @@ int GraphicalUserInterface::run()
     balanceCatalog.startLiveUpdates();
 
     const int exitCode = QApplication::exec();
+    chainRunManager.requestStop();
     taskExecutor.requestStop();
     balanceCatalog.stopLiveUpdates();
+    chainRunManager.stopAndWait();
     taskExecutor.stopAndWait();
     return exitCode;
 }

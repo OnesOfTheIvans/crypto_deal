@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -196,8 +197,12 @@ TEST(OperationChainDefinitionLoaderTest, BuildsFreshChainsThroughOperationFactor
     const std::vector<OperationChainDefinition> definitions = OperationChainDefinitionLoader::load(file.getPath());
     const OperationChainBuilder builder;
 
-    EXPECT_NO_THROW(builder.build(definitions.front(), {}));
-    EXPECT_NO_THROW(builder.build(definitions.front(), {}));
+    const std::unique_ptr<OperationChain> firstChain = builder.build(definitions.front(), {});
+    const std::unique_ptr<OperationChain> secondChain = builder.build(definitions.front(), {});
+
+    ASSERT_NE(firstChain, nullptr);
+    ASSERT_NE(secondChain, nullptr);
+    EXPECT_NE(firstChain.get(), secondChain.get());
 }
 
 TEST(OperationChainDefinitionLoaderTest, RejectsDuplicateNamesWithFieldPath)

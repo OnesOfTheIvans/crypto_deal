@@ -4,12 +4,14 @@
 #include "OperationChain.hpp"
 #include "OperationChainDefinition.hpp"
 
+#include <memory>
 #include <vector>
 
 class OperationChainBuilder
 {
   public:
-    OperationChain build(const OperationChainDefinition &definition, const std::vector<Exchanger> &exchangers) const;
+    std::unique_ptr<OperationChain> build(const OperationChainDefinition &definition,
+                                          const std::vector<Exchanger> &exchangers) const;
 };
 
 #endif

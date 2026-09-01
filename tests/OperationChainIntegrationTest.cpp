@@ -155,9 +155,9 @@ TEST(OperationChainIntegrationTest, ExecutesFactoryOperationsAcrossExchangers)
                                                {OperationType::SEND_TO, sendConfig},
                                                {OperationType::SELL_CRYPTO, sellConfig}});
     const OperationChainBuilder builder;
-    OperationChain chain = builder.build(definition, {binanceService, bybitService});
+    std::unique_ptr<OperationChain> chain = builder.build(definition, {binanceService, bybitService});
 
-    chain.execute();
+    chain->execute();
 
     EXPECT_EQ(binanceService->buyBaseAsset, "BTC");
     EXPECT_EQ(binanceService->buyQuoteAsset, "USDT");
@@ -167,7 +167,7 @@ TEST(OperationChainIntegrationTest, ExecutesFactoryOperationsAcrossExchangers)
     EXPECT_EQ(bybitService->sellQuoteAsset, "USDT");
     EXPECT_EQ(bybitService->sellQuantity, Decimal{2});
     EXPECT_EQ(bybitService->orderWaitCalls, 1);
-    const OperationChainSnapshot snapshot = chain.getSnapshot();
+    const OperationChainSnapshot snapshot = chain->getSnapshot();
     EXPECT_EQ(snapshot.status, OperationChainStatus::COMPLETED);
     EXPECT_EQ(snapshot.currentContext, (OperationContextSnapshot{ExchangerType::BYBIT, "USDT", Decimal{250}}));
     ASSERT_EQ(snapshot.steps.size(), 3);
