@@ -26,6 +26,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>
@@ -88,7 +89,12 @@ class DealService
 
     virtual OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
 
+    virtual OrderInfo
+    waitUntilOrderFilled(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
+
     virtual OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
+
+    virtual OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, std::stop_token stopToken);
 
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 

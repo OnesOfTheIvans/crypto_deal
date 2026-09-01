@@ -116,7 +116,7 @@ class BybitDealService : public DealService
 
     std::map<OrderKey, PendingOrderWait> pendingOrderWaits;
     std::mutex pendingOrderWaitsMutex;
-    std::condition_variable orderUpdateCondition;
+    std::condition_variable_any orderUpdateCondition;
     std::mutex streamLifecycleMutex;
 
     std::atomic<long long> serverTimeOffset{0};
@@ -199,23 +199,29 @@ class BybitDealService : public DealService
 
     void prepareOrderSubscription(const std::string &symbol, const std::string &orderId);
 
-    PendingOrderWait waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId);
+    PendingOrderWait
+    waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
 
     OrderInfo
     processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderWait &pendingWait);
 
     void prepareOcoSubscription(const OcoInfo &ocoInfo);
 
-    void
-    waitForOcoTerminalStatus(const OcoInfo &ocoInfo, PendingOrderWait &takeProfitWait, PendingOrderWait &stopLossWait);
+    void waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
+                                  PendingOrderWait &takeProfitWait,
+                                  PendingOrderWait &stopLossWait,
+                                  std::stop_token stopToken);
 
-    PendingOrderWait waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo);
+    PendingOrderWait
+    waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo, std::stop_token stopToken);
 
     OcoWaitResult processOcoOrdersUpdate(const OcoInfo &ocoInfo,
                                          const PendingOrderWait &takeProfitWait,
-                                         const PendingOrderWait &stopLossWait);
+                                         const PendingOrderWait &stopLossWait,
+                                         std::stop_token stopToken);
 
-    OcoWaitResult reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+    OcoWaitResult
+    reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed, std::stop_token stopToken);
 
     std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
@@ -226,7 +232,7 @@ class BybitDealService : public DealService
 
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
 
-    OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder);
+    OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder, std::stop_token stopToken);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -330,7 +336,12 @@ class BybitDealService : public DealService
 
     OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
+    OrderInfo
+    waitUntilOrderFilled(const std::string &symbol, const std::string &orderId, std::stop_token stopToken) override;
+
     OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
+
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, std::stop_token stopToken) override;
 
     Decimal getTickerPrice(const std::string &symbol);
 

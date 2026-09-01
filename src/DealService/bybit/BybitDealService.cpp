@@ -1,6 +1,7 @@
 #include "BybitDealService.hpp"
 #include "EnumStringConverter.hpp"
 #include "common/OrderStatusUtil.hpp"
+#include "common/OrderWaitInterrupted.hpp"
 #include "common/SymbolRuleValidator.hpp"
 #include "common/TradablePairUtil.hpp"
 #include "common/exception_handling.hpp"
@@ -36,6 +37,15 @@ using namespace exception_handling;
 
 namespace {
     constexpr size_t BYBIT_OCO_GROUP_ID_MAX_LENGTH = 33;
+
+    void throwIfOrderWaitInterrupted(bool completed, const string &description)
+    {
+        if (!completed)
+        {
+            throw OrderWaitInterrupted(description + " was interrupted");
+        }
+    }
+
     template <typename ResponseDtoType> string getErrorMessage(const ResponseDtoType &response)
     {
         return "Bybit Error " + to_string(response.retCode) + ": " + response.retMsg.value_or("Unknown Error");
@@ -274,13 +284,15 @@ optional<string> BybitDealService::cancelOcoAfterFailure(const OcoInfo &ocoInfo)
     return nullopt;
 }
 
-OcoWaitResult BybitDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed)
+OcoWaitResult BybitDealService::reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo,
+                                                                       bool isTakeProfitFailed,
+                                                                       stop_token stopToken)
 {
     const optional<string> reconciliationError = reconcileOcoSiblingOrder(ocoInfo, isTakeProfitFailed);
     const optional<OrderInfo> filledOrder = getFilledOcoOrder(ocoInfo);
     if (filledOrder.has_value())
     {
-        return completeOcoWait(ocoInfo, filledOrder.value());
+        return completeOcoWait(ocoInfo, filledOrder.value(), stopToken);
     }
 
     throwOcoWaitAfterReconciliationFailure(ocoInfo, reconciliationError);
@@ -343,7 +355,8 @@ void BybitDealService::throwOcoWaitAfterReconciliationFailure(const OcoInfo &oco
     throwOcoWaitFailure(ocoInfo, reason, cleanupError);
 }
 
-OcoWaitResult BybitDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder)
+OcoWaitResult
+BybitDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder, stop_token stopToken)
 {
     throwIf(filledOrder.clientOrderId.empty(),
             "Bybit OCO filled order " + filledOrder.orderId + " is missing its client order id");
@@ -355,7 +368,7 @@ OcoWaitResult BybitDealService::completeOcoWait(const OcoInfo &ocoInfo, const Or
         const optional<string> cleanupError = cancelOcoAfterFailure(ocoInfo);
         throwOcoWaitFailure(ocoInfo, "failed to cancel the unfilled child: " + cancellationError.value(), cleanupError);
     }
-    const PendingOrderWait siblingWait = waitForOcoSiblingTerminalStatus(filledOrder, ocoInfo);
+    const PendingOrderWait siblingWait = waitForOcoSiblingTerminalStatus(filledOrder, ocoInfo, stopToken);
     if (siblingWait.error.has_value())
     {
         throwOcoWaitFailure(ocoInfo,
@@ -428,20 +441,22 @@ void BybitDealService::prepareOrderSubscription(const string &symbol, const stri
     reconcileOrder(pendingOrder);
 }
 
-BybitDealService::PendingOrderWait BybitDealService::waitForOrderTerminalStatus(const string &symbol,
-                                                                                const string &orderId)
+BybitDealService::PendingOrderWait
+BybitDealService::waitForOrderTerminalStatus(const string &symbol, const string &orderId, stop_token stopToken)
 {
     const OrderKey orderKey = getOrderKey(symbol, orderId);
     unique_lock<mutex> lock(pendingOrderWaitsMutex);
-    orderUpdateCondition.wait(lock,
-                              [this, &orderKey]()
-                              {
-                                  const PendingOrderWait &pendingWait = getPendingOrderWait(orderKey);
-                                  return pendingWait.error.has_value() ||
-                                         (pendingWait.orderInfo.has_value() &&
-                                          isOrderTerminal(pendingWait.orderInfo->status)) ||
-                                         getUserStreamStatus() != StreamStatus::CONNECTED;
-                              });
+    const bool completed = orderUpdateCondition.wait(
+        lock,
+        stopToken,
+        [this, &orderKey]()
+        {
+            const PendingOrderWait &pendingWait = getPendingOrderWait(orderKey);
+            return pendingWait.error.has_value() ||
+                   (pendingWait.orderInfo.has_value() && isOrderTerminal(pendingWait.orderInfo->status)) ||
+                   getUserStreamStatus() != StreamStatus::CONNECTED;
+        });
+    throwIfOrderWaitInterrupted(completed, "Bybit order wait " + symbol + "/" + orderId);
 
     return getPendingOrderWait(orderKey);
 }
@@ -469,11 +484,17 @@ BybitDealService::processOrderUpdate(const string &symbol, const string &orderId
 
 OrderInfo BybitDealService::waitUntilOrderFilled(const string &symbol, const string &orderId)
 {
+    return waitUntilOrderFilled(symbol, orderId, {});
+}
+
+OrderInfo BybitDealService::waitUntilOrderFilled(const string &symbol, const string &orderId, stop_token stopToken)
+{
     throwIf(symbol.empty() || orderId.empty(), "Symbol and orderId are required while waiting for a Bybit order");
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), "Bybit order wait " + symbol + "/" + orderId);
 
     const PendingOrderRegistration registration(*this, symbol, orderId);
     prepareOrderSubscription(symbol, orderId);
-    return processOrderUpdate(symbol, orderId, waitForOrderTerminalStatus(symbol, orderId));
+    return processOrderUpdate(symbol, orderId, waitForOrderTerminalStatus(symbol, orderId, stopToken));
 }
 
 void BybitDealService::prepareOcoSubscription(const OcoInfo &ocoInfo)
@@ -485,53 +506,59 @@ void BybitDealService::prepareOcoSubscription(const OcoInfo &ocoInfo)
 
 void BybitDealService::waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
                                                 PendingOrderWait &takeProfitWait,
-                                                PendingOrderWait &stopLossWait)
+                                                PendingOrderWait &stopLossWait,
+                                                stop_token stopToken)
 {
     const OrderKey takeProfitKey = getOrderKey(ocoInfo.takeProfitOrder.symbol, ocoInfo.takeProfitOrder.orderId);
     const OrderKey stopLossKey = getOrderKey(ocoInfo.stopLossOrder.symbol, ocoInfo.stopLossOrder.orderId);
     unique_lock<mutex> lock(pendingOrderWaitsMutex);
-    orderUpdateCondition.wait(lock,
-                              [this, &takeProfitKey, &stopLossKey]()
-                              {
-                                  const PendingOrderWait &currentTakeProfitWait = getPendingOrderWait(takeProfitKey);
-                                  const PendingOrderWait &currentStopLossWait = getPendingOrderWait(stopLossKey);
-                                  const bool takeProfitTerminal =
-                                      currentTakeProfitWait.orderInfo.has_value() &&
-                                      isOrderTerminal(currentTakeProfitWait.orderInfo->status);
-                                  const bool stopLossTerminal = currentStopLossWait.orderInfo.has_value() &&
-                                                                isOrderTerminal(currentStopLossWait.orderInfo->status);
-                                  return currentTakeProfitWait.error.has_value() ||
-                                         currentStopLossWait.error.has_value() || takeProfitTerminal ||
-                                         stopLossTerminal || getUserStreamStatus() != StreamStatus::CONNECTED;
-                              });
+    const bool completed = orderUpdateCondition.wait(
+        lock,
+        stopToken,
+        [this, &takeProfitKey, &stopLossKey]()
+        {
+            const PendingOrderWait &currentTakeProfitWait = getPendingOrderWait(takeProfitKey);
+            const PendingOrderWait &currentStopLossWait = getPendingOrderWait(stopLossKey);
+            const bool takeProfitTerminal =
+                currentTakeProfitWait.orderInfo.has_value() && isOrderTerminal(currentTakeProfitWait.orderInfo->status);
+            const bool stopLossTerminal =
+                currentStopLossWait.orderInfo.has_value() && isOrderTerminal(currentStopLossWait.orderInfo->status);
+            return currentTakeProfitWait.error.has_value() || currentStopLossWait.error.has_value() ||
+                   takeProfitTerminal || stopLossTerminal || getUserStreamStatus() != StreamStatus::CONNECTED;
+        });
+    throwIfOrderWaitInterrupted(completed, "Bybit OCO wait " + ocoInfo.orderListId);
 
     takeProfitWait = getPendingOrderWait(takeProfitKey);
     stopLossWait = getPendingOrderWait(stopLossKey);
 }
 
 BybitDealService::PendingOrderWait BybitDealService::waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder,
-                                                                                     const OcoInfo &ocoInfo)
+                                                                                     const OcoInfo &ocoInfo,
+                                                                                     stop_token stopToken)
 {
     const OrderInfo &siblingOrder =
         filledOrder.orderId == ocoInfo.takeProfitOrder.orderId ? ocoInfo.stopLossOrder : ocoInfo.takeProfitOrder;
     const OrderKey siblingKey = getOrderKey(siblingOrder.symbol, siblingOrder.orderId);
     unique_lock<mutex> lock(pendingOrderWaitsMutex);
-    orderUpdateCondition.wait(lock,
-                              [this, &siblingKey]()
-                              {
-                                  const PendingOrderWait &siblingWait = getPendingOrderWait(siblingKey);
-                                  return siblingWait.error.has_value() ||
-                                         (siblingWait.orderInfo.has_value() &&
-                                          isOrderTerminal(siblingWait.orderInfo->status)) ||
-                                         getUserStreamStatus() != StreamStatus::CONNECTED;
-                              });
+    const bool completed = orderUpdateCondition.wait(
+        lock,
+        stopToken,
+        [this, &siblingKey]()
+        {
+            const PendingOrderWait &siblingWait = getPendingOrderWait(siblingKey);
+            return siblingWait.error.has_value() ||
+                   (siblingWait.orderInfo.has_value() && isOrderTerminal(siblingWait.orderInfo->status)) ||
+                   getUserStreamStatus() != StreamStatus::CONNECTED;
+        });
+    throwIfOrderWaitInterrupted(completed, "Bybit OCO sibling wait " + ocoInfo.orderListId);
 
     return getPendingOrderWait(siblingKey);
 }
 
 OcoWaitResult BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
                                                        const PendingOrderWait &takeProfitWait,
-                                                       const PendingOrderWait &stopLossWait)
+                                                       const PendingOrderWait &stopLossWait,
+                                                       stop_token stopToken)
 {
     const bool takeProfitFilled =
         takeProfitWait.orderInfo.has_value() && isOrderFilled(takeProfitWait.orderInfo->status);
@@ -544,11 +571,11 @@ OcoWaitResult BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
     }
     if (takeProfitFilled)
     {
-        return completeOcoWait(ocoInfo, takeProfitWait.orderInfo.value());
+        return completeOcoWait(ocoInfo, takeProfitWait.orderInfo.value(), stopToken);
     }
     if (stopLossFilled)
     {
-        return completeOcoWait(ocoInfo, stopLossWait.orderInfo.value());
+        return completeOcoWait(ocoInfo, stopLossWait.orderInfo.value(), stopToken);
     }
     if (takeProfitWait.error.has_value() || stopLossWait.error.has_value())
     {
@@ -564,7 +591,7 @@ OcoWaitResult BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
     if (isTakeProfitFailed || (stopLossWait.orderInfo.has_value() && !isOrderFilled(stopLossWait.orderInfo->status) &&
                                isOrderTerminal(stopLossWait.orderInfo->status)))
     {
-        return reconcileOcoAfterUnfilledTerminalChild(ocoInfo, isTakeProfitFailed);
+        return reconcileOcoAfterUnfilledTerminalChild(ocoInfo, isTakeProfitFailed, stopToken);
     }
 
     const string streamError = getUserStreamLastError();
@@ -577,11 +604,17 @@ OcoWaitResult BybitDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
 
 OcoWaitResult BybitDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
 {
+    return waitUntilOcoOrderFilled(ocoInfo, {});
+}
+
+OcoWaitResult BybitDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, stop_token stopToken)
+{
     const OrderInfo &takeProfitOrder = ocoInfo.takeProfitOrder;
     const OrderInfo &stopLossOrder = ocoInfo.stopLossOrder;
     throwIf(takeProfitOrder.symbol.empty() || takeProfitOrder.orderId.empty() || stopLossOrder.symbol.empty() ||
                 stopLossOrder.orderId.empty(),
             "Both Bybit OCO orders must contain symbol and orderId");
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), "Bybit OCO wait " + ocoInfo.orderListId);
 
     const PendingOrderRegistration takeProfitRegistration(*this, takeProfitOrder.symbol, takeProfitOrder.orderId);
     const PendingOrderRegistration stopLossRegistration(*this, stopLossOrder.symbol, stopLossOrder.orderId);
@@ -589,8 +622,8 @@ OcoWaitResult BybitDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo)
     prepareOcoSubscription(ocoInfo);
     PendingOrderWait takeProfitWait;
     PendingOrderWait stopLossWait;
-    waitForOcoTerminalStatus(ocoInfo, takeProfitWait, stopLossWait);
-    return processOcoOrdersUpdate(ocoInfo, takeProfitWait, stopLossWait);
+    waitForOcoTerminalStatus(ocoInfo, takeProfitWait, stopLossWait, stopToken);
+    return processOcoOrdersUpdate(ocoInfo, takeProfitWait, stopLossWait, stopToken);
 }
 
 StreamStatus BybitDealService::getUserStreamStatus() const

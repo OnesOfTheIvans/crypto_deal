@@ -1,6 +1,7 @@
 #include "../src/DealService/binance/BinanceDealService.hpp"
 #include "../src/DealService/bybit/BybitDealService.hpp"
 #include "../src/DealService/common/DecimalConverter.hpp"
+#include "../src/DealService/common/OrderWaitInterrupted.hpp"
 #include "MockHttpRequest.hpp"
 #include "PrivateAccess.hpp"
 
@@ -8,6 +9,7 @@
 #include <future>
 #include <gtest/gtest.h>
 #include <latch>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>
@@ -51,11 +53,11 @@ namespace {
                R"(","price":"50000","origQty":"0.1","executedQty":"0","cumulativeQuoteQty":"0"})";
     }
 
-    std::string createBinanceFilledMessage(long long orderId)
+    std::string createBinanceOrderMessage(long long orderId, const std::string &status)
     {
         return R"({"event":{"e":"executionReport","s":"BTCUSDT","S":"BUY","o":"LIMIT",)"
-               R"("f":"GTC","q":"0.1","p":"50000","X":"FILLED","i":)" +
-               std::to_string(orderId) + R"(,"z":"0.1","Z":"5000"}})";
+               R"("f":"GTC","q":"0.1","p":"50000","X":")" +
+               status + R"(","i":)" + std::to_string(orderId) + R"(,"z":"0.1","Z":"5000"}})";
     }
 
     std::string createBybitOrderResponse(const std::string &orderId, const std::string &status)
@@ -65,12 +67,29 @@ namespace {
                R"(","price":"50000","qty":"0.1","cumExecQty":"0","cumExecValue":"0"}]}})";
     }
 
-    std::string createBybitFilledMessage(const std::string &orderId)
+    std::string
+    createBybitOrderMessage(const std::string &orderId, const std::string &orderLinkId, const std::string &status)
     {
         return R"({"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":")" + orderId +
-               R"(","side":"Buy","orderType":"Limit","orderStatus":"Filled","price":"50000",)"
+               R"(","orderLinkId":")" + orderLinkId + R"(","side":"Buy","orderType":"Limit","orderStatus":")" + status +
+               R"(","price":"50000",)"
                R"("qty":"0.1","cumExecQty":"0.1","cumExecValue":"5000","leavesQty":"0",)"
                R"("avgPrice":"50000"}]})";
+    }
+
+    OcoInfo
+    createOcoInfo(const std::string &groupId, const std::string &takeProfitOrderId, const std::string &stopLossOrderId)
+    {
+        OcoInfo ocoInfo;
+        ocoInfo.orderListId = groupId;
+        ocoInfo.listClientOrderId = groupId;
+        ocoInfo.takeProfitOrder.symbol = "BTCUSDT";
+        ocoInfo.takeProfitOrder.orderId = takeProfitOrderId;
+        ocoInfo.takeProfitOrder.clientOrderId = groupId + "_TP";
+        ocoInfo.stopLossOrder.symbol = "BTCUSDT";
+        ocoInfo.stopLossOrder.orderId = stopLossOrderId;
+        ocoInfo.stopLossOrder.clientOrderId = groupId + "_SL";
+        return ocoInfo;
     }
 
     std::string getBinanceSymbolInfoResponse()
@@ -143,8 +162,8 @@ TEST(DealServiceConcurrencyTest, BinanceDistinctOrderWaitsReceiveIndependentUpda
         FAIL() << "Timed out waiting for concurrent Binance reconciliation requests";
     }
 
-    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceFilledMessage(202));
-    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceFilledMessage(101));
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(202, "FILLED"));
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(101, "FILLED"));
 
     EXPECT_EQ(first.get().orderId, "101");
     EXPECT_EQ(second.get().orderId, "202");
@@ -173,12 +192,251 @@ TEST(DealServiceConcurrencyTest, BybitDistinctOrderWaitsReceiveIndependentUpdate
         FAIL() << "Timed out waiting for concurrent Bybit reconciliation requests";
     }
 
-    test_private_access::dispatchBybitUserStreamMessage(service, createBybitFilledMessage("SECOND"));
-    test_private_access::dispatchBybitUserStreamMessage(service, createBybitFilledMessage("FIRST"));
+    test_private_access::dispatchBybitUserStreamMessage(service,
+                                                        createBybitOrderMessage("SECOND", "SECOND_CLIENT", "Filled"));
+    test_private_access::dispatchBybitUserStreamMessage(service,
+                                                        createBybitOrderMessage("FIRST", "FIRST_CLIENT", "Filled"));
 
     EXPECT_EQ(first.get().orderId, "FIRST");
     EXPECT_EQ(second.get().orderId, "SECOND");
     EXPECT_EQ(countRequestsContaining("/v5/market/time"), 1u);
+}
+
+TEST(DealServiceConcurrencyTest, BinanceInterruptedOrderWaitIsIsolatedAndCleansRegistration)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime":1779052073334})");
+    MockNetwork::instance().setResponse("orderId=301", createBinanceOrderResponse(301, "NEW"));
+    MockNetwork::instance().setResponse("orderId=301", createBinanceOrderResponse(301, "FILLED"));
+    MockNetwork::instance().setResponse("orderId=302", createBinanceOrderResponse(302, "NEW"));
+
+    BinanceDealService service("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    std::stop_source interruptedSource;
+    std::stop_source survivingSource;
+
+    std::future<OrderInfo> interrupted =
+        std::async(std::launch::async,
+                   [&service, stopToken = interruptedSource.get_token()]()
+                   { return service.waitUntilOrderFilled("BTCUSDT", "301", stopToken); });
+    std::future<OrderInfo> surviving = std::async(std::launch::async,
+                                                  [&service, stopToken = survivingSource.get_token()]() {
+                                                      return service.waitUntilOrderFilled("BTCUSDT", "302", stopToken);
+                                                  });
+
+    if (!MockNetwork::instance().waitForRequestCount("/api/v3/order?", 2, 1s))
+    {
+        interruptedSource.request_stop();
+        survivingSource.request_stop();
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for Binance order reconciliation requests";
+    }
+
+    interruptedSource.request_stop();
+    if (interrupted.wait_for(1s) != std::future_status::ready)
+    {
+        survivingSource.request_stop();
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the interrupted Binance order wait";
+    }
+    EXPECT_THROW(interrupted.get(), OrderWaitInterrupted);
+    EXPECT_EQ(surviving.wait_for(25ms), std::future_status::timeout);
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(302, "FILLED"));
+    survivingSource.request_stop();
+    if (surviving.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the surviving Binance order wait";
+    }
+    EXPECT_EQ(surviving.get().orderId, "302");
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+
+    const OrderInfo retriedOrder = service.waitUntilOrderFilled("BTCUSDT", "301");
+    EXPECT_EQ(retriedOrder.status, "FILLED");
+    EXPECT_EQ(countRequestsContaining("/api/v3/order?"), 3u);
+}
+
+TEST(DealServiceConcurrencyTest, BybitInterruptedOrderWaitIsIsolatedAndCleansRegistration)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/v5/market/time",
+                                        R"({"retCode":0,"retMsg":"OK","result":{"timeSecond":"1779052073"}})");
+    MockNetwork::instance().setResponse("orderId=INTERRUPTED", createBybitOrderResponse("INTERRUPTED", "New"));
+    MockNetwork::instance().setResponse("orderId=INTERRUPTED", createBybitOrderResponse("INTERRUPTED", "Filled"));
+    MockNetwork::instance().setResponse("orderId=SURVIVING", createBybitOrderResponse("SURVIVING", "New"));
+
+    BybitDealService service("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    std::stop_source interruptedSource;
+    std::stop_source survivingSource;
+
+    std::future<OrderInfo> interrupted =
+        std::async(std::launch::async,
+                   [&service, stopToken = interruptedSource.get_token()]()
+                   { return service.waitUntilOrderFilled("BTCUSDT", "INTERRUPTED", stopToken); });
+    std::future<OrderInfo> surviving =
+        std::async(std::launch::async,
+                   [&service, stopToken = survivingSource.get_token()]()
+                   { return service.waitUntilOrderFilled("BTCUSDT", "SURVIVING", stopToken); });
+
+    if (!MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 2, 1s))
+    {
+        interruptedSource.request_stop();
+        survivingSource.request_stop();
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for Bybit order reconciliation requests";
+    }
+
+    interruptedSource.request_stop();
+    if (interrupted.wait_for(1s) != std::future_status::ready)
+    {
+        survivingSource.request_stop();
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the interrupted Bybit order wait";
+    }
+    EXPECT_THROW(interrupted.get(), OrderWaitInterrupted);
+    EXPECT_EQ(surviving.wait_for(25ms), std::future_status::timeout);
+
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderMessage("SURVIVING", "SURVIVING_CLIENT", "Filled"));
+    survivingSource.request_stop();
+    if (surviving.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the surviving Bybit order wait";
+    }
+    EXPECT_EQ(surviving.get().orderId, "SURVIVING");
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+
+    const OrderInfo retriedOrder = service.waitUntilOrderFilled("BTCUSDT", "INTERRUPTED");
+    EXPECT_EQ(retriedOrder.status, "Filled");
+    EXPECT_EQ(countRequestsContaining("/v5/order/realtime"), 3u);
+}
+
+TEST(DealServiceConcurrencyTest, BinanceInterruptedOcoWaitCleansRegistrationsAndTerminalStateWins)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime":1779052073334})");
+    MockNetwork::instance().setResponse("orderId=401", createBinanceOrderResponse(401, "NEW"));
+    MockNetwork::instance().setResponse("orderId=401", createBinanceOrderResponse(401, "NEW"));
+    MockNetwork::instance().setResponse("orderId=402", createBinanceOrderResponse(402, "NEW"));
+    MockNetwork::instance().setResponse("orderId=402", createBinanceOrderResponse(402, "NEW"));
+
+    BinanceDealService service("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    const OcoInfo ocoInfo = createOcoInfo("BINANCE_GROUP", "401", "402");
+    std::stop_source interruptedSource;
+    std::future<OcoWaitResult> interrupted =
+        std::async(std::launch::async,
+                   [&service, &ocoInfo, stopToken = interruptedSource.get_token()]()
+                   { return service.waitUntilOcoOrderFilled(ocoInfo, stopToken); });
+
+    if (!MockNetwork::instance().waitForRequestCount("/api/v3/order?", 2, 1s))
+    {
+        interruptedSource.request_stop();
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for Binance OCO reconciliation requests";
+    }
+    interruptedSource.request_stop();
+    if (interrupted.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the interrupted Binance OCO wait";
+    }
+    EXPECT_THROW(interrupted.get(), OrderWaitInterrupted);
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+    EXPECT_EQ(countRequestsContaining("/api/v3/orderList"), 0u);
+
+    std::stop_source completedSource;
+    std::future<OcoWaitResult> completed = std::async(std::launch::async,
+                                                      [&service, &ocoInfo, stopToken = completedSource.get_token()]()
+                                                      { return service.waitUntilOcoOrderFilled(ocoInfo, stopToken); });
+    if (!MockNetwork::instance().waitForRequestCount("/api/v3/order?", 4, 1s))
+    {
+        completedSource.request_stop();
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the retried Binance OCO reconciliation requests";
+    }
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(401, "FILLED"));
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(402, "CANCELED"));
+    completedSource.request_stop();
+    if (completed.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBinanceStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the completed Binance OCO wait";
+    }
+    const OcoWaitResult result = completed.get();
+    EXPECT_EQ(result.filledOrder.orderId, "401");
+    EXPECT_EQ(result.siblingTerminalOrder.orderId, "402");
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+    EXPECT_EQ(countRequestsContaining("/api/v3/orderList"), 0u);
+}
+
+TEST(DealServiceConcurrencyTest, BybitInterruptedOcoWaitCleansRegistrationsAndTerminalStateWins)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/v5/market/time",
+                                        R"({"retCode":0,"retMsg":"OK","result":{"timeSecond":"1779052073"}})");
+    MockNetwork::instance().setResponse("orderId=TP_ID", createBybitOrderResponse("TP_ID", "New"));
+    MockNetwork::instance().setResponse("orderId=TP_ID", createBybitOrderResponse("TP_ID", "New"));
+    MockNetwork::instance().setResponse("orderId=SL_ID", createBybitOrderResponse("SL_ID", "New"));
+    MockNetwork::instance().setResponse("orderId=SL_ID", createBybitOrderResponse("SL_ID", "New"));
+
+    BybitDealService service("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    const OcoInfo ocoInfo = createOcoInfo("BYBIT_GROUP", "TP_ID", "SL_ID");
+    std::stop_source interruptedSource;
+    std::future<OcoWaitResult> interrupted =
+        std::async(std::launch::async,
+                   [&service, &ocoInfo, stopToken = interruptedSource.get_token()]()
+                   { return service.waitUntilOcoOrderFilled(ocoInfo, stopToken); });
+
+    if (!MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 2, 1s))
+    {
+        interruptedSource.request_stop();
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for Bybit OCO reconciliation requests";
+    }
+    interruptedSource.request_stop();
+    if (interrupted.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the interrupted Bybit OCO wait";
+    }
+    EXPECT_THROW(interrupted.get(), OrderWaitInterrupted);
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 0u);
+
+    std::stop_source completedSource;
+    std::future<OcoWaitResult> completed = std::async(std::launch::async,
+                                                      [&service, &ocoInfo, stopToken = completedSource.get_token()]()
+                                                      { return service.waitUntilOcoOrderFilled(ocoInfo, stopToken); });
+    if (!MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 4, 1s))
+    {
+        completedSource.request_stop();
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the retried Bybit OCO reconciliation requests";
+    }
+
+    test_private_access::dispatchBybitUserStreamMessage(service,
+                                                        createBybitOrderMessage("TP_ID", "BYBIT_GROUP_TP", "Filled"));
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderMessage("SL_ID", "BYBIT_GROUP_SL", "Cancelled"));
+    completedSource.request_stop();
+    if (completed.wait_for(1s) != std::future_status::ready)
+    {
+        test_private_access::setBybitStreamStatus(service, StreamStatus::ERROR);
+        FAIL() << "Timed out waiting for the completed Bybit OCO wait";
+    }
+    const OcoWaitResult result = completed.get();
+    EXPECT_EQ(result.filledOrder.orderId, "TP_ID");
+    EXPECT_EQ(result.siblingTerminalOrder.orderId, "SL_ID");
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 0u);
 }
 
 TEST(DealServiceConcurrencyTest, CachesAndBalancesSupportSimultaneousAccess)

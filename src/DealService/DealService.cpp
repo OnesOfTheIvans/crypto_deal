@@ -1,4 +1,5 @@
 #include "DealService.hpp"
+#include "common/OrderWaitInterrupted.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -15,6 +16,28 @@
 #include <openssl/hmac.h>
 
 using namespace std;
+
+namespace {
+    void throwIfOrderWaitInterrupted(stop_token stopToken, const string &description)
+    {
+        if (stopToken.stop_requested())
+        {
+            throw OrderWaitInterrupted(description + " was interrupted");
+        }
+    }
+}
+
+OrderInfo DealService::waitUntilOrderFilled(const string &symbol, const string &orderId, stop_token stopToken)
+{
+    throwIfOrderWaitInterrupted(stopToken, "Order wait");
+    return waitUntilOrderFilled(symbol, orderId);
+}
+
+OcoWaitResult DealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, stop_token stopToken)
+{
+    throwIfOrderWaitInterrupted(stopToken, "OCO wait");
+    return waitUntilOcoOrderFilled(ocoInfo);
+}
 
 // Correct HMAC SHA256 returning hex string
 string DealService::hmac_sha256(const string &key, const string &data) const
