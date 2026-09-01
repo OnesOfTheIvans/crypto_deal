@@ -5,6 +5,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -145,10 +146,14 @@ TEST(OperationFactoryTest, PlaceOrderUsesReturnedWebsocketOrderWithoutRestQuery)
     config.type = OrderType::MARKET;
 
     const OperationFactory factory;
-    factory.create(OperationType::PLACE_ORDER, config)(context);
+    OperationAcceptedIdentifiers acceptedIdentifiers;
+    factory.create(OperationType::PLACE_ORDER, config)(context,
+                                                       [&acceptedIdentifiers](OperationAcceptedIdentifiers identifiers)
+                                                       { acceptedIdentifiers = std::move(identifiers); });
 
     EXPECT_EQ(service->orderWaitCalls, 1);
     EXPECT_EQ(service->getOrderCalls, 0);
+    EXPECT_EQ(acceptedIdentifiers.orderId, "placed");
     EXPECT_EQ(context.quantity, Decimal{2});
     EXPECT_EQ(context.inAsset, "BTC");
 }
@@ -169,7 +174,7 @@ TEST(OperationFactoryTest, SellCryptoUsesCumulativeQuoteQuantity)
     config.outAsset = "USDT";
 
     const OperationFactory factory;
-    factory.create(OperationType::SELL_CRYPTO, config)(context);
+    factory.create(OperationType::SELL_CRYPTO, config)(context, {});
 
     EXPECT_EQ(context.quantity, Decimal{250});
     EXPECT_EQ(context.inAsset, "USDT");
@@ -193,7 +198,7 @@ TEST(OperationFactoryTest, PlaceSellOrderUsesCumulativeQuoteQuantity)
     config.type = OrderType::MARKET;
 
     const OperationFactory factory;
-    factory.create(OperationType::PLACE_ORDER, config)(context);
+    factory.create(OperationType::PLACE_ORDER, config)(context, {});
 
     EXPECT_EQ(context.quantity, Decimal{250});
     EXPECT_EQ(context.inAsset, "USDT");
@@ -203,6 +208,8 @@ TEST(OperationFactoryTest, PlaceOcoDelegatesToOcoWaitAndUsesFilledChild)
 {
     auto service = std::make_shared<OperationDealService>();
     service->placedOco.orderListId = "list";
+    service->placedOco.takeProfitOrder.orderId = "take-profit";
+    service->placedOco.stopLossOrder.orderId = "stop-loss";
     service->filledOrder.symbol = "BTCUSDT";
     service->filledOrder.orderId = "filled-child";
     service->filledOrder.executedQty = Decimal{3};
@@ -215,10 +222,16 @@ TEST(OperationFactoryTest, PlaceOcoDelegatesToOcoWaitAndUsesFilledChild)
     config.stopPrice = Decimal{9};
 
     const OperationFactory factory;
-    factory.create(OperationType::PLACE_OCO, config)(context);
+    OperationAcceptedIdentifiers acceptedIdentifiers;
+    factory.create(OperationType::PLACE_OCO, config)(context,
+                                                     [&acceptedIdentifiers](OperationAcceptedIdentifiers identifiers)
+                                                     { acceptedIdentifiers = std::move(identifiers); });
 
     EXPECT_EQ(service->ocoWaitCalls, 1);
     EXPECT_EQ(service->getOrderCalls, 0);
+    EXPECT_EQ(acceptedIdentifiers.ocoGroupId, "list");
+    EXPECT_EQ(acceptedIdentifiers.takeProfitOrderId, "take-profit");
+    EXPECT_EQ(acceptedIdentifiers.stopLossOrderId, "stop-loss");
     EXPECT_EQ(context.quantity, Decimal{3});
     EXPECT_EQ(context.inAsset, "BTC");
 }
@@ -242,7 +255,7 @@ TEST(OperationFactoryTest, PlaceSellOcoUsesCumulativeQuoteQuantity)
     config.stopPrice = Decimal{9};
 
     const OperationFactory factory;
-    factory.create(OperationType::PLACE_OCO, config)(context);
+    factory.create(OperationType::PLACE_OCO, config)(context, {});
 
     EXPECT_EQ(context.quantity, Decimal{250});
     EXPECT_EQ(context.inAsset, "USDT");
@@ -263,7 +276,7 @@ TEST(OperationFactoryTest, PlaceOcoWaitFailurePropagatesWithoutMutatingContext)
     const OperationFactory factory;
     const operation operation = factory.create(OperationType::PLACE_OCO, config);
 
-    EXPECT_THROW(operation(context), std::runtime_error);
+    EXPECT_THROW(operation(context, {}), std::runtime_error);
     EXPECT_EQ(context.inAsset, "USDT");
     EXPECT_EQ(context.quantity, Decimal{1});
 }

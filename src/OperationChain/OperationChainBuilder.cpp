@@ -2,6 +2,7 @@
 
 #include "OperationFactory.hpp"
 
+#include <utility>
 #include <vector>
 
 using namespace std;
@@ -18,9 +19,5 @@ OperationChain OperationChainBuilder::build(const OperationChainDefinition &defi
         operations.push_back(operationFactory.create(operationDefinition.getType(), operationDefinition.getConfig()));
     }
 
-    return OperationChain(operations,
-                          exchangers,
-                          definition.getInitialExchangerType(),
-                          definition.getInitialAsset(),
-                          definition.getInitialQuantity());
+    return OperationChain(definition, move(operations), exchangers);
 }

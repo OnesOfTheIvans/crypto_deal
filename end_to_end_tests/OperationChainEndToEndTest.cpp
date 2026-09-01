@@ -227,37 +227,35 @@ namespace {
         BaseConfig sellConfig;
         sellConfig.outAsset = "USDT";
 
-        bool finalContextObserved = false;
-        ExchangerType finalExchangerType = GetParam();
-        string finalAsset;
-        Decimal finalQuantity{};
-
         const OperationFactory factory;
-        const operation refreshBalances = [](OperationContext &context)
+        const operation refreshBalances = [](OperationContext &context, const OperationProgressHandler &)
         { context.exchangersPull.getExchanger(context.exchangerType)->getBalancesRest(); };
-        const operation observeFinalContext =
-            [&finalContextObserved, &finalExchangerType, &finalAsset, &finalQuantity](OperationContext &context)
-        {
-            finalExchangerType = context.exchangerType;
-            finalAsset = context.inAsset;
-            finalQuantity = context.quantity;
-            finalContextObserved = true;
-        };
+        SendToConfig refreshConfig;
+        refreshConfig.destinationExchanger = GetParam();
+        refreshConfig.chain = "BALANCE_REFRESH";
+        refreshConfig.address = "end-to-end-test";
+        const OperationChainDefinition definition("End-to-end buy and sell",
+                                                  GetParam(),
+                                                  "USDT",
+                                                  DecimalConverter::parseDecimal("0.00010"),
+                                                  {{OperationType::BUY_CRYPTO, buyConfig},
+                                                   {OperationType::SEND_TO, refreshConfig},
+                                                   {OperationType::SELL_CRYPTO, sellConfig}});
         const vector<operation> operations{
             factory.create(OperationType::BUY_CRYPTO, buyConfig),
             refreshBalances,
             factory.create(OperationType::SELL_CRYPTO, sellConfig),
-            observeFinalContext,
         };
 
-        OperationChain chain(operations, {service}, GetParam(), "USDT", DecimalConverter::parseDecimal("0.00010"));
+        OperationChain chain(definition, operations, {service});
 
         ASSERT_NO_THROW(executeOperationChainInNewThread(chain, *service));
 
-        EXPECT_TRUE(finalContextObserved);
-        EXPECT_EQ(finalExchangerType, GetParam());
-        EXPECT_EQ(finalAsset, "USDT");
-        EXPECT_GT(finalQuantity, Decimal{0});
+        const OperationChainSnapshot snapshot = chain.getSnapshot();
+        EXPECT_EQ(snapshot.status, OperationChainStatus::COMPLETED);
+        EXPECT_EQ(snapshot.currentContext.exchangerType, GetParam());
+        EXPECT_EQ(snapshot.currentContext.asset, "USDT");
+        EXPECT_GT(snapshot.currentContext.quantity, Decimal{0});
     }
 
     INSTANTIATE_TEST_SUITE_P(EndToEnd,

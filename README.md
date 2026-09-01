@@ -55,6 +55,11 @@ Unknown fields and invalid definitions stop application startup. OCO client iden
 the exchange services generate fresh identifiers so multiple runs of one definition cannot collide. Definitions do
 not start automatically.
 
+Each built `OperationChain` is one single-use run. Execution remains synchronous, while `getSnapshot()` and the
+optional state-change handler expose detached thread-safe run and step state. Snapshots include typed operation
+configuration, input/output context, timestamps, monotonic revisions, accepted ordinary/OCO identifiers, Awaiting
+progress, and exact failures. A failed operation is recorded before its original exception is rethrown.
+
 ## End-to-end tests
 
 End-to-end tests use real Binance and Bybit endpoints and require valid credentials in `config.ini`.

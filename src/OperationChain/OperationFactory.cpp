@@ -9,11 +9,43 @@
 
 // DEBUG
 #include <iostream>
+#include <optional>
+#include <string>
+#include <utility>
 
 using namespace std;
 using namespace exception_handling;
 
 namespace {
+    optional<string> getIdentifierIfPresent(const string &identifier)
+    {
+        return identifier.empty() ? nullopt : optional<string>(identifier);
+    }
+
+    OperationAcceptedIdentifiers createAcceptedIdentifiers(const OrderInfo &orderInfo)
+    {
+        OperationAcceptedIdentifiers identifiers;
+        identifiers.orderId = getIdentifierIfPresent(orderInfo.orderId);
+        return identifiers;
+    }
+
+    OperationAcceptedIdentifiers createAcceptedIdentifiers(const OcoInfo &ocoInfo)
+    {
+        OperationAcceptedIdentifiers identifiers;
+        identifiers.ocoGroupId = getIdentifierIfPresent(ocoInfo.orderListId);
+        identifiers.takeProfitOrderId = getIdentifierIfPresent(ocoInfo.takeProfitOrder.orderId);
+        identifiers.stopLossOrderId = getIdentifierIfPresent(ocoInfo.stopLossOrder.orderId);
+        return identifiers;
+    }
+
+    void reportAwaiting(const OperationProgressHandler &progressHandler, OperationAcceptedIdentifiers identifiers)
+    {
+        if (progressHandler)
+        {
+            progressHandler(move(identifiers));
+        }
+    }
+
     Decimal getReceivedQuantity(const OrderInfo &orderInfo, OrderOperation side)
     {
         if (side == OrderOperation::SELL)
@@ -31,11 +63,12 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderInfo orderInfo =
                                   service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
                               OrderInfo completeOrderInfo =
                                   service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
@@ -50,11 +83,12 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
                               OrderInfo orderInfo =
                                   service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
                               OrderInfo completeOrderInfo =
                                   service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
@@ -69,7 +103,7 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOrderConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
@@ -95,6 +129,7 @@ OperationFactory::OperationFactory()
                               request.quantity = context.quantity;
                               request.price = preset.price;
                               OrderInfo orderInfo = service->placeOrder(request);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
                               OrderInfo completeOrderInfo =
                                   service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
@@ -109,7 +144,7 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOcoConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
@@ -135,6 +170,7 @@ OperationFactory::OperationFactory()
                               request.limitClientOrderId = preset.limitClientOrderId;
                               request.stopClientOrderId = preset.stopClientOrderId;
                               OcoInfo ocoInfo = service->placeOco(request);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(ocoInfo));
 
                               const OcoWaitResult result = service->waitUntilOcoOrderFilled(ocoInfo);
 
@@ -152,7 +188,7 @@ OperationFactory::OperationFactory()
         [](const Config &config) -> operation
         {
             const auto preset = get<SendToConfig>(config);
-            return [preset](OperationContext &context)
+            return [preset](OperationContext &context, const OperationProgressHandler &)
             {
                 string targetExchanger = context.exchangerType == ExchangerType::BYBIT ? "Bybit" : "Binance";
                 string destinationExchanger = preset.destinationExchanger == ExchangerType::BYBIT ? "Bybit" : "Binance";

@@ -1,5 +1,5 @@
 #include "../src/OperationChain/OperationChain.hpp"
-#include "../src/OperationChain/OperationFactory.hpp"
+#include "../src/OperationChain/OperationChainBuilder.hpp"
 
 #include <gtest/gtest.h>
 
@@ -147,23 +147,15 @@ TEST(OperationChainIntegrationTest, ExecutesFactoryOperationsAcrossExchangers)
     BaseConfig sellConfig;
     sellConfig.outAsset = "USDT";
 
-    const OperationFactory factory;
-    bool finalContextObserved = false;
-    const operation observeFinalContext = [&finalContextObserved](OperationContext &context)
-    {
-        EXPECT_EQ(context.exchangerType, ExchangerType::BYBIT);
-        EXPECT_EQ(context.inAsset, "USDT");
-        EXPECT_EQ(context.quantity, Decimal{250});
-        finalContextObserved = true;
-    };
-    const std::vector<operation> operations{
-        factory.create(OperationType::BUY_CRYPTO, buyConfig),
-        factory.create(OperationType::SEND_TO, sendConfig),
-        factory.create(OperationType::SELL_CRYPTO, sellConfig),
-        observeFinalContext,
-    };
-
-    OperationChain chain(operations, {binanceService, bybitService}, ExchangerType::BINANCE, "USDT", Decimal{1});
+    const OperationChainDefinition definition("Cross-exchange chain",
+                                              ExchangerType::BINANCE,
+                                              "USDT",
+                                              Decimal{1},
+                                              {{OperationType::BUY_CRYPTO, buyConfig},
+                                               {OperationType::SEND_TO, sendConfig},
+                                               {OperationType::SELL_CRYPTO, sellConfig}});
+    const OperationChainBuilder builder;
+    OperationChain chain = builder.build(definition, {binanceService, bybitService});
 
     chain.execute();
 
@@ -175,5 +167,14 @@ TEST(OperationChainIntegrationTest, ExecutesFactoryOperationsAcrossExchangers)
     EXPECT_EQ(bybitService->sellQuoteAsset, "USDT");
     EXPECT_EQ(bybitService->sellQuantity, Decimal{2});
     EXPECT_EQ(bybitService->orderWaitCalls, 1);
-    EXPECT_TRUE(finalContextObserved);
+    const OperationChainSnapshot snapshot = chain.getSnapshot();
+    EXPECT_EQ(snapshot.status, OperationChainStatus::COMPLETED);
+    EXPECT_EQ(snapshot.currentContext, (OperationContextSnapshot{ExchangerType::BYBIT, "USDT", Decimal{250}}));
+    ASSERT_EQ(snapshot.steps.size(), 3);
+    EXPECT_EQ(snapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(snapshot.steps[0].acceptedIdentifiers.orderId, "binance-placed");
+    EXPECT_EQ(snapshot.steps[1].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_FALSE(snapshot.steps[1].acceptedIdentifiers.orderId.has_value());
+    EXPECT_EQ(snapshot.steps[2].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(snapshot.steps[2].acceptedIdentifiers.orderId, "bybit-placed");
 }
