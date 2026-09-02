@@ -6,6 +6,7 @@
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
 #include "models/BalanceCatalog.hpp"
+#include "models/OperationChainRunModel.hpp"
 #include "models/OrderSessionModel.hpp"
 #include "models/PairCatalog.hpp"
 #include "models/SymbolInfoCatalog.hpp"
@@ -37,7 +38,8 @@ int GraphicalUserInterface::run()
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceDealService, bybitDealService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceDealService, bybitDealService);
     OperationChainRunManager chainRunManager(operationChainDefinitions, binanceDealService, bybitDealService);
-    CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     mainWindow.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
     balanceCatalog.loadBalances();

@@ -73,6 +73,33 @@ QWidget[orderCard="true"] {
     border-radius: 10px;
 }
 
+QWidget[operationChainSection="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
+QLabel[operationChainSectionTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[operationChainSectionDescription="true"],
+QLabel[operationChainEmptyState="true"] {
+    color: #7f899b;
+    font-size: 12px;
+}
+
+QLabel[operationChainActionError="true"] {
+    background-color: #301d23;
+    border: 1px solid #6f3843;
+    border-radius: 6px;
+    color: #ef9ca5;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
 QLabel[placeholderTitle="true"] {
     color: #dbe2ed;
     font-size: 16px;
@@ -218,7 +245,8 @@ QWidget#bybitBalancesTab {
 }
 
 QTreeWidget[sessionOrdersTable="true"],
-QTableWidget[accountBalancesTable="true"] {
+QTableWidget[accountBalancesTable="true"],
+QTableWidget[operationChainTable="true"] {
     alternate-background-color: #181e28;
     background-color: #151a23;
     border: 0;
@@ -237,8 +265,14 @@ QTableWidget[accountBalancesTable="true"]::item {
     padding: 6px;
 }
 
+QTableWidget[operationChainTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 5px;
+}
+
 QTreeWidget[sessionOrdersTable="true"]::item:selected,
-QTableWidget[accountBalancesTable="true"]::item:selected {
+QTableWidget[accountBalancesTable="true"]::item:selected,
+QTableWidget[operationChainTable="true"]::item:selected {
     background-color: #273b60;
 }
 
@@ -380,6 +414,40 @@ QPushButton[primaryOrderAction="true"]:hover {
 QPushButton[primaryOrderAction="true"]:disabled {
     background-color: #242b37;
     color: #667184;
+}
+
+QPushButton[primaryChainAction="true"] {
+    background-color: #2768d9;
+    border: 0;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 14px;
+}
+
+QPushButton[primaryChainAction="true"]:hover {
+    background-color: #3477e7;
+}
+
+QPushButton[dangerChainAction="true"] {
+    background-color: #42242b;
+    border: 1px solid #74404a;
+    border-radius: 6px;
+    color: #f2c4c9;
+    font-size: 12px;
+    padding: 0 12px;
+}
+
+QPushButton[dangerChainAction="true"]:hover {
+    background-color: #553039;
+    border-color: #94505d;
+}
+
+QPushButton[dangerChainAction="true"]:disabled {
+    background-color: #20242d;
+    border-color: #2b313d;
+    color: #626b7a;
 }
 
 QFrame[orderFormDivider="true"] {

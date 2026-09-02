@@ -1,8 +1,10 @@
 #include "graphical/models/OrderSessionModel.hpp"
+#include "OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OperationChainRunModel.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 
@@ -1008,7 +1010,9 @@ TEST(OrderSessionModelTest, EnablesSelectionDrivenActionsAndUsesCancelDefaultCon
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *workspaceTabs = window.findChild<QTabWidget *>("ordersWorkspaceTabs");
     auto *activeTable = window.findChild<QTreeWidget *>("activeOrdersTable");
     auto *refreshButton = window.findChild<QPushButton *>("refreshSessionOrderButton");
@@ -1104,7 +1108,9 @@ TEST(OrderSessionModelTest, MapsAnOcoChildSelectionToItsGroupActions)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *workspaceTabs = window.findChild<QTabWidget *>("ordersWorkspaceTabs");
     auto *activeTable = window.findChild<QTreeWidget *>("activeOrdersTable");
     auto *cancelButton = window.findChild<QPushButton *>("cancelSessionOrderButton");
@@ -1147,7 +1153,9 @@ TEST(OrderSessionModelTest, DisplaysActiveAndAllSessionTablesWithVisibleOcoChild
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *activeTable = window.findChild<QTreeWidget *>("activeOrdersTable");
     auto *allSessionTable = window.findChild<QTreeWidget *>("allSessionOrdersTable");
 
@@ -1184,7 +1192,9 @@ TEST(OrderSessionModelTest, ShowsFailedSubmissionOnlyInAllSessionOrdersTable)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *activeTable = window.findChild<QTreeWidget *>("activeOrdersTable");
     auto *allSessionTable = window.findChild<QTreeWidget *>("allSessionOrdersTable");
 

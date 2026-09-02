@@ -1,7 +1,9 @@
+#include "OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OperationChainRunModel.hpp"
 #include "graphical/models/OrderSessionModel.hpp"
 #include "graphical/models/PairCatalog.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
@@ -46,7 +48,9 @@ TEST(GraphicalUserInterfaceTest, ShowsOrdersPageByDefault)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     window.show();
     QApplication::processEvents();
 
@@ -71,7 +75,9 @@ TEST(GraphicalUserInterfaceTest, SeparatesNewOrderAndSessionOrderWorkspaces)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
 
     auto *workspaceTabs = window.findChild<QTabWidget *>("ordersWorkspaceTabs");
     auto *sessionTabs = window.findChild<QTabWidget *>("sessionOrdersTabs");
@@ -100,7 +106,9 @@ TEST(GraphicalUserInterfaceTest, SwitchesPagesAndKeepsNavigationSelectionSynchro
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     window.show();
     QApplication::processEvents();
 
@@ -143,7 +151,9 @@ TEST(GraphicalUserInterfaceTest, UsesApprovedWindowDimensions)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
 
     EXPECT_EQ(window.size(), QSize(1180, 760));
     EXPECT_EQ(window.minimumSize(), QSize(960, 640));

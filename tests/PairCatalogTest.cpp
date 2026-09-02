@@ -1,8 +1,10 @@
 #include "graphical/models/PairCatalog.hpp"
+#include "OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
 #include "graphical/async/AsyncTaskExecutor.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
+#include "graphical/models/OperationChainRunModel.hpp"
 #include "graphical/models/OrderSessionModel.hpp"
 #include "graphical/models/SymbolInfoCatalog.hpp"
 #include "graphical/widgets/OrderEntryForm.hpp"
@@ -173,7 +175,9 @@ TEST(PairCatalogTest, DeliversIndependentCatalogStatusToOrdersPage)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *binanceStatus = window.findChild<QLabel *>("binancePairCatalogStatus");
     auto *bybitStatus = window.findChild<QLabel *>("bybitPairCatalogStatus");
 
@@ -227,7 +231,9 @@ TEST(PairCatalogTest, FiltersPairSelectorsAndKeepsExchangeChoiceStableDuringInde
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *categoryField = window.findChild<QLineEdit *>("orderCategoryField");
@@ -302,7 +308,9 @@ TEST(PairCatalogTest, DisablesPairFormForEmptyAndFailedSelectedCatalogs)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *exchangeSelector = window.findChild<QComboBox *>("orderExchangeSelector");
     auto *pairControls = window.findChild<QWidget *>("orderPairDependentControls");
     auto *selectedCatalogStatus = window.findChild<QLabel *>("selectedPairCatalogStatus");
@@ -344,7 +352,9 @@ TEST(PairCatalogTest, ShowsOnlyFieldsForTheSelectedPlacementOperation)
     BalanceCatalog balanceCatalog(taskExecutor, binanceService, bybitService);
     SymbolInfoCatalog symbolInfoCatalog(taskExecutor, binanceService, bybitService);
     OrderSessionModel orderSessionModel(taskExecutor, binanceService, bybitService);
-    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel);
+    OperationChainRunManager chainRunManager({}, binanceService, bybitService);
+    OperationChainRunModel chainRunModel(chainRunManager);
+    CryptoDealWindow window(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     auto *entryFormWidget = window.findChild<QWidget *>("orderEntryForm");
     auto *operationSelector = window.findChild<QComboBox *>("orderOperationSelector");
     auto *amountLabel = window.findChild<QLabel *>("orderAmountLabel");

@@ -10,6 +10,7 @@ add_library(GraphicalUserInterfaceLib
     graphical/async/AsyncTaskExecutor.cpp
     graphical/async/UiTaskState.cpp
     graphical/models/BalanceCatalog.cpp
+    graphical/models/OperationChainRunModel.cpp
     graphical/models/OrderSessionModel.cpp
     graphical/models/PairCatalog.cpp
     graphical/models/SymbolInfoCatalog.cpp

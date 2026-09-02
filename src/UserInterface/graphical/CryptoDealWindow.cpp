@@ -3,6 +3,7 @@
 #include "GuiLayoutConstants.hpp"
 #include "common/exception_handling.hpp"
 #include "models/BalanceCatalog.hpp"
+#include "models/OperationChainRunModel.hpp"
 #include "models/OrderSessionModel.hpp"
 #include "models/PairCatalog.hpp"
 #include "models/SymbolInfoCatalog.hpp"
@@ -28,9 +29,11 @@ CryptoDealWindow::CryptoDealWindow(PairCatalog &pairCatalog,
                                    BalanceCatalog &balanceCatalog,
                                    SymbolInfoCatalog &symbolInfoCatalog,
                                    OrderSessionModel &orderSessionModel,
+                                   OperationChainRunModel &operationChainRunModel,
                                    QWidget *parent)
     : QMainWindow(parent), pairCatalog(pairCatalog), balanceCatalog(balanceCatalog),
-      symbolInfoCatalog(symbolInfoCatalog), orderSessionModel(orderSessionModel), pageStack(nullptr)
+      symbolInfoCatalog(symbolInfoCatalog), orderSessionModel(orderSessionModel),
+      operationChainRunModel(operationChainRunModel), pageStack(nullptr)
 {
     setObjectName("cryptoDealWindow");
     setWindowTitle("CryptoDeal");
@@ -95,7 +98,7 @@ void CryptoDealWindow::createLayout()
     pageStack = new QStackedWidget(windowContent);
     pageStack->setObjectName("primaryPageStack");
     pageStack->addWidget(new OrdersPage(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, pageStack));
-    pageStack->addWidget(new OperationChainsPage(pageStack));
+    pageStack->addWidget(new OperationChainsPage(operationChainRunModel, pageStack));
     pageStack->addWidget(new AccountsPage(balanceCatalog, pageStack));
 
     auto *navigationGroup = new QButtonGroup(this);
