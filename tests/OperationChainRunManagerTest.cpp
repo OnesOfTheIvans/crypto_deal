@@ -1,5 +1,6 @@
 #include "../src/OperationChain/OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
+#include "common/OrderWaitInterrupted.hpp"
 
 #include <gtest/gtest.h>
 
@@ -8,6 +9,7 @@
 #include <condition_variable>
 #include <functional>
 #include <latch>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -21,6 +23,49 @@
 using namespace std;
 
 namespace {
+    bool isTerminal(OperationChainStatus status)
+    {
+        return status == OperationChainStatus::COMPLETED || status == OperationChainStatus::FAILED ||
+               status == OperationChainStatus::CANCELLED;
+    }
+
+    class RunObserver
+    {
+      private:
+        mutable mutex stateMutex;
+        condition_variable stateChanged;
+        map<OperationChainRunId, OperationChainRunSnapshot> snapshots;
+
+      public:
+        void record(OperationChainRunSnapshot snapshot)
+        {
+            {
+                lock_guard<mutex> lock(stateMutex);
+                const auto current = snapshots.find(snapshot.runId);
+                if (current == snapshots.end() || snapshot.updateSequence > current->second.updateSequence)
+                {
+                    snapshots[snapshot.runId] = move(snapshot);
+                }
+            }
+            stateChanged.notify_all();
+        }
+
+        OperationChainRunSnapshot waitForTerminal(OperationChainRunId runId)
+        {
+            unique_lock<mutex> lock(stateMutex);
+            const bool completed = stateChanged.wait_for(lock,
+                                                         chrono::seconds(2),
+                                                         [this, runId]()
+                                                         {
+                                                             const auto snapshot = snapshots.find(runId);
+                                                             return snapshot != snapshots.end() &&
+                                                                    isTerminal(snapshot->second.chainSnapshot.status);
+                                                         });
+            EXPECT_TRUE(completed);
+            return snapshots.at(runId);
+        }
+    };
+
     class RunManagerDealService final : public TestDealService
     {
       public:
@@ -62,6 +107,82 @@ namespace {
         }
     };
 
+    class CancellationDealService final : public TestDealService
+    {
+      public:
+        using BuyAction = function<OrderInfo(const string &, const string &, Decimal)>;
+        using OrderWaitAction = function<OrderInfo(const string &, const string &, stop_token)>;
+        using OrderCancellationAction = function<OrderInfo(const OrderQuery &, stop_token)>;
+        using OcoPlacementAction = function<OcoInfo(const PlaceOcoRequest &)>;
+        using OcoWaitAction = function<OcoWaitResult(const OcoInfo &, stop_token)>;
+        using OcoCancellationAction = function<OcoInfo(const OcoInfo &, stop_token)>;
+
+        BuyAction buyAction;
+        OrderWaitAction orderWaitAction;
+        OrderCancellationAction orderCancellationAction;
+        OcoPlacementAction ocoPlacementAction;
+        OcoWaitAction ocoWaitAction;
+        OcoCancellationAction ocoCancellationAction;
+        atomic<size_t> buyCalls{0};
+        atomic<size_t> orderCancellationCalls{0};
+        atomic<size_t> ocoCancellationCalls{0};
+
+        explicit CancellationDealService(ExchangerType exchangerType) : TestDealService(exchangerType) {}
+
+        OrderInfo buyCrypto(const string &baseAsset, const string &quoteAsset, Decimal quantity) override
+        {
+            ++buyCalls;
+            return buyAction ? buyAction(baseAsset, quoteAsset, quantity) : OrderInfo{};
+        }
+
+        OrderInfo waitUntilOrderFilled(const string &symbol, const string &orderId) override
+        {
+            return waitUntilOrderFilled(symbol, orderId, {});
+        }
+
+        OrderInfo waitUntilOrderFilled(const string &symbol, const string &orderId, stop_token stopToken) override
+        {
+            return orderWaitAction ? orderWaitAction(symbol, orderId, stopToken) : OrderInfo{};
+        }
+
+        OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &query) override
+        {
+            return cancelOrderAndWaitUntilTerminal(query, {});
+        }
+
+        OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &query, stop_token stopToken) override
+        {
+            ++orderCancellationCalls;
+            return orderCancellationAction ? orderCancellationAction(query, stopToken) : OrderInfo{};
+        }
+
+        OcoInfo placeOco(const PlaceOcoRequest &request) override
+        {
+            return ocoPlacementAction ? ocoPlacementAction(request) : OcoInfo{};
+        }
+
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override
+        {
+            return waitUntilOcoOrderFilled(ocoInfo, {});
+        }
+
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, stop_token stopToken) override
+        {
+            return ocoWaitAction ? ocoWaitAction(ocoInfo, stopToken) : OcoWaitResult{};
+        }
+
+        OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override
+        {
+            return cancelOcoAndWaitUntilTerminal(ocoInfo, {});
+        }
+
+        OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, stop_token stopToken) override
+        {
+            ++ocoCancellationCalls;
+            return ocoCancellationAction ? ocoCancellationAction(ocoInfo, stopToken) : OcoInfo{};
+        }
+    };
+
     OperationChainDefinition
     createBuyDefinition(string name, string outAsset, ExchangerType exchangerType = ExchangerType::BINANCE)
     {
@@ -70,6 +191,20 @@ namespace {
                                         "USDT",
                                         Decimal{1},
                                         {{OperationType::BUY_CRYPTO, BaseConfig{move(outAsset)}}});
+    }
+
+    OperationChainDefinition createOcoDefinition(string name, ExchangerType exchangerType = ExchangerType::BINANCE)
+    {
+        PlaceOcoConfig config;
+        config.outAsset = "BTC";
+        config.side = OrderOperation::BUY;
+        config.price = Decimal{11};
+        config.stopPrice = Decimal{9};
+        return OperationChainDefinition(move(name),
+                                        exchangerType,
+                                        "USDT",
+                                        Decimal{1},
+                                        {{OperationType::PLACE_OCO, config}});
     }
 
     OrderInfo
@@ -92,6 +227,36 @@ namespace {
         order.executedQty = Decimal{1};
         order.status = "FILLED";
         return order;
+    }
+
+    OrderInfo createCancelledOrder(const string &symbol, const string &orderId, ExchangerType exchangerType)
+    {
+        OrderInfo order;
+        order.symbol = symbol;
+        order.orderId = orderId;
+        order.origQty = Decimal{1};
+        order.status = exchangerType == ExchangerType::BINANCE ? "CANCELED" : "Cancelled";
+        return order;
+    }
+
+    OrderInfo waitUntilInterrupted(const string &, const string &, stop_token stopToken, latch &waitStarted)
+    {
+        mutex waitMutex;
+        condition_variable_any waitChanged;
+        unique_lock<mutex> lock(waitMutex);
+        waitStarted.count_down();
+        static_cast<void>(waitChanged.wait(lock, stopToken, []() { return false; }));
+        throw OrderWaitInterrupted("Test order wait was interrupted");
+    }
+
+    OcoWaitResult waitUntilOcoInterrupted(const OcoInfo &, stop_token stopToken, latch &waitStarted)
+    {
+        mutex waitMutex;
+        condition_variable_any waitChanged;
+        unique_lock<mutex> lock(waitMutex);
+        waitStarted.count_down();
+        static_cast<void>(waitChanged.wait(lock, stopToken, []() { return false; }));
+        throw OrderWaitInterrupted("Test OCO wait was interrupted");
     }
 
     shared_ptr<RunManagerDealService> createImmediateService(ExchangerType exchangerType)
@@ -345,4 +510,367 @@ TEST(OperationChainRunManagerTest, JoinsWaitingWorkerAfterSharedServiceInterrupt
     EXPECT_EQ(run.value().chainSnapshot.status, OperationChainStatus::FAILED);
     EXPECT_EQ(run.value().chainSnapshot.error, "User stream stopped during chain wait");
     EXPECT_TRUE(manager.isStopping());
+}
+
+TEST(OperationChainRunManagerTest, CancelsPendingRunBeforeItsFirstRequest)
+{
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &, const string &, Decimal) -> OrderInfo
+    { throw runtime_error("Placement must not start"); };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Pending", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler(
+        [&manager, &observer](OperationChainRunSnapshot snapshot)
+        {
+            const bool shouldCancel =
+                snapshot.chainSnapshot.status == OperationChainStatus::PENDING && !snapshot.cancellationRequested;
+            const OperationChainRunId runId = snapshot.runId;
+            observer.record(move(snapshot));
+            if (shouldCancel)
+            {
+                manager.requestRunCancellation(runId);
+            }
+        });
+
+    const OperationChainRunId runId = manager.startRun("Pending");
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(binanceService->buyCalls.load(), 0);
+    EXPECT_TRUE(terminal.cancellationRequested);
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::PENDING);
+    EXPECT_FALSE(terminal.chainSnapshot.currentStepIndex.has_value());
+}
+
+TEST(OperationChainRunManagerTest, CancelsAcceptedOrderAfterPlacementInFlight)
+{
+    latch placementStarted(1);
+    binary_semaphore releasePlacement(0);
+    latch waitStarted(1);
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction =
+        [&placementStarted, &releasePlacement](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    {
+        placementStarted.count_down();
+        releasePlacement.acquire();
+        return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1);
+    };
+    binanceService->orderWaitAction = [&waitStarted](const string &symbol, const string &orderId, stop_token stopToken)
+    { return waitUntilInterrupted(symbol, orderId, stopToken, waitStarted); };
+    binanceService->orderCancellationAction = [](const OrderQuery &query, stop_token)
+    { return createCancelledOrder(query.symbol, query.orderId.value(), ExchangerType::BINANCE); };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Placement", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("Placement");
+    placementStarted.wait();
+    const OperationChainRunSnapshot beforeCancellation = manager.getRun(runId).value();
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot cancellationRequested = manager.getRun(runId).value();
+    releasePlacement.release();
+    waitStarted.wait();
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(binanceService->orderCancellationCalls.load(), 1);
+    EXPECT_GT(cancellationRequested.updateSequence, beforeCancellation.updateSequence);
+    EXPECT_TRUE(cancellationRequested.cancellationRequested);
+    EXPECT_EQ(cancellationRequested.chainSnapshot.status, OperationChainStatus::RUNNING);
+    EXPECT_TRUE(terminal.cancellationRequested);
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].acceptedIdentifiers.orderId, "run-order-1");
+    EXPECT_FALSE(terminal.chainSnapshot.currentStepIndex.has_value());
+}
+
+TEST(OperationChainRunManagerTest, RepeatedAndTerminalCancellationRequestsAreHarmless)
+{
+    latch waitStarted(1);
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1); };
+    binanceService->orderWaitAction = [&waitStarted](const string &symbol, const string &orderId, stop_token stopToken)
+    { return waitUntilInterrupted(symbol, orderId, stopToken, waitStarted); };
+    binanceService->orderCancellationAction = [](const OrderQuery &query, stop_token)
+    { return createCancelledOrder(query.symbol, query.orderId.value(), ExchangerType::BINANCE); };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Repeated", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("Repeated");
+    waitStarted.wait();
+    manager.requestRunCancellation(runId);
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot stored = manager.getRun(runId).value();
+    EXPECT_THROW(manager.requestRunCancellation(999), runtime_error);
+    manager.stopAndWait();
+
+    EXPECT_EQ(binanceService->orderCancellationCalls.load(), 1);
+    EXPECT_EQ(stored.updateSequence, terminal.updateSequence);
+    EXPECT_EQ(stored.chainSnapshot.status, OperationChainStatus::CANCELLED);
+}
+
+TEST(OperationChainRunManagerTest, TreatsTerminalWaitFailureAsConfirmedCancellation)
+{
+    latch waitStarted(1);
+    mutex terminalMutex;
+    condition_variable_any terminalChanged;
+    bool cancellationPublished = false;
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1); };
+    binanceService->orderWaitAction =
+        [&waitStarted, &terminalMutex, &terminalChanged, &cancellationPublished](const string &,
+                                                                                 const string &,
+                                                                                 stop_token stopToken) -> OrderInfo
+    {
+        unique_lock<mutex> lock(terminalMutex);
+        waitStarted.count_down();
+        const bool terminal =
+            terminalChanged.wait(lock, stopToken, [&cancellationPublished]() { return cancellationPublished; });
+        if (terminal)
+        {
+            throw runtime_error("Normal fill wait observed terminal CANCELED status");
+        }
+        throw OrderWaitInterrupted("Normal fill wait was interrupted");
+    };
+    binanceService->orderCancellationAction =
+        [&terminalMutex, &terminalChanged, &cancellationPublished](const OrderQuery &query, stop_token)
+    {
+        {
+            lock_guard<mutex> lock(terminalMutex);
+            cancellationPublished = true;
+        }
+        terminalChanged.notify_all();
+        return createCancelledOrder(query.symbol, query.orderId.value(), ExchangerType::BINANCE);
+    };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Terminal race", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("Terminal race");
+    waitStarted.wait();
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::CANCELLED);
+    EXPECT_TRUE(terminal.chainSnapshot.error.empty());
+}
+
+TEST(OperationChainRunManagerTest, RecordsExactOrderCancellationFailure)
+{
+    latch waitStarted(1);
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1); };
+    binanceService->orderWaitAction = [&waitStarted](const string &symbol, const string &orderId, stop_token stopToken)
+    { return waitUntilInterrupted(symbol, orderId, stopToken, waitStarted); };
+    binanceService->orderCancellationAction = [](const OrderQuery &, stop_token) -> OrderInfo
+    { throw runtime_error("Exact cancellation failure"); };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Failure", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("Failure");
+    waitStarted.wait();
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::FAILED);
+    EXPECT_EQ(terminal.chainSnapshot.error, "Exact cancellation failure");
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::FAILED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].error, terminal.chainSnapshot.error);
+    EXPECT_FALSE(terminal.chainSnapshot.currentStepIndex.has_value());
+}
+
+TEST(OperationChainRunManagerTest, NaturalFillWinsCancellationRace)
+{
+    latch waitStarted(1);
+    binary_semaphore releaseFill(0);
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1); };
+    binanceService->orderWaitAction =
+        [&waitStarted, &releaseFill](const string &symbol, const string &orderId, stop_token)
+    {
+        waitStarted.count_down();
+        releaseFill.acquire();
+        return createFilledOrder(symbol, orderId);
+    };
+    binanceService->orderCancellationAction = [&releaseFill](const OrderQuery &query, stop_token)
+    {
+        releaseFill.release();
+        return createFilledOrder(query.symbol, query.orderId.value());
+    };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Fill race", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("Fill race");
+    waitStarted.wait();
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_TRUE(terminal.cancellationRequested);
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::COMPLETED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(terminal.chainSnapshot.currentContext.asset, "BTC");
+}
+
+TEST(OperationChainRunManagerTest, CancelsOcoOnlyAfterBothChildrenAreConfirmedCancelled)
+{
+    latch waitStarted(1);
+    auto bybitService = make_shared<CancellationDealService>(ExchangerType::BYBIT);
+    bybitService->ocoPlacementAction = [](const PlaceOcoRequest &request)
+    {
+        OcoInfo ocoInfo;
+        ocoInfo.orderListId = "oco-group";
+        ocoInfo.takeProfitOrder.symbol = request.symbol;
+        ocoInfo.takeProfitOrder.orderId = "take-profit";
+        ocoInfo.takeProfitOrder.status = "New";
+        ocoInfo.stopLossOrder.symbol = request.symbol;
+        ocoInfo.stopLossOrder.orderId = "stop-loss";
+        ocoInfo.stopLossOrder.status = "New";
+        return ocoInfo;
+    };
+    bybitService->ocoWaitAction = [&waitStarted](const OcoInfo &ocoInfo, stop_token stopToken)
+    { return waitUntilOcoInterrupted(ocoInfo, stopToken, waitStarted); };
+    bybitService->ocoCancellationAction = [](const OcoInfo &accepted, stop_token)
+    {
+        OcoInfo terminal = accepted;
+        terminal.takeProfitOrder.status = "Cancelled";
+        terminal.stopLossOrder.status = "Cancelled";
+        return terminal;
+    };
+    auto binanceService = createImmediateService(ExchangerType::BINANCE);
+    OperationChainRunManager manager({createOcoDefinition("OCO", ExchangerType::BYBIT)}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId runId = manager.startRun("OCO");
+    waitStarted.wait();
+    manager.requestRunCancellation(runId);
+    const OperationChainRunSnapshot terminal = observer.waitForTerminal(runId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(bybitService->ocoCancellationCalls.load(), 1);
+    EXPECT_EQ(terminal.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].status, OperationStepStatus::CANCELLED);
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].acceptedIdentifiers.ocoGroupId, "oco-group");
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].acceptedIdentifiers.takeProfitOrderId, "take-profit");
+    EXPECT_EQ(terminal.chainSnapshot.steps[0].acceptedIdentifiers.stopLossOrderId, "stop-loss");
+}
+
+TEST(OperationChainRunManagerTest, CancelsOnlyTheSelectedConcurrentRun)
+{
+    latch waitsStarted(2);
+    mutex waitsMutex;
+    condition_variable_any waitsChanged;
+    set<string> filledOrderIds;
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [nextOrderNumber = make_shared<atomic<size_t>>(
+                                     1)](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, nextOrderNumber->fetch_add(1)); };
+    binanceService->orderWaitAction =
+        [&waitsStarted, &waitsMutex, &waitsChanged, &filledOrderIds](const string &symbol,
+                                                                     const string &orderId,
+                                                                     stop_token stopToken)
+    {
+        unique_lock<mutex> lock(waitsMutex);
+        waitsStarted.count_down();
+        const bool filled =
+            waitsChanged.wait(lock,
+                              stopToken,
+                              [&filledOrderIds, &orderId]() { return filledOrderIds.contains(orderId); });
+        if (!filled)
+        {
+            throw OrderWaitInterrupted("Selected test wait was interrupted");
+        }
+        return createFilledOrder(symbol, orderId);
+    };
+    binanceService->orderCancellationAction = [](const OrderQuery &query, stop_token)
+    { return createCancelledOrder(query.symbol, query.orderId.value(), ExchangerType::BINANCE); };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Concurrent", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const OperationChainRunId cancelledRunId = manager.startRun("Concurrent");
+    const OperationChainRunId completedRunId = manager.startRun("Concurrent");
+    waitsStarted.wait();
+    const OperationChainRunSnapshot completedRunAwaiting = manager.getRun(completedRunId).value();
+    const string completedOrderId = completedRunAwaiting.chainSnapshot.steps[0].acceptedIdentifiers.orderId.value();
+
+    manager.requestRunCancellation(cancelledRunId);
+    const OperationChainRunSnapshot cancelledRun = observer.waitForTerminal(cancelledRunId);
+    {
+        lock_guard<mutex> lock(waitsMutex);
+        filledOrderIds.insert(completedOrderId);
+    }
+    waitsChanged.notify_all();
+    const OperationChainRunSnapshot completedRun = observer.waitForTerminal(completedRunId);
+    manager.stopAndWait();
+
+    EXPECT_EQ(binanceService->orderCancellationCalls.load(), 1);
+    EXPECT_EQ(cancelledRun.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_TRUE(cancelledRun.cancellationRequested);
+    EXPECT_EQ(completedRun.chainSnapshot.status, OperationChainStatus::COMPLETED);
+    EXPECT_FALSE(completedRun.cancellationRequested);
+}
+
+TEST(OperationChainRunManagerTest, ShutdownInterruptsCancellationWithoutReportingItAsConfirmed)
+{
+    latch orderWaitStarted(1);
+    binary_semaphore releaseOrderWait(0);
+    latch cancellationStarted(1);
+    auto binanceService = make_shared<CancellationDealService>(ExchangerType::BINANCE);
+    binanceService->buyAction = [](const string &baseAsset, const string &quoteAsset, Decimal quantity)
+    { return createAcceptedOrder(baseAsset, quoteAsset, quantity, 1); };
+    binanceService->orderWaitAction = [&orderWaitStarted,
+                                       &releaseOrderWait](const string &, const string &, stop_token) -> OrderInfo
+    {
+        orderWaitStarted.count_down();
+        releaseOrderWait.acquire();
+        throw runtime_error("Shared stream stopped during shutdown");
+    };
+    binanceService->orderCancellationAction = [&cancellationStarted](const OrderQuery &,
+                                                                     stop_token stopToken) -> OrderInfo
+    {
+        mutex cancellationMutex;
+        condition_variable_any cancellationChanged;
+        unique_lock<mutex> lock(cancellationMutex);
+        cancellationStarted.count_down();
+        static_cast<void>(cancellationChanged.wait(lock, stopToken, []() { return false; }));
+        throw OrderWaitInterrupted("Cancellation confirmation stopped during shutdown");
+    };
+    auto bybitService = createImmediateService(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Shutdown", "BTC")}, binanceService, bybitService);
+
+    const OperationChainRunId runId = manager.startRun("Shutdown");
+    orderWaitStarted.wait();
+    manager.requestRunCancellation(runId);
+    cancellationStarted.wait();
+    manager.requestStop();
+    releaseOrderWait.release();
+    manager.stopAndWait();
+
+    const OperationChainRunSnapshot run = manager.getRun(runId).value();
+    EXPECT_TRUE(run.cancellationRequested);
+    EXPECT_EQ(run.chainSnapshot.status, OperationChainStatus::FAILED);
+    EXPECT_EQ(run.chainSnapshot.error, "Shared stream stopped during shutdown");
+    EXPECT_NE(run.chainSnapshot.status, OperationChainStatus::CANCELLED);
 }

@@ -2,6 +2,7 @@
 #define OPERATION_CHAIN_H
 
 #include "Operation.hpp"
+#include "OperationCancellationCoordinator.hpp"
 #include "OperationChainDefinition.hpp"
 #include "OperationChainSnapshot.hpp"
 #include "type_aliasing.hpp"
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -22,6 +24,7 @@ class OperationChain
     OperationContext context;
     std::vector<operation> operations;
     OperationChainClock clock;
+    std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator;
     mutable std::mutex snapshotMutex;
     OperationChainSnapshot snapshot;
 
@@ -37,6 +40,12 @@ class OperationChain
 
     void finishExecution();
 
+    void cancelPendingExecution();
+
+    void cancelExecutionBetweenSteps();
+
+    void cancelStepAndExecution(std::size_t stepIndex);
+
     void failExecution(std::size_t stepIndex, const std::string &error);
 
     void updateSnapshotTime(OperationChainTimePoint timePoint);
@@ -48,7 +57,8 @@ class OperationChain
         const OperationChainDefinition &definition,
         std::vector<operation> operations,
         const std::vector<Exchanger> &exchangers,
-        OperationChainClock clock = []() { return std::chrono::system_clock::now(); });
+        OperationChainClock clock = []() { return std::chrono::system_clock::now(); },
+        std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator = {});
 
     OperationChainSnapshot getSnapshot() const;
 

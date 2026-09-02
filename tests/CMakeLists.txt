@@ -24,6 +24,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/DealService/common/TradablePairUtil.cpp
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
+    ../src/OperationChain/OperationCancellationCoordinator.cpp
     ../src/OperationChain/OperationFactory.cpp
     ../src/OperationChain/OperationChain.cpp
     ../src/OperationChain/OperationChainBuilder.cpp

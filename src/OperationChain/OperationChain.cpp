@@ -1,9 +1,12 @@
 #include "OperationChain.hpp"
 
+#include "OperationCancellationRequested.hpp"
+#include "common/OrderWaitInterrupted.hpp"
 #include "common/exception_handling.hpp"
 
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -14,12 +17,16 @@ using namespace std;
 OperationChain::OperationChain(const OperationChainDefinition &definition,
                                vector<operation> operations,
                                const vector<Exchanger> &exchangers,
-                               OperationChainClock clock)
-    : context(exchangers), operations(move(operations)), clock(move(clock))
+                               OperationChainClock clock,
+                               shared_ptr<OperationCancellationCoordinator> cancellationCoordinator)
+    : context(exchangers), operations(move(operations)), clock(move(clock)),
+      cancellationCoordinator(cancellationCoordinator == nullptr ? make_shared<OperationCancellationCoordinator>()
+                                                                 : move(cancellationCoordinator))
 {
     throwIf(this->operations.size() != definition.getOperations().size(),
             "Operation-chain definition and executable operation counts do not match");
     throwIf(!this->clock, "Operation chain requires a clock");
+    context.cancellationCoordinator = this->cancellationCoordinator.get();
 
     context.exchangerType = definition.getInitialExchangerType();
     context.inAsset = definition.getInitialAsset();
@@ -121,6 +128,48 @@ void OperationChain::finishExecution()
     updateSnapshotTime(timePoint);
 }
 
+void OperationChain::cancelPendingExecution()
+{
+    lock_guard<mutex> lock(snapshotMutex);
+    throwIf(snapshot.status != OperationChainStatus::PENDING, "Pending operation chain is not cancellable");
+
+    const OperationChainTimePoint timePoint = clock();
+    snapshot.status = OperationChainStatus::CANCELLED;
+    snapshot.currentStepIndex.reset();
+    snapshot.finishedAt = timePoint;
+    updateSnapshotTime(timePoint);
+}
+
+void OperationChain::cancelExecutionBetweenSteps()
+{
+    lock_guard<mutex> lock(snapshotMutex);
+    throwIf(snapshot.status != OperationChainStatus::RUNNING, "Running operation chain is not cancellable");
+
+    const OperationChainTimePoint timePoint = clock();
+    snapshot.status = OperationChainStatus::CANCELLED;
+    snapshot.currentStepIndex.reset();
+    snapshot.finishedAt = timePoint;
+    updateSnapshotTime(timePoint);
+}
+
+void OperationChain::cancelStepAndExecution(size_t stepIndex)
+{
+    lock_guard<mutex> lock(snapshotMutex);
+    throwIf(snapshot.status != OperationChainStatus::RUNNING, "Running operation chain is not cancellable");
+    OperationStepSnapshot &step = snapshot.steps.at(stepIndex);
+    throwIf(step.status != OperationStepStatus::RUNNING && step.status != OperationStepStatus::AWAITING,
+            "Operation-chain step is not cancellable");
+
+    const OperationChainTimePoint timePoint = clock();
+    step.status = OperationStepStatus::CANCELLED;
+    step.finishedAt = timePoint;
+    snapshot.status = OperationChainStatus::CANCELLED;
+    snapshot.currentContext = createContextSnapshot(context);
+    snapshot.currentStepIndex.reset();
+    snapshot.finishedAt = timePoint;
+    updateSnapshotTime(timePoint);
+}
+
 void OperationChain::failExecution(size_t stepIndex, const string &error)
 {
     lock_guard<mutex> lock(snapshotMutex);
@@ -131,6 +180,7 @@ void OperationChain::failExecution(size_t stepIndex, const string &error)
     step.error = error;
     snapshot.status = OperationChainStatus::FAILED;
     snapshot.currentContext = createContextSnapshot(context);
+    snapshot.currentStepIndex.reset();
     snapshot.error = error;
     snapshot.finishedAt = timePoint;
     updateSnapshotTime(timePoint);
@@ -171,13 +221,30 @@ OperationChainSnapshot OperationChain::getSnapshot() const
 
 void OperationChain::execute(const OperationChainStateChangeHandler &stateChangeHandler)
 {
+    if (cancellationCoordinator->isCancellationRequested())
+    {
+        cancelPendingExecution();
+        cancellationCoordinator->finishChain();
+        notifyStateChanged(stateChangeHandler);
+        return;
+    }
+
     startExecution();
     notifyStateChanged(stateChangeHandler);
 
     for (size_t stepIndex = 0; stepIndex < operations.size(); ++stepIndex)
     {
+        if (cancellationCoordinator->isCancellationRequested())
+        {
+            cancelExecutionBetweenSteps();
+            cancellationCoordinator->finishChain();
+            notifyStateChanged(stateChangeHandler);
+            return;
+        }
+
         startStep(stepIndex);
         notifyStateChanged(stateChangeHandler);
+        cancellationCoordinator->startOperation(snapshot.steps[stepIndex].type != OperationType::SEND_TO);
         try
         {
             operations[stepIndex](context,
@@ -187,23 +254,80 @@ void OperationChain::execute(const OperationChainStateChangeHandler &stateChange
                                       notifyStateChanged(stateChangeHandler);
                                   });
         }
+        catch (const OperationCancellationRequested &)
+        {
+            cancellationCoordinator->finishOperation();
+            cancelStepAndExecution(stepIndex);
+            cancellationCoordinator->finishChain();
+            notifyStateChanged(stateChangeHandler);
+            return;
+        }
+        catch (const OrderWaitInterrupted &exception)
+        {
+            cancellationCoordinator->finishOperation();
+            if (cancellationCoordinator->isCancellationConfirmed())
+            {
+                cancelStepAndExecution(stepIndex);
+                cancellationCoordinator->finishChain();
+                notifyStateChanged(stateChangeHandler);
+                return;
+            }
+
+            const string error = cancellationCoordinator->hasCancellationFailed()
+                                     ? cancellationCoordinator->getCancellationFailure()
+                                     : string(exception.what());
+            failExecution(stepIndex, error);
+            cancellationCoordinator->finishChain();
+            notifyStateChanged(stateChangeHandler);
+            throw runtime_error(error);
+        }
         catch (const exception &exception)
         {
-            failExecution(stepIndex, exception.what());
+            cancellationCoordinator->finishOperation();
+            cancellationCoordinator->waitForCancellationResolution();
+            if (cancellationCoordinator->isCancellationConfirmed())
+            {
+                cancelStepAndExecution(stepIndex);
+                cancellationCoordinator->finishChain();
+                notifyStateChanged(stateChangeHandler);
+                return;
+            }
+
+            const string error = cancellationCoordinator->hasCancellationFailed()
+                                     ? cancellationCoordinator->getCancellationFailure()
+                                     : string(exception.what());
+            failExecution(stepIndex, error);
+            cancellationCoordinator->finishChain();
             notifyStateChanged(stateChangeHandler);
+            if (cancellationCoordinator->hasCancellationFailed())
+            {
+                throw runtime_error(error);
+            }
             throw;
         }
         catch (...)
         {
+            cancellationCoordinator->finishOperation();
             failExecution(stepIndex, "Operation failed with a non-standard exception");
+            cancellationCoordinator->finishChain();
             notifyStateChanged(stateChangeHandler);
             throw;
         }
 
+        cancellationCoordinator->finishOperation();
         finishStep(stepIndex);
         notifyStateChanged(stateChangeHandler);
+
+        if (cancellationCoordinator->isCancellationRequested() && stepIndex + 1 < operations.size())
+        {
+            cancelExecutionBetweenSteps();
+            cancellationCoordinator->finishChain();
+            notifyStateChanged(stateChangeHandler);
+            return;
+        }
     }
 
     finishExecution();
+    cancellationCoordinator->finishChain();
     notifyStateChanged(stateChangeHandler);
 }

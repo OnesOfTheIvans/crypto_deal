@@ -1,4 +1,5 @@
 add_library(OperationChainLib
+    OperationCancellationCoordinator.cpp
     OperationChain.cpp
     OperationChainBuilder.cpp
     OperationChainDefinition.cpp

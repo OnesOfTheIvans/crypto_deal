@@ -34,10 +34,18 @@ namespace {
         }
         gate.condition.notify_all();
     }
+
+    bool isRunTerminal(OperationChainStatus status)
+    {
+        return status == OperationChainStatus::COMPLETED || status == OperationChainStatus::FAILED ||
+               status == OperationChainStatus::CANCELLED;
+    }
 }
 
-OperationChainRunManager::RunRecord::RunRecord(OperationChainRunSnapshot snapshot, unique_ptr<OperationChain> chain)
-    : snapshot(move(snapshot)), chain(move(chain))
+OperationChainRunManager::RunRecord::RunRecord(OperationChainRunSnapshot snapshot,
+                                               unique_ptr<OperationChain> chain,
+                                               shared_ptr<OperationCancellationCoordinator> cancellationCoordinator)
+    : snapshot(move(snapshot)), chain(move(chain)), cancellationCoordinator(move(cancellationCoordinator))
 {}
 
 OperationChainRunManager::OperationChainRunManager(vector<OperationChainDefinition> definitions,
@@ -94,12 +102,13 @@ OperationChainRunId OperationChainRunManager::startRun(const string &definitionN
         throwIf(nextUpdateSequence == 0, "Operation-chain update sequence space is exhausted");
 
         const OperationChainRunId runId = nextRunId++;
-        unique_ptr<OperationChain> chain = builder.build(definition, exchangers);
+        auto cancellationCoordinator = make_shared<OperationCancellationCoordinator>();
+        unique_ptr<OperationChain> chain = builder.build(definition, exchangers, cancellationCoordinator);
         initialSnapshot.runId = runId;
         initialSnapshot.chainSnapshot = chain->getSnapshot();
         initialSnapshot.updateSequence = nextUpdateSequence++;
 
-        auto record = make_unique<RunRecord>(initialSnapshot, move(chain));
+        auto record = make_unique<RunRecord>(initialSnapshot, move(chain), cancellationCoordinator);
         OperationChain *chainPointer = record->chain.get();
         const auto [run, inserted] = runs.emplace(runId, move(record));
         throwIf(!inserted, "Operation-chain run ID collision");
@@ -125,6 +134,46 @@ OperationChainRunId OperationChainRunManager::startRun(const string &definitionN
     notifyRunChanged(initialSnapshot);
     openRunStartGate(*startGate);
     return initialSnapshot.runId;
+}
+
+void OperationChainRunManager::requestRunCancellation(OperationChainRunId runId)
+{
+    OperationChainRunSnapshot changedSnapshot;
+    {
+        lock_guard<mutex> lock(stateMutex);
+        throwIf(stopping, "Operation-chain run manager is stopping");
+        const auto run = runs.find(runId);
+        throwIf(run == runs.end(), "Unknown operation-chain run: " + to_string(runId));
+        if (run->second->snapshot.cancellationRequested || isRunTerminal(run->second->snapshot.chainSnapshot.status))
+        {
+            return;
+        }
+
+        throwIf(nextUpdateSequence == 0, "Operation-chain update sequence space is exhausted");
+        run->second->snapshot.cancellationRequested = true;
+        run->second->snapshot.updateSequence = nextUpdateSequence++;
+        changedSnapshot = run->second->snapshot;
+        const shared_ptr<OperationCancellationCoordinator> cancellationCoordinator =
+            run->second->cancellationCoordinator;
+        cancellationCoordinator->requestCancellation();
+
+        try
+        {
+            run->second->cancellationWorker = jthread([this, cancellationCoordinator](stop_token stopToken)
+                                                      { cancelRun(cancellationCoordinator, stopToken); });
+        }
+        catch (const exception &exception)
+        {
+            cancellationCoordinator->failCancellation(exception.what());
+        }
+        catch (...)
+        {
+            cancellationCoordinator->failCancellation(
+                "Operation-chain cancellation worker failed to start with a non-standard exception");
+        }
+    }
+
+    notifyRunChanged(changedSnapshot);
 }
 
 void OperationChainRunManager::executeRun(OperationChainRunId runId, OperationChain &chain, stop_token stopToken)
@@ -182,6 +231,12 @@ void OperationChainRunManager::updateRun(OperationChainRunId runId, OperationCha
     }
 
     notifyRunChanged(changedSnapshot);
+}
+
+void OperationChainRunManager::cancelRun(const shared_ptr<OperationCancellationCoordinator> &cancellationCoordinator,
+                                         stop_token stopToken)
+{
+    cancellationCoordinator->cancelCurrentOperation(stopToken);
 }
 
 void OperationChainRunManager::notifyRunChanged(const OperationChainRunSnapshot &snapshot) const
@@ -251,6 +306,7 @@ void OperationChainRunManager::requestStop()
     for (auto &run : runs)
     {
         run.second->worker.request_stop();
+        run.second->cancellationWorker.request_stop();
     }
 }
 
@@ -261,10 +317,11 @@ void OperationChainRunManager::stopAndWait()
     vector<jthread *> workers;
     {
         lock_guard<mutex> lock(stateMutex);
-        workers.reserve(runs.size());
+        workers.reserve(runs.size() * 2);
         for (auto &run : runs)
         {
             workers.push_back(&run.second->worker);
+            workers.push_back(&run.second->cancellationWorker);
         }
     }
 

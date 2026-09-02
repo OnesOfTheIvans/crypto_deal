@@ -11,6 +11,7 @@ struct OperationChainRunSnapshot
     OperationChainRunId runId = 0;
     OperationChainSnapshot chainSnapshot;
     std::uint64_t updateSequence = 0;
+    bool cancellationRequested = false;
 };
 
 #endif

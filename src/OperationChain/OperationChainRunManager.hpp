@@ -28,9 +28,13 @@ class OperationChainRunManager
     {
         OperationChainRunSnapshot snapshot;
         std::unique_ptr<OperationChain> chain;
+        std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator;
         std::jthread worker;
+        std::jthread cancellationWorker;
 
-        RunRecord(OperationChainRunSnapshot snapshot, std::unique_ptr<OperationChain> chain);
+        RunRecord(OperationChainRunSnapshot snapshot,
+                  std::unique_ptr<OperationChain> chain,
+                  std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator);
     };
 
     const std::vector<OperationChainDefinition> definitions;
@@ -50,6 +54,9 @@ class OperationChainRunManager
 
     void updateRun(OperationChainRunId runId, OperationChainSnapshot snapshot);
 
+    void cancelRun(const std::shared_ptr<OperationCancellationCoordinator> &cancellationCoordinator,
+                   std::stop_token stopToken);
+
     void notifyRunChanged(const OperationChainRunSnapshot &snapshot) const;
 
   public:
@@ -62,6 +69,8 @@ class OperationChainRunManager
     void setRunChangeHandler(OperationChainRunChangeHandler handler);
 
     OperationChainRunId startRun(const std::string &definitionName);
+
+    void requestRunCancellation(OperationChainRunId runId);
 
     const std::vector<OperationChainDefinition> &getDefinitions() const;
 

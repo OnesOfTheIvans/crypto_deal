@@ -170,7 +170,7 @@ TEST(OperationChainTest, RecordsFailedStepAndLeavesLaterStepsPendingBeforeRethro
     const OperationChainSnapshot snapshot = chain.getSnapshot();
     EXPECT_EQ(snapshot.status, OperationChainStatus::FAILED);
     EXPECT_EQ(snapshot.error, "Operation failed");
-    EXPECT_EQ(snapshot.currentStepIndex, 1);
+    EXPECT_FALSE(snapshot.currentStepIndex.has_value());
     EXPECT_EQ(snapshot.currentContext, (OperationContextSnapshot{ExchangerType::BINANCE, "BTC", Decimal{2}}));
     EXPECT_EQ(snapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
     EXPECT_EQ(snapshot.steps[1].status, OperationStepStatus::FAILED);
@@ -321,4 +321,136 @@ TEST(OperationChainTest, ObserverFailureIsReportedWithoutChangingExecution)
 
     EXPECT_NE(errorOutput.find("Operation-chain state observer failed: observer error"), std::string::npos);
     EXPECT_EQ(chain.getSnapshot().status, OperationChainStatus::COMPLETED);
+}
+
+TEST(OperationChainTest, CancelsPendingExecutionWithoutStartingAnOperation)
+{
+    std::atomic<bool> operationStarted = false;
+    const operation skippedOperation = [&operationStarted](OperationContext &, const OperationProgressHandler &)
+    { operationStarted = true; };
+    const OperationChainDefinition definition =
+        createDefinition("Pending cancellation", {createBaseDefinition(OperationType::BUY_CRYPTO, "BTC")});
+    auto cancellationCoordinator = std::make_shared<OperationCancellationCoordinator>();
+    OperationChain chain(definition, {skippedOperation}, {}, createClock(), cancellationCoordinator);
+    cancellationCoordinator->requestCancellation();
+
+    std::vector<OperationChainSnapshot> events;
+    chain.execute([&events](OperationChainSnapshot snapshot) { events.push_back(std::move(snapshot)); });
+
+    EXPECT_FALSE(operationStarted.load());
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events.front().status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(events.front().revision, 1);
+    EXPECT_FALSE(events.front().startedAt.has_value());
+    EXPECT_TRUE(events.front().finishedAt.has_value());
+    EXPECT_EQ(events.front().steps[0].status, OperationStepStatus::PENDING);
+    EXPECT_FALSE(events.front().currentStepIndex.has_value());
+}
+
+TEST(OperationChainTest, CancelsCurrentStepBeforeItsRequest)
+{
+    std::atomic<bool> requestStarted = false;
+    const operation cancellableOperation =
+        [&requestStarted](OperationContext &context, const OperationProgressHandler &)
+    {
+        context.cancellationCoordinator->throwIfCancellationRequested();
+        requestStarted = true;
+    };
+    const operation skippedOperation = [](OperationContext &, const OperationProgressHandler &) {};
+    const OperationChainDefinition definition =
+        createDefinition("Pre-request cancellation",
+                         {createBaseDefinition(OperationType::BUY_CRYPTO, "BTC"),
+                          createBaseDefinition(OperationType::SELL_CRYPTO, "USDT")});
+    auto cancellationCoordinator = std::make_shared<OperationCancellationCoordinator>();
+    OperationChain chain(definition,
+                         {cancellableOperation, skippedOperation},
+                         {},
+                         createClock(),
+                         cancellationCoordinator);
+
+    chain.execute(
+        [&cancellationCoordinator](OperationChainSnapshot snapshot)
+        {
+            if (snapshot.steps[0].status == OperationStepStatus::RUNNING)
+            {
+                cancellationCoordinator->requestCancellation();
+            }
+        });
+
+    const OperationChainSnapshot snapshot = chain.getSnapshot();
+    EXPECT_FALSE(requestStarted.load());
+    EXPECT_EQ(snapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(snapshot.steps[0].status, OperationStepStatus::CANCELLED);
+    EXPECT_TRUE(snapshot.steps[0].startedAt.has_value());
+    EXPECT_TRUE(snapshot.steps[0].finishedAt.has_value());
+    EXPECT_EQ(snapshot.steps[1].status, OperationStepStatus::PENDING);
+    EXPECT_FALSE(snapshot.currentStepIndex.has_value());
+}
+
+TEST(OperationChainTest, CancelsBetweenStepsAndPreservesCompletedWork)
+{
+    std::vector<int> executionOrder;
+    const operation firstOperation = [&executionOrder](OperationContext &context, const OperationProgressHandler &)
+    {
+        executionOrder.push_back(1);
+        context.inAsset = "BTC";
+    };
+    const operation secondOperation = [&executionOrder](OperationContext &, const OperationProgressHandler &)
+    { executionOrder.push_back(2); };
+    const OperationChainDefinition definition =
+        createDefinition("Between-step cancellation",
+                         {createBaseDefinition(OperationType::BUY_CRYPTO, "BTC"),
+                          createBaseDefinition(OperationType::SELL_CRYPTO, "USDT")});
+    auto cancellationCoordinator = std::make_shared<OperationCancellationCoordinator>();
+    OperationChain chain(definition, {firstOperation, secondOperation}, {}, createClock(), cancellationCoordinator);
+
+    chain.execute(
+        [&cancellationCoordinator](OperationChainSnapshot snapshot)
+        {
+            if (snapshot.steps[0].status == OperationStepStatus::SUCCEEDED)
+            {
+                cancellationCoordinator->requestCancellation();
+            }
+        });
+
+    const OperationChainSnapshot snapshot = chain.getSnapshot();
+    EXPECT_EQ(executionOrder, (std::vector<int>{1}));
+    EXPECT_EQ(snapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_EQ(snapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(snapshot.steps[1].status, OperationStepStatus::PENDING);
+    EXPECT_EQ(snapshot.currentContext.asset, "BTC");
+    EXPECT_FALSE(snapshot.currentStepIndex.has_value());
+}
+
+TEST(OperationChainTest, LetsFinalNonCancellableOperationFinishNaturally)
+{
+    std::latch operationStarted(1);
+    std::binary_semaphore releaseOperation(0);
+    const operation blockingOperation =
+        [&operationStarted, &releaseOperation](OperationContext &context, const OperationProgressHandler &)
+    {
+        operationStarted.count_down();
+        releaseOperation.acquire();
+        context.exchangerType = ExchangerType::BYBIT;
+    };
+    SendToConfig config;
+    config.destinationExchanger = ExchangerType::BYBIT;
+    config.chain = "TESTNET";
+    config.address = "address";
+    const OperationChainDefinition definition =
+        createDefinition("Final non-cancellable operation", {OperationDefinition(OperationType::SEND_TO, config)});
+    auto cancellationCoordinator = std::make_shared<OperationCancellationCoordinator>();
+    OperationChain chain(definition, {blockingOperation}, {}, createClock(), cancellationCoordinator);
+    std::jthread worker([&chain]() { chain.execute(); });
+    operationStarted.wait();
+
+    cancellationCoordinator->requestCancellation();
+    releaseOperation.release();
+    worker.join();
+
+    const OperationChainSnapshot snapshot = chain.getSnapshot();
+    EXPECT_EQ(snapshot.status, OperationChainStatus::COMPLETED);
+    EXPECT_EQ(snapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(snapshot.currentContext.exchangerType, ExchangerType::BYBIT);
+    EXPECT_FALSE(snapshot.currentStepIndex.has_value());
 }
