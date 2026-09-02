@@ -79,6 +79,14 @@ namespace {
         })";
     }
 
+    std::string
+    createBinanceOrderStreamMessage(long long orderId, const std::string &clientOrderId, const std::string &status)
+    {
+        return R"({"event":{"e":"executionReport","s":"BTCUSDT","c":")" + clientOrderId +
+               R"(","S":"SELL","o":"LIMIT","f":"GTC","q":"0.5","p":"50000","X":")" + status + R"(","i":)" +
+               std::to_string(orderId) + R"(,"z":"0","Z":"0"}})";
+    }
+
     std::string binanceBalanceStreamMessage(const std::string &usdtFree = "100000",
                                             const std::string &usdtLocked = "0",
                                             const std::string &btcFree = "1",
@@ -388,6 +396,82 @@ TEST_F(BinanceDealServiceIntegrationTest, CancelOrder_Success)
     EXPECT_EQ(info.symbol, "BTCUSDT");
     EXPECT_EQ(info.orderId, "12345");
     EXPECT_EQ(info.status, "CANCELED");
+}
+
+TEST_F(BinanceDealServiceIntegrationTest, ConfirmedCancellationSkipsRequestForAlreadyTerminalFill)
+{
+    auto service = createService();
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("orderId=12346", createBinanceOrderResponse(12346, "FILLED"));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "12346";
+
+    const OrderInfo result = service.cancelOrderAndWaitUntilTerminal(query);
+
+    EXPECT_EQ(result.status, "FILLED");
+    std::size_t cancellationRequests = 0;
+    for (const MockNetwork::RecordedRequest &request : MockNetwork::instance().getRequests())
+    {
+        if (request.method == "DELETE" && request.target.find("/api/v3/order?") != std::string::npos)
+        {
+            ++cancellationRequests;
+        }
+    }
+    EXPECT_EQ(cancellationRequests, 0u);
+}
+
+TEST_F(BinanceDealServiceIntegrationTest, ConfirmedCancellationPreservesCancelFailureWhenOrderRemainsActive)
+{
+    auto service = createService();
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("orderId=12347", createBinanceOrderResponse(12347, "NEW"));
+    MockNetwork::instance().setResponse("orderId=12347", R"({
+        "code": -2011,
+        "msg": "Unknown order sent."
+    })");
+    MockNetwork::instance().setResponse("orderId=12347", createBinanceOrderResponse(12347, "NEW"));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "12347";
+
+    try
+    {
+        static_cast<void>(service.cancelOrderAndWaitUntilTerminal(query));
+        FAIL() << "Expected confirmed Binance cancellation to preserve the cancel failure";
+    }
+    catch (const std::runtime_error &error)
+    {
+        EXPECT_NE(std::string(error.what()).find("Unknown order sent."), std::string::npos);
+    }
+}
+
+TEST_F(BinanceDealServiceIntegrationTest, ConfirmedCancellationWaitsForTerminalStreamUpdateAfterActiveResponse)
+{
+    auto service = createService();
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("orderId=12348", createBinanceOrderResponse(12348, "NEW"));
+    MockNetwork::instance().setResponse("orderId=12348", createBinanceOrderResponse(12348, "NEW"));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "12348";
+    std::future<OrderInfo> result =
+        std::async(std::launch::async, [&service, &query]() { return service.cancelOrderAndWaitUntilTerminal(query); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/order?", 2, std::chrono::seconds(1)));
+    EXPECT_EQ(result.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+
+    test_private_access::dispatchBinanceUserStreamMessage(
+        service,
+        createBinanceOrderStreamMessage(12348, "confirmed-order", "CANCELED"));
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    EXPECT_EQ(result.get().status, "CANCELED");
 }
 
 TEST_F(BinanceDealServiceIntegrationTest, GetSymbolInfo_Success)
@@ -1101,4 +1185,52 @@ TEST_F(BinanceDealServiceIntegrationTest, CancelOco_Success)
 
     EXPECT_NO_THROW(service.cancelOco(query));
     EXPECT_EQ(MockNetwork::instance().lastRequest().method, "DELETE");
+}
+
+TEST_F(BinanceDealServiceIntegrationTest, ConfirmedOcoCancellationWaitsForBothTerminalChildren)
+{
+    auto service = createService();
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    setBinanceServerTimeResponse();
+    MockNetwork::instance().setResponse("orderId=901", createBinanceOrderResponse(901, "NEW"));
+    MockNetwork::instance().setResponse("orderId=902", createBinanceOrderResponse(902, "NEW"));
+    MockNetwork::instance().setResponse("/api/v3/orderList", R"({
+        "orderListId": 90,
+        "listClientOrderId": "confirmed-group",
+        "listStatusType": "ALL_DONE",
+        "listOrderStatus": "ALL_DONE",
+        "symbol": "BTCUSDT",
+        "orders": []
+    })");
+
+    OcoInfo ocoInfo;
+    ocoInfo.orderListId = "90";
+    ocoInfo.listClientOrderId = "confirmed-group";
+    ocoInfo.takeProfitOrder.symbol = "BTCUSDT";
+    ocoInfo.takeProfitOrder.orderId = "901";
+    ocoInfo.stopLossOrder.symbol = "BTCUSDT";
+    ocoInfo.stopLossOrder.orderId = "902";
+
+    std::future<OcoInfo> result =
+        std::async(std::launch::async,
+                   [&service, &ocoInfo]() { return service.cancelOcoAndWaitUntilTerminal(ocoInfo); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/orderList", 1, std::chrono::seconds(1)));
+
+    test_private_access::dispatchBinanceUserStreamMessage(
+        service,
+        createBinanceOrderStreamMessage(901, "confirmed-group-tp", "CANCELED"));
+    EXPECT_EQ(result.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+
+    test_private_access::dispatchBinanceUserStreamMessage(
+        service,
+        createBinanceOrderStreamMessage(902, "confirmed-group-sl", "CANCELED"));
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const OcoInfo terminalOcoInfo = result.get();
+    EXPECT_EQ(terminalOcoInfo.orderListId, ocoInfo.orderListId);
+    EXPECT_EQ(terminalOcoInfo.listClientOrderId, ocoInfo.listClientOrderId);
+    EXPECT_EQ(terminalOcoInfo.takeProfitOrder.orderId, "901");
+    EXPECT_EQ(terminalOcoInfo.takeProfitOrder.status, "CANCELED");
+    EXPECT_EQ(terminalOcoInfo.stopLossOrder.orderId, "902");
+    EXPECT_EQ(terminalOcoInfo.stopLossOrder.status, "CANCELED");
 }

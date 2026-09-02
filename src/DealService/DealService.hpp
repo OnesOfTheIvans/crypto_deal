@@ -112,6 +112,10 @@ class DealService
 
     virtual OrderInfo cancelOrder(const OrderQuery &request) = 0;
 
+    virtual OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request) = 0;
+
+    virtual OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request, std::stop_token stopToken);
+
     virtual OrderInfo getOrder(const OrderQuery &request) = 0;
 
     virtual SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) = 0;
@@ -124,6 +128,10 @@ class DealService
     virtual OcoInfo placeOco(const PlaceOcoRequest &request) = 0;
 
     virtual void cancelOco(const OrderListQuery &request) = 0;
+
+    virtual OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) = 0;
+
+    virtual OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, std::stop_token stopToken);
 
     virtual void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) = 0;
 

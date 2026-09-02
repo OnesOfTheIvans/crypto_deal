@@ -32,6 +32,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -57,6 +58,7 @@ class BybitDealService : public DealService
     {
         std::optional<OrderInfo> orderInfo;
         std::optional<std::string> error;
+        std::size_t registrationCount = 0;
     };
 
     class PendingOrderRegistration
@@ -189,6 +191,8 @@ class BybitDealService : public DealService
         return pendingOrderWaits.at(orderKey);
     }
 
+    PendingOrderWait getPendingOrderWait(const std::string &symbol, const std::string &orderId);
+
     void publishOrderUpdate(const OrderInfo &orderInfo);
 
     void publishOrderWaitError(const OrderInfo &orderInfo, const std::string &error);
@@ -202,6 +206,10 @@ class BybitDealService : public DealService
     PendingOrderWait
     waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
 
+    OrderInfo processOrderCancellationUpdate(const std::string &symbol,
+                                             const std::string &orderId,
+                                             const PendingOrderWait &pendingWait);
+
     OrderInfo
     processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderWait &pendingWait);
 
@@ -211,6 +219,11 @@ class BybitDealService : public DealService
                                   PendingOrderWait &takeProfitWait,
                                   PendingOrderWait &stopLossWait,
                                   std::stop_token stopToken);
+
+    void waitForOcoCancellationTerminalStatus(const OcoInfo &ocoInfo,
+                                              PendingOrderWait &takeProfitWait,
+                                              PendingOrderWait &stopLossWait,
+                                              std::stop_token stopToken);
 
     PendingOrderWait
     waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo, std::stop_token stopToken);
@@ -233,6 +246,15 @@ class BybitDealService : public DealService
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
 
     OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder, std::stop_token stopToken);
+
+    OcoInfo
+    createTerminalOcoInfo(const OcoInfo &ocoInfo, const OrderInfo &firstOrder, const OrderInfo &secondOrder) const;
+
+    std::optional<OcoInfo> getTerminalOcoInfo(const OcoInfo &ocoInfo);
+
+    OcoInfo processOcoCancellationUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderWait &takeProfitWait,
+                                         const PendingOrderWait &stopLossWait);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -349,6 +371,10 @@ class BybitDealService : public DealService
 
     OrderInfo cancelOrder(const OrderQuery &request) override;
 
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request) override;
+
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request, std::stop_token stopToken) override;
+
     OrderInfo getOrder(const OrderQuery &request) override;
 
     SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) override;
@@ -362,6 +388,10 @@ class BybitDealService : public DealService
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
     void cancelOco(const OrderListQuery &request) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, std::stop_token stopToken) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 

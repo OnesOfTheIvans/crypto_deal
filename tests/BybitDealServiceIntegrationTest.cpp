@@ -119,6 +119,16 @@ namespace {
         })";
     }
 
+    std::string
+    createBybitOrderStreamMessage(const std::string &orderId, const std::string &orderLinkId, const std::string &status)
+    {
+        return R"({"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":")" + orderId +
+               R"(","orderLinkId":")" + orderLinkId + R"(","side":"Sell","orderType":"Limit","orderStatus":")" +
+               status +
+               R"(","price":"50000","qty":"0.5","cumExecQty":"0","cumExecValue":"0",)"
+               R"("leavesQty":"0","avgPrice":"0"}]})";
+    }
+
     std::string bybitOrderPriceLimitResponse(const std::string &buyLmt = "100000", const std::string &sellLmt = "10000")
     {
         return R"({
@@ -540,6 +550,77 @@ TEST_F(BybitDealServiceIntegrationTest, CancelOrder_Success)
     EXPECT_NE(body.find(R"("orderId":"132141")"), std::string::npos);
     EXPECT_EQ(body.find("orderLinkId"), std::string::npos);
     EXPECT_EQ(body.find("null"), std::string::npos);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, ConfirmedCancellationSkipsRequestForAlreadyTerminalFill)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("orderId=TERMINAL",
+                                        createBybitOrderResponse("TERMINAL", "Filled", "TERMINAL_CLIENT"));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "TERMINAL";
+
+    const OrderInfo result = service.cancelOrderAndWaitUntilTerminal(query);
+
+    EXPECT_EQ(result.status, "Filled");
+    EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 0u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, ConfirmedCancellationPreservesCancelFailureWhenOrderRemainsActive)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("orderId=ACTIVE", createBybitOrderResponse("ACTIVE", "New"));
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 10001,
+        "retMsg": "Cancellation denied"
+    })");
+    MockNetwork::instance().setResponse("orderId=ACTIVE", createBybitOrderResponse("ACTIVE", "New"));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "ACTIVE";
+
+    try
+    {
+        static_cast<void>(service.cancelOrderAndWaitUntilTerminal(query));
+        FAIL() << "Expected confirmed Bybit cancellation to preserve the cancel failure";
+    }
+    catch (const std::runtime_error &error)
+    {
+        EXPECT_NE(std::string(error.what()).find("Cancellation denied"), std::string::npos);
+    }
+}
+
+TEST_F(BybitDealServiceIntegrationTest, ConfirmedCancellationWaitsForTerminalStreamUpdateAfterAcknowledgement)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("orderId=ACKNOWLEDGED",
+                                        createBybitOrderResponse("ACKNOWLEDGED", "New", "ACKNOWLEDGED_CLIENT"));
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "ACKNOWLEDGED", "orderLinkId": "ACKNOWLEDGED_CLIENT" }
+    })");
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "ACKNOWLEDGED";
+    std::future<OrderInfo> result =
+        std::async(std::launch::async, [&service, &query]() { return service.cancelOrderAndWaitUntilTerminal(query); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/cancel", 1, std::chrono::seconds(1)));
+    EXPECT_EQ(result.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderStreamMessage("ACKNOWLEDGED", "ACKNOWLEDGED_CLIENT", "Cancelled"));
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    EXPECT_EQ(result.get().status, "Cancelled");
 }
 
 TEST_F(BybitDealServiceIntegrationTest, GetSymbolInfo_Success)
@@ -1224,6 +1305,76 @@ TEST_F(BybitDealServiceIntegrationTest, CancelOco_Success)
 
     EXPECT_NO_THROW(service.cancelOco(cancelQuery));
     EXPECT_EQ(countRequestsContaining("/v5/order/cancel"), 2u);
+}
+
+TEST_F(BybitDealServiceIntegrationTest, ConfirmedOcoCancellationWaitsForBothTerminalChildren)
+{
+    auto service = createService();
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "CONFIRMED_TP", "orderLinkId": "CONFIRMED_GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/create", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "CONFIRMED_SL", "orderLinkId": "CONFIRMED_GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("orderId=CONFIRMED_TP",
+                                        createBybitOrderResponse("CONFIRMED_TP", "New", "CONFIRMED_GROUP_TP"));
+    MockNetwork::instance().setResponse("orderId=CONFIRMED_SL",
+                                        createBybitOrderResponse("CONFIRMED_SL", "New", "CONFIRMED_GROUP_SL"));
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "CONFIRMED_TP", "orderLinkId": "CONFIRMED_GROUP_TP" }
+    })");
+    MockNetwork::instance().setResponse("/v5/order/cancel", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "orderId": "CONFIRMED_SL", "orderLinkId": "CONFIRMED_GROUP_SL" }
+    })");
+    MockNetwork::instance().setResponse("/v5/market/instruments-info", bybitSymbolInfoResponse());
+    MockNetwork::instance().setResponse("/v5/market/price-limit", bybitOrderPriceLimitResponse());
+    MockNetwork::instance().setResponse("/v5/market/tickers", R"({
+        "retCode": 0,
+        "retMsg": "OK",
+        "result": { "list": [{ "symbol": "BTCUSDT", "lastPrice": "55000" }] }
+    })");
+    test_private_access::dispatchBybitUserStreamMessage(service, bybitWalletStreamMessage());
+
+    PlaceOcoRequest request;
+    request.symbol = "BTCUSDT";
+    request.side = OrderOperation::SELL;
+    request.quantity = DecimalConverter::parseDecimal("0.5");
+    request.price = DecimalConverter::parseDecimal("60000");
+    request.stopPrice = DecimalConverter::parseDecimal("55000");
+    request.listClientOrderId = "CONFIRMED_GROUP";
+    const OcoInfo ocoInfo = service.placeOco(request);
+
+    std::future<OcoInfo> result =
+        std::async(std::launch::async,
+                   [&service, &ocoInfo]() { return service.cancelOcoAndWaitUntilTerminal(ocoInfo); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/cancel", 2, std::chrono::seconds(1)));
+
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderStreamMessage("CONFIRMED_TP", "CONFIRMED_GROUP_TP", "Cancelled"));
+    EXPECT_EQ(result.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderStreamMessage("CONFIRMED_SL", "CONFIRMED_GROUP_SL", "Cancelled"));
+
+    ASSERT_EQ(result.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const OcoInfo terminalOcoInfo = result.get();
+    EXPECT_EQ(terminalOcoInfo.orderListId, ocoInfo.orderListId);
+    EXPECT_EQ(terminalOcoInfo.listClientOrderId, ocoInfo.listClientOrderId);
+    EXPECT_EQ(terminalOcoInfo.takeProfitOrder.orderId, "CONFIRMED_TP");
+    EXPECT_EQ(terminalOcoInfo.takeProfitOrder.status, "Cancelled");
+    EXPECT_EQ(terminalOcoInfo.stopLossOrder.orderId, "CONFIRMED_SL");
+    EXPECT_EQ(terminalOcoInfo.stopLossOrder.status, "Cancelled");
 }
 
 TEST_F(BybitDealServiceIntegrationTest, FilledOcoUpdateWaitsForSiblingTerminalStreamUpdate)

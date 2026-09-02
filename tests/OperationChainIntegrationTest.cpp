@@ -87,6 +87,11 @@ namespace {
             return {};
         }
 
+        OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &) override
+        {
+            return {};
+        }
+
         OrderInfo getOrder(const OrderQuery &) override
         {
             return {};
@@ -113,6 +118,11 @@ namespace {
         }
 
         void cancelOco(const OrderListQuery &) override {}
+
+        OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override
+        {
+            return ocoInfo;
+        }
 
         void cancelAllOpenOrders(const std::string &, OrderCategory) override {}
 

@@ -24,6 +24,7 @@
 #include "domain/UserStreamSubscribeRequestDto.hpp"
 
 #include <chrono>
+#include <exception>
 #include <sstream>
 #include <stdexcept>
 // DEBUG
@@ -122,14 +123,32 @@ bool BinanceDealService::isOrderTerminal(const string &status)
 void BinanceDealService::registerPendingOrder(const OrderKey &orderKey)
 {
     lock_guard<mutex> lock(pendingOrderWaitsMutex);
-    const bool inserted = pendingOrderWaits.emplace(orderKey, PendingOrderUpdate{}).second;
-    throwIf(!inserted, "Binance order already has an active wait: " + orderKey.first + "/" + orderKey.second);
+    PendingOrderWait &pendingWait = pendingOrderWaits[orderKey];
+    ++pendingWait.registrationCount;
 }
 
 void BinanceDealService::unregisterPendingOrder(const OrderKey &orderKey)
 {
     lock_guard<mutex> lock(pendingOrderWaitsMutex);
-    pendingOrderWaits.erase(orderKey);
+    auto pendingWait = pendingOrderWaits.find(orderKey);
+    if (pendingWait == pendingOrderWaits.end())
+    {
+        return;
+    }
+    if (pendingWait->second.registrationCount > 1)
+    {
+        --pendingWait->second.registrationCount;
+        return;
+    }
+
+    pendingOrderWaits.erase(pendingWait);
+}
+
+BinanceDealService::PendingOrderUpdate BinanceDealService::getPendingOrderUpdate(const string &symbol,
+                                                                                 const string &orderId)
+{
+    lock_guard<mutex> lock(pendingOrderWaitsMutex);
+    return getPendingOrderUpdate(getOrderKey(symbol, orderId));
 }
 
 void BinanceDealService::publishOrderUpdate(const OrderInfo &orderInfo)
@@ -147,7 +166,7 @@ void BinanceDealService::publishOrderUpdate(const OrderInfo &orderInfo)
             return;
         }
 
-        optional<OrderInfo> &currentInfo = pendingOrder->second;
+        optional<OrderInfo> &currentInfo = pendingOrder->second.orderInfo;
         if (currentInfo.has_value())
         {
             if (isOrderFilled(currentInfo->status))
@@ -392,6 +411,104 @@ OrderInfo BinanceDealService::waitUntilOrderFilled(const string &symbol, const s
     return processOrderUpdate(symbol, orderId, waitForOrderTerminalStatus(symbol, orderId, stopToken));
 }
 
+OrderInfo BinanceDealService::processOrderCancellationUpdate(const string &symbol,
+                                                             const string &orderId,
+                                                             const PendingOrderUpdate &pendingUpdate)
+{
+    if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+    {
+        return pendingUpdate.value();
+    }
+
+    const string streamError = getUserStreamLastError();
+    throw runtime_error("Binance user stream stopped while confirming cancellation of order " + symbol + "/" + orderId +
+                        (streamError.empty() ? "" : ": " + streamError));
+}
+
+OrderInfo BinanceDealService::cancelOrderAndWaitUntilTerminal(const OrderQuery &request)
+{
+    return cancelOrderAndWaitUntilTerminal(request, {});
+}
+
+OrderInfo BinanceDealService::cancelOrderAndWaitUntilTerminal(const OrderQuery &request, stop_token stopToken)
+{
+    throwIf(request.symbol.empty() || !request.orderId.has_value() || request.orderId->empty(),
+            "Symbol and orderId are required while cancelling and confirming a Binance order");
+    const string orderId = request.orderId.value();
+    const string waitDescription = "Binance order cancellation " + request.symbol + "/" + orderId;
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), waitDescription);
+
+    const PendingOrderRegistration registration(*this, request.symbol, orderId);
+    prepareOrderSubscription(request.symbol, orderId);
+
+    PendingOrderUpdate pendingUpdate = getPendingOrderUpdate(request.symbol, orderId);
+    if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+    {
+        return pendingUpdate.value();
+    }
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), waitDescription);
+
+    try
+    {
+        const OrderInfo cancellationInfo = cancelOrder(request);
+        if (isOrderTerminal(cancellationInfo.status))
+        {
+            publishOrderUpdate(cancellationInfo);
+        }
+    }
+    catch (...)
+    {
+        const exception_ptr cancellationFailure = current_exception();
+        try
+        {
+            OrderInfo order;
+            order.symbol = request.symbol;
+            order.orderId = orderId;
+            reconcileOrder(order);
+        }
+        catch (...)
+        {
+            rethrow_exception(cancellationFailure);
+        }
+
+        pendingUpdate = getPendingOrderUpdate(request.symbol, orderId);
+        if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+        {
+            return pendingUpdate.value();
+        }
+        rethrow_exception(cancellationFailure);
+    }
+
+    pendingUpdate = getPendingOrderUpdate(request.symbol, orderId);
+    if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+    {
+        return pendingUpdate.value();
+    }
+
+    pendingUpdate = waitForOrderTerminalStatus(request.symbol, orderId, stopToken);
+    if (pendingUpdate.has_value() && isOrderTerminal(pendingUpdate->status))
+    {
+        return pendingUpdate.value();
+    }
+
+    OrderInfo order;
+    order.symbol = request.symbol;
+    order.orderId = orderId;
+    try
+    {
+        reconcileOrder(order);
+    }
+    catch (const exception &error)
+    {
+        const string streamError = getUserStreamLastError();
+        throw runtime_error("Binance user stream stopped while confirming cancellation of order " + request.symbol +
+                            "/" + orderId + (streamError.empty() ? "" : ": " + streamError) +
+                            "; reconciliation failed: " + error.what());
+    }
+
+    return processOrderCancellationUpdate(request.symbol, orderId, getPendingOrderUpdate(request.symbol, orderId));
+}
+
 void BinanceDealService::prepareOcoSubscription(const OcoInfo &ocoInfo)
 {
     ensureUserStreamConnected();
@@ -421,6 +538,33 @@ void BinanceDealService::waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
             return takeProfitTerminal || stopLossTerminal || getUserStreamStatus() != StreamStatus::CONNECTED;
         });
     throwIfOrderWaitInterrupted(completed, "Binance OCO wait " + ocoInfo.orderListId);
+
+    takeProfitUpdate = getPendingOrderUpdate(takeProfitKey);
+    stopLossUpdate = getPendingOrderUpdate(stopLossKey);
+}
+
+void BinanceDealService::waitForOcoCancellationTerminalStatus(const OcoInfo &ocoInfo,
+                                                              PendingOrderUpdate &takeProfitUpdate,
+                                                              PendingOrderUpdate &stopLossUpdate,
+                                                              stop_token stopToken)
+{
+    const OrderKey takeProfitKey = getOrderKey(ocoInfo.takeProfitOrder.symbol, ocoInfo.takeProfitOrder.orderId);
+    const OrderKey stopLossKey = getOrderKey(ocoInfo.stopLossOrder.symbol, ocoInfo.stopLossOrder.orderId);
+    unique_lock<mutex> lock(pendingOrderWaitsMutex);
+    const bool completed = orderUpdateCondition.wait(
+        lock,
+        stopToken,
+        [this, &takeProfitKey, &stopLossKey]()
+        {
+            const PendingOrderUpdate &currentTakeProfitUpdate = getPendingOrderUpdate(takeProfitKey);
+            const PendingOrderUpdate &currentStopLossUpdate = getPendingOrderUpdate(stopLossKey);
+            const bool takeProfitTerminal =
+                currentTakeProfitUpdate.has_value() && isOrderTerminal(currentTakeProfitUpdate->status);
+            const bool stopLossTerminal =
+                currentStopLossUpdate.has_value() && isOrderTerminal(currentStopLossUpdate->status);
+            return (takeProfitTerminal && stopLossTerminal) || getUserStreamStatus() != StreamStatus::CONNECTED;
+        });
+    throwIfOrderWaitInterrupted(completed, "Binance OCO cancellation " + ocoInfo.orderListId);
 
     takeProfitUpdate = getPendingOrderUpdate(takeProfitKey);
     stopLossUpdate = getPendingOrderUpdate(stopLossKey);
@@ -471,6 +615,59 @@ BinanceDealService::completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &fil
     }
 
     return {filledOrder, siblingUpdate.value()};
+}
+
+OcoInfo BinanceDealService::createTerminalOcoInfo(const OcoInfo &ocoInfo,
+                                                  const OrderInfo &firstOrder,
+                                                  const OrderInfo &secondOrder) const
+{
+    throwIf(firstOrder.orderId != ocoInfo.takeProfitOrder.orderId &&
+                secondOrder.orderId != ocoInfo.takeProfitOrder.orderId,
+            "Binance OCO terminal result is missing the take-profit order");
+    throwIf(firstOrder.orderId != ocoInfo.stopLossOrder.orderId && secondOrder.orderId != ocoInfo.stopLossOrder.orderId,
+            "Binance OCO terminal result is missing the stop-loss order");
+
+    OcoInfo terminalOcoInfo = ocoInfo;
+    terminalOcoInfo.takeProfitOrder = firstOrder.orderId == ocoInfo.takeProfitOrder.orderId ? firstOrder : secondOrder;
+    terminalOcoInfo.stopLossOrder = firstOrder.orderId == ocoInfo.stopLossOrder.orderId ? firstOrder : secondOrder;
+    return terminalOcoInfo;
+}
+
+optional<OcoInfo> BinanceDealService::getTerminalOcoInfo(const OcoInfo &ocoInfo)
+{
+    PendingOrderUpdate takeProfitUpdate;
+    PendingOrderUpdate stopLossUpdate;
+    {
+        lock_guard<mutex> lock(pendingOrderWaitsMutex);
+        takeProfitUpdate =
+            getPendingOrderUpdate(getOrderKey(ocoInfo.takeProfitOrder.symbol, ocoInfo.takeProfitOrder.orderId));
+        stopLossUpdate =
+            getPendingOrderUpdate(getOrderKey(ocoInfo.stopLossOrder.symbol, ocoInfo.stopLossOrder.orderId));
+    }
+
+    if (!takeProfitUpdate.has_value() || !isOrderTerminal(takeProfitUpdate->status) || !stopLossUpdate.has_value() ||
+        !isOrderTerminal(stopLossUpdate->status))
+    {
+        return nullopt;
+    }
+
+    return createTerminalOcoInfo(ocoInfo, takeProfitUpdate.value(), stopLossUpdate.value());
+}
+
+OcoInfo BinanceDealService::processOcoCancellationUpdate(const OcoInfo &ocoInfo,
+                                                         const PendingOrderUpdate &takeProfitUpdate,
+                                                         const PendingOrderUpdate &stopLossUpdate)
+{
+    if (takeProfitUpdate.has_value() && isOrderTerminal(takeProfitUpdate->status) && stopLossUpdate.has_value() &&
+        isOrderTerminal(stopLossUpdate->status))
+    {
+        return createTerminalOcoInfo(ocoInfo, takeProfitUpdate.value(), stopLossUpdate.value());
+    }
+
+    const string groupId = !ocoInfo.listClientOrderId.empty() ? ocoInfo.listClientOrderId : ocoInfo.orderListId;
+    const string streamError = getUserStreamLastError();
+    throw runtime_error("Binance user stream stopped while confirming cancellation of OCO " + groupId +
+                        (streamError.empty() ? "" : ": " + streamError));
 }
 
 OcoWaitResult BinanceDealService::processOcoOrdersUpdate(const OcoInfo &ocoInfo,
@@ -533,6 +730,115 @@ OcoWaitResult BinanceDealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo
     PendingOrderUpdate stopLossUpdate;
     waitForOcoTerminalStatus(ocoInfo, takeProfitUpdate, stopLossUpdate, stopToken);
     return processOcoOrdersUpdate(ocoInfo, takeProfitUpdate, stopLossUpdate, stopToken);
+}
+
+OcoInfo BinanceDealService::cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo)
+{
+    return cancelOcoAndWaitUntilTerminal(ocoInfo, {});
+}
+
+OcoInfo BinanceDealService::cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, stop_token stopToken)
+{
+    const OrderInfo &takeProfitOrder = ocoInfo.takeProfitOrder;
+    const OrderInfo &stopLossOrder = ocoInfo.stopLossOrder;
+    throwIf(takeProfitOrder.symbol.empty() || takeProfitOrder.orderId.empty() || stopLossOrder.symbol.empty() ||
+                stopLossOrder.orderId.empty(),
+            "Both Binance OCO orders must contain symbol and orderId while cancelling");
+    throwIf(ocoInfo.orderListId.empty() && ocoInfo.listClientOrderId.empty(),
+            "Binance OCO cancellation requires an order list identifier");
+    const string groupId = !ocoInfo.listClientOrderId.empty() ? ocoInfo.listClientOrderId : ocoInfo.orderListId;
+    const string waitDescription = "Binance OCO cancellation " + groupId;
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), waitDescription);
+
+    const PendingOrderRegistration takeProfitRegistration(*this, takeProfitOrder.symbol, takeProfitOrder.orderId);
+    const PendingOrderRegistration stopLossRegistration(*this, stopLossOrder.symbol, stopLossOrder.orderId);
+    prepareOcoSubscription(ocoInfo);
+
+    optional<OcoInfo> terminalOcoInfo = getTerminalOcoInfo(ocoInfo);
+    if (terminalOcoInfo.has_value())
+    {
+        return terminalOcoInfo.value();
+    }
+
+    const optional<OrderInfo> initiallyFilledOrder = getFilledOcoOrder(ocoInfo);
+    if (initiallyFilledOrder.has_value())
+    {
+        const OcoWaitResult waitResult = completeOcoWait(ocoInfo, initiallyFilledOrder.value(), stopToken);
+        return createTerminalOcoInfo(ocoInfo, waitResult.filledOrder, waitResult.siblingTerminalOrder);
+    }
+    throwIfOrderWaitInterrupted(!stopToken.stop_requested(), waitDescription);
+
+    OrderListQuery query;
+    query.symbol = takeProfitOrder.symbol;
+    if (!ocoInfo.orderListId.empty())
+    {
+        query.orderListId = ocoInfo.orderListId;
+    }
+    if (!ocoInfo.listClientOrderId.empty())
+    {
+        query.listClientOrderId = ocoInfo.listClientOrderId;
+    }
+
+    try
+    {
+        cancelOco(query);
+    }
+    catch (...)
+    {
+        const exception_ptr cancellationFailure = current_exception();
+        try
+        {
+            reconcileOrder(takeProfitOrder);
+            reconcileOrder(stopLossOrder);
+        }
+        catch (...)
+        {
+            rethrow_exception(cancellationFailure);
+        }
+
+        terminalOcoInfo = getTerminalOcoInfo(ocoInfo);
+        if (terminalOcoInfo.has_value())
+        {
+            return terminalOcoInfo.value();
+        }
+
+        const optional<OrderInfo> filledOrder = getFilledOcoOrder(ocoInfo);
+        if (filledOrder.has_value())
+        {
+            const OcoWaitResult waitResult = completeOcoWait(ocoInfo, filledOrder.value(), stopToken);
+            return createTerminalOcoInfo(ocoInfo, waitResult.filledOrder, waitResult.siblingTerminalOrder);
+        }
+        rethrow_exception(cancellationFailure);
+    }
+
+    PendingOrderUpdate takeProfitUpdate;
+    PendingOrderUpdate stopLossUpdate;
+    waitForOcoCancellationTerminalStatus(ocoInfo, takeProfitUpdate, stopLossUpdate, stopToken);
+    if (takeProfitUpdate.has_value() && isOrderTerminal(takeProfitUpdate->status) && stopLossUpdate.has_value() &&
+        isOrderTerminal(stopLossUpdate->status))
+    {
+        return createTerminalOcoInfo(ocoInfo, takeProfitUpdate.value(), stopLossUpdate.value());
+    }
+
+    try
+    {
+        reconcileOrder(takeProfitOrder);
+        reconcileOrder(stopLossOrder);
+    }
+    catch (const exception &error)
+    {
+        const string streamError = getUserStreamLastError();
+        throw runtime_error("Binance user stream stopped while confirming cancellation of OCO " + groupId +
+                            (streamError.empty() ? "" : ": " + streamError) +
+                            "; reconciliation failed: " + error.what());
+    }
+
+    {
+        lock_guard<mutex> lock(pendingOrderWaitsMutex);
+        takeProfitUpdate = getPendingOrderUpdate(getOrderKey(takeProfitOrder.symbol, takeProfitOrder.orderId));
+        stopLossUpdate = getPendingOrderUpdate(getOrderKey(stopLossOrder.symbol, stopLossOrder.orderId));
+    }
+    return processOcoCancellationUpdate(ocoInfo, takeProfitUpdate, stopLossUpdate);
 }
 
 void BinanceDealService::setRequestParameters(boost::urls::url &url,

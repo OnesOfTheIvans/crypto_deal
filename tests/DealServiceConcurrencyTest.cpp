@@ -202,6 +202,170 @@ TEST(DealServiceConcurrencyTest, BybitDistinctOrderWaitsReceiveIndependentUpdate
     EXPECT_EQ(countRequestsContaining("/v5/market/time"), 1u);
 }
 
+TEST(DealServiceConcurrencyTest, BinanceFillWaitAndConfirmedCancellationShareOneOrderObserver)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime":1779052073334})");
+    MockNetwork::instance().setResponse("orderId=250", createBinanceOrderResponse(250, "NEW"));
+    MockNetwork::instance().setResponse("orderId=250", createBinanceOrderResponse(250, "NEW"));
+    MockNetwork::instance().setResponse("orderId=250", createBinanceOrderResponse(250, "NEW"));
+
+    BinanceDealService service("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+
+    std::future<OrderInfo> fillWait =
+        std::async(std::launch::async, [&service]() { return service.waitUntilOrderFilled("BTCUSDT", "250"); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/order?", 1, 1s));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "250";
+    std::future<OrderInfo> cancellation =
+        std::async(std::launch::async, [&service, &query]() { return service.cancelOrderAndWaitUntilTerminal(query); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/order?", 3, 1s));
+    EXPECT_EQ(cancellation.wait_for(25ms), std::future_status::timeout);
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(250, "FILLED"));
+
+    ASSERT_EQ(fillWait.wait_for(1s), std::future_status::ready);
+    ASSERT_EQ(cancellation.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(fillWait.get().status, "FILLED");
+    EXPECT_EQ(cancellation.get().status, "FILLED");
+}
+
+TEST(DealServiceConcurrencyTest, BybitFillWaitAndConfirmedCancellationShareOneOrderObserver)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/v5/market/time",
+                                        R"({"retCode":0,"retMsg":"OK","result":{"timeSecond":"1779052073"}})");
+    MockNetwork::instance().setResponse("orderId=SHARED", createBybitOrderResponse("SHARED", "New"));
+    MockNetwork::instance().setResponse("orderId=SHARED", createBybitOrderResponse("SHARED", "New"));
+    MockNetwork::instance().setResponse(
+        "/v5/order/cancel",
+        R"({"retCode":0,"retMsg":"OK","result":{"orderId":"SHARED","orderLinkId":"SHARED_CLIENT"}})");
+
+    BybitDealService service("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+
+    std::future<OrderInfo> fillWait =
+        std::async(std::launch::async, [&service]() { return service.waitUntilOrderFilled("BTCUSDT", "SHARED"); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 1, 1s));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "SHARED";
+    std::future<OrderInfo> cancellation =
+        std::async(std::launch::async, [&service, &query]() { return service.cancelOrderAndWaitUntilTerminal(query); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 2, 1s));
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/cancel", 1, 1s));
+    EXPECT_EQ(cancellation.wait_for(25ms), std::future_status::timeout);
+
+    test_private_access::dispatchBybitUserStreamMessage(service,
+                                                        createBybitOrderMessage("SHARED", "SHARED_CLIENT", "Filled"));
+
+    ASSERT_EQ(fillWait.wait_for(1s), std::future_status::ready);
+    ASSERT_EQ(cancellation.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(fillWait.get().status, "Filled");
+    EXPECT_EQ(cancellation.get().status, "Filled");
+}
+
+TEST(DealServiceConcurrencyTest, BinanceInterruptedConfirmationLeavesSameOrderFillWaitActive)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/api/v3/time", R"({"serverTime":1779052073334})");
+    MockNetwork::instance().setResponse("orderId=251", createBinanceOrderResponse(251, "NEW"));
+    MockNetwork::instance().setResponse("orderId=251", createBinanceOrderResponse(251, "NEW"));
+    MockNetwork::instance().setResponse("orderId=251", createBinanceOrderResponse(251, "NEW"));
+
+    BinanceDealService service("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    test_private_access::setBinanceStreamStatus(service, StreamStatus::CONNECTED);
+    std::stop_source cancellationStopSource;
+
+    std::future<OrderInfo> fillWait =
+        std::async(std::launch::async, [&service]() { return service.waitUntilOrderFilled("BTCUSDT", "251"); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/order?", 1, 1s));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "251";
+    std::future<OrderInfo> cancellation =
+        std::async(std::launch::async,
+                   [&service, &query, stopToken = cancellationStopSource.get_token()]()
+                   { return service.cancelOrderAndWaitUntilTerminal(query, stopToken); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/api/v3/order?", 3, 1s));
+
+    cancellationStopSource.request_stop();
+    ASSERT_EQ(cancellation.wait_for(1s), std::future_status::ready);
+    EXPECT_THROW(cancellation.get(), OrderWaitInterrupted);
+    EXPECT_EQ(fillWait.wait_for(25ms), std::future_status::timeout);
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+
+    test_private_access::dispatchBinanceUserStreamMessage(service, createBinanceOrderMessage(251, "FILLED"));
+    ASSERT_EQ(fillWait.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(fillWait.get().status, "FILLED");
+}
+
+TEST(DealServiceConcurrencyTest, BybitInterruptedConfirmationLeavesSameOrderFillWaitActive)
+{
+    MockNetwork::instance().reset();
+    MockNetwork::instance().setResponse("/v5/market/time",
+                                        R"({"retCode":0,"retMsg":"OK","result":{"timeSecond":"1779052073"}})");
+    MockNetwork::instance().setResponse("orderId=INTERRUPTED_SHARED",
+                                        createBybitOrderResponse("INTERRUPTED_SHARED", "New"));
+    MockNetwork::instance().setResponse("orderId=INTERRUPTED_SHARED",
+                                        createBybitOrderResponse("INTERRUPTED_SHARED", "New"));
+    MockNetwork::instance().setResponse("/v5/order/cancel",
+                                        R"({"retCode":0,"retMsg":"OK","result":{"orderId":"INTERRUPTED_SHARED"}})");
+
+    BybitDealService service("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    test_private_access::setBybitStreamStatus(service, StreamStatus::CONNECTED);
+    std::stop_source cancellationStopSource;
+
+    std::future<OrderInfo> fillWait =
+        std::async(std::launch::async,
+                   [&service]() { return service.waitUntilOrderFilled("BTCUSDT", "INTERRUPTED_SHARED"); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 1, 1s));
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "INTERRUPTED_SHARED";
+    std::future<OrderInfo> cancellation =
+        std::async(std::launch::async,
+                   [&service, &query, stopToken = cancellationStopSource.get_token()]()
+                   { return service.cancelOrderAndWaitUntilTerminal(query, stopToken); });
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/realtime", 2, 1s));
+    ASSERT_TRUE(MockNetwork::instance().waitForRequestCount("/v5/order/cancel", 1, 1s));
+
+    cancellationStopSource.request_stop();
+    ASSERT_EQ(cancellation.wait_for(1s), std::future_status::ready);
+    EXPECT_THROW(cancellation.get(), OrderWaitInterrupted);
+    EXPECT_EQ(fillWait.wait_for(25ms), std::future_status::timeout);
+    EXPECT_EQ(service.getUserStreamStatus(), StreamStatus::CONNECTED);
+
+    test_private_access::dispatchBybitUserStreamMessage(
+        service,
+        createBybitOrderMessage("INTERRUPTED_SHARED", "INTERRUPTED_SHARED_CLIENT", "Filled"));
+    ASSERT_EQ(fillWait.wait_for(1s), std::future_status::ready);
+    EXPECT_EQ(fillWait.get().status, "Filled");
+}
+
+TEST(DealServiceConcurrencyTest, ConfirmedCancellationHonorsPreRequestedStopTokensBeforeNetworkAccess)
+{
+    MockNetwork::instance().reset();
+    BinanceDealService binance("test.binance.com", "api_key", "secret_key", "ws.binance.com");
+    BybitDealService bybit("test.bybit.com", "api_key", "secret_key", "ws.bybit.com");
+    std::stop_source stopSource;
+    stopSource.request_stop();
+
+    OrderQuery query;
+    query.symbol = "BTCUSDT";
+    query.orderId = "STOPPED";
+
+    EXPECT_THROW(binance.cancelOrderAndWaitUntilTerminal(query, stopSource.get_token()), OrderWaitInterrupted);
+    EXPECT_THROW(bybit.cancelOrderAndWaitUntilTerminal(query, stopSource.get_token()), OrderWaitInterrupted);
+    EXPECT_TRUE(MockNetwork::instance().getRequests().empty());
+}
+
 TEST(DealServiceConcurrencyTest, BinanceInterruptedOrderWaitIsIsolatedAndCleansRegistration)
 {
     MockNetwork::instance().reset();

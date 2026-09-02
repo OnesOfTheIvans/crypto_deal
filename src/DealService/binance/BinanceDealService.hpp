@@ -28,6 +28,7 @@
 #include <boost/json.hpp>
 
 #include <condition_variable>
+#include <cstddef>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -48,6 +49,13 @@ class BinanceDealService : public DealService
 {
   private:
     using OrderKey = std::pair<std::string, std::string>;
+
+    struct PendingOrderWait
+    {
+        std::optional<OrderInfo> orderInfo;
+        std::size_t registrationCount = 0;
+    };
+
     using PendingOrderUpdate = std::optional<OrderInfo>;
 
     class PendingOrderRegistration
@@ -79,7 +87,7 @@ class BinanceDealService : public DealService
     std::string streamLastError;
     mutable std::mutex streamStatusMutex;
 
-    std::map<OrderKey, PendingOrderUpdate> pendingOrderWaits;
+    std::map<OrderKey, PendingOrderWait> pendingOrderWaits;
     std::mutex pendingOrderWaitsMutex;
     std::condition_variable_any orderUpdateCondition;
     std::mutex streamLifecycleMutex;
@@ -166,8 +174,10 @@ class BinanceDealService : public DealService
 
     const PendingOrderUpdate &getPendingOrderUpdate(const OrderKey &orderKey) const
     {
-        return pendingOrderWaits.at(orderKey);
+        return pendingOrderWaits.at(orderKey).orderInfo;
     }
+
+    PendingOrderUpdate getPendingOrderUpdate(const std::string &symbol, const std::string &orderId);
 
     void publishOrderUpdate(const OrderInfo &orderInfo);
 
@@ -180,6 +190,10 @@ class BinanceDealService : public DealService
     PendingOrderUpdate
     waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
 
+    OrderInfo processOrderCancellationUpdate(const std::string &symbol,
+                                             const std::string &orderId,
+                                             const PendingOrderUpdate &pendingUpdate);
+
     OrderInfo
     processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderUpdate &pendingUpdate);
 
@@ -189,6 +203,11 @@ class BinanceDealService : public DealService
                                   PendingOrderUpdate &takeProfitUpdate,
                                   PendingOrderUpdate &stopLossUpdate,
                                   std::stop_token stopToken);
+
+    void waitForOcoCancellationTerminalStatus(const OcoInfo &ocoInfo,
+                                              PendingOrderUpdate &takeProfitUpdate,
+                                              PendingOrderUpdate &stopLossUpdate,
+                                              std::stop_token stopToken);
 
     PendingOrderUpdate
     waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo, std::stop_token stopToken);
@@ -211,6 +230,15 @@ class BinanceDealService : public DealService
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
 
     OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder, std::stop_token stopToken);
+
+    OcoInfo
+    createTerminalOcoInfo(const OcoInfo &ocoInfo, const OrderInfo &firstOrder, const OrderInfo &secondOrder) const;
+
+    std::optional<OcoInfo> getTerminalOcoInfo(const OcoInfo &ocoInfo);
+
+    OcoInfo processOcoCancellationUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderUpdate &takeProfitUpdate,
+                                         const PendingOrderUpdate &stopLossUpdate);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -264,6 +292,10 @@ class BinanceDealService : public DealService
 
     OrderInfo cancelOrder(const OrderQuery &request) override;
 
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request) override;
+
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request, std::stop_token stopToken) override;
+
     OrderInfo getOrder(const OrderQuery &request) override;
 
     SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory = OrderCategory::SPOT) override;
@@ -276,6 +308,10 @@ class BinanceDealService : public DealService
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
     void cancelOco(const OrderListQuery &request) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, std::stop_token stopToken) override;
 
     void stopUserStream() override;
 

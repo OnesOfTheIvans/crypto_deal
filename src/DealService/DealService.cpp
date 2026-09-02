@@ -39,6 +39,18 @@ OcoWaitResult DealService::waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, stop_
     return waitUntilOcoOrderFilled(ocoInfo);
 }
 
+OrderInfo DealService::cancelOrderAndWaitUntilTerminal(const OrderQuery &request, stop_token stopToken)
+{
+    throwIfOrderWaitInterrupted(stopToken, "Order cancellation");
+    return cancelOrderAndWaitUntilTerminal(request);
+}
+
+OcoInfo DealService::cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, stop_token stopToken)
+{
+    throwIfOrderWaitInterrupted(stopToken, "OCO cancellation");
+    return cancelOcoAndWaitUntilTerminal(ocoInfo);
+}
+
 // Correct HMAC SHA256 returning hex string
 string DealService::hmac_sha256(const string &key, const string &data) const
 {
