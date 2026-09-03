@@ -41,7 +41,7 @@ const vector<OperationChainDefinition> &OperationChainRunModel::getDefinitions()
     return runManager.getDefinitions();
 }
 
-vector<OperationChainRunSnapshot> OperationChainRunModel::getRuns() const
+vector<OperationChainRunSnapshot> OperationChainRunModel::getRuns(OperationChainRunFilter filter) const
 {
     vector<OperationChainRunSnapshot> snapshots;
     snapshots.reserve(runs.size());
@@ -49,7 +49,7 @@ vector<OperationChainRunSnapshot> OperationChainRunModel::getRuns() const
     {
         snapshots.push_back(run.second);
     }
-    return snapshots;
+    return filterAndSortOperationChainRuns(move(snapshots), filter);
 }
 
 optional<OperationChainRunSnapshot> OperationChainRunModel::getRun(OperationChainRunId runId) const

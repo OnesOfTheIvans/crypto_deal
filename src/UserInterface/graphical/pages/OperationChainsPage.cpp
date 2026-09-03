@@ -6,13 +6,18 @@
 
 #include <QAbstractItemView>
 #include <QDateTime>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSize>
 #include <QString>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWidget>
@@ -33,6 +38,9 @@ namespace {
     constexpr int CHAIN_RUNS_MINIMUM_HEIGHT = 120;
     constexpr int CHAIN_ACTION_MINIMUM_HEIGHT = 32;
     constexpr int CHAIN_TABLE_ROW_HEIGHT = 44;
+    constexpr int CHAIN_FILTER_PANEL_WIDTH = 136;
+    constexpr int CHAIN_FILTER_ITEM_HEIGHT = 30;
+    constexpr int CHAIN_FILTER_LIST_VERTICAL_PADDING = 10;
 
     enum class DefinitionColumn
     {
@@ -121,6 +129,33 @@ namespace {
                run.chainSnapshot.status == OperationChainStatus::RUNNING;
     }
 
+    void addRunFilterItem(QListWidget &list, const QString &label, OperationChainRunFilter filter)
+    {
+        auto *item = new QListWidgetItem(label, &list);
+        item->setData(Qt::UserRole, static_cast<int>(filter));
+        item->setSizeHint(QSize(CHAIN_FILTER_PANEL_WIDTH, CHAIN_FILTER_ITEM_HEIGHT));
+    }
+
+    QString getRunFilterEmptyText(OperationChainRunFilter filter)
+    {
+        switch (filter)
+        {
+        case OperationChainRunFilter::ACTIVE:
+            return "No active operation-chain runs.";
+        case OperationChainRunFilter::COMPLETED:
+            return "No completed operation-chain runs.";
+        case OperationChainRunFilter::FAILED:
+            return "No failed operation-chain runs.";
+        case OperationChainRunFilter::CANCELLED:
+            return "No cancelled operation-chain runs.";
+        case OperationChainRunFilter::NON_ACTIVE:
+            return "No non-active operation-chain runs.";
+        case OperationChainRunFilter::ALL:
+            return "No operation-chain runs have been started this session.";
+        }
+        return "No operation-chain runs match this filter.";
+    }
+
     QTableWidgetItem *createTableItem(const QString &text, Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignVCenter)
     {
         auto *item = new QTableWidgetItem(text);
@@ -144,7 +179,8 @@ namespace {
 
 OperationChainsPage::OperationChainsPage(OperationChainRunModel &runModel, QWidget *parent)
     : QWidget(parent), runModel(runModel), actionError(nullptr), definitionsEmptyState(nullptr),
-      runsEmptyState(nullptr), definitionsTable(nullptr), runsTable(nullptr)
+      runsEmptyState(nullptr), runFilterToggle(nullptr), runFilterList(nullptr), definitionsTable(nullptr),
+      runsTable(nullptr)
 {
     setObjectName("operationChainsPage");
     setProperty("primaryPage", true);
@@ -247,10 +283,47 @@ QWidget *OperationChainsPage::createRunsSection()
     auto *title = new QLabel("Session runs", section);
     title->setProperty("operationChainSectionTitle", true);
 
-    auto *description = new QLabel("Runs are retained for this application session.", section);
+    auto *description = new QLabel("Runs are retained for this application session. Select a status filter.", section);
     description->setProperty("operationChainSectionDescription", true);
 
-    runsEmptyState = new QLabel("No operation-chain runs have been started this session.", section);
+    auto *runFilterPanel = new QWidget(section);
+    runFilterPanel->setObjectName("operationChainRunFilterPanel");
+    runFilterPanel->setFixedWidth(CHAIN_FILTER_PANEL_WIDTH);
+    auto *runFilterLayout = new QVBoxLayout(runFilterPanel);
+    runFilterLayout->setContentsMargins(0, 0, 0, 0);
+    runFilterLayout->setSpacing(4);
+
+    runFilterToggle = new QToolButton(runFilterPanel);
+    runFilterToggle->setObjectName("operationChainRunFilterToggle");
+    runFilterToggle->setProperty("operationChainRunFilterToggle", true);
+    runFilterToggle->setCheckable(true);
+    runFilterToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    runFilterToggle->setCursor(Qt::PointingHandCursor);
+    runFilterToggle->setToolTip("Expand or collapse session-run status filters");
+    runFilterToggle->setAccessibleName("Session-run status filter");
+
+    runFilterList = new QListWidget(runFilterPanel);
+    runFilterList->setObjectName("operationChainRunFilterList");
+    runFilterList->setProperty("operationChainRunFilters", true);
+    runFilterList->setFixedWidth(CHAIN_FILTER_PANEL_WIDTH);
+    runFilterList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    runFilterList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    runFilterList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    runFilterList->setSelectionMode(QAbstractItemView::SingleSelection);
+    addRunFilterItem(*runFilterList, "Active", OperationChainRunFilter::ACTIVE);
+    addRunFilterItem(*runFilterList, "Completed", OperationChainRunFilter::COMPLETED);
+    addRunFilterItem(*runFilterList, "Failed", OperationChainRunFilter::FAILED);
+    addRunFilterItem(*runFilterList, "Cancelled", OperationChainRunFilter::CANCELLED);
+    addRunFilterItem(*runFilterList, "Non-active", OperationChainRunFilter::NON_ACTIVE);
+    addRunFilterItem(*runFilterList, "All", OperationChainRunFilter::ALL);
+    runFilterList->setFixedHeight(CHAIN_FILTER_ITEM_HEIGHT * runFilterList->count() +
+                                  CHAIN_FILTER_LIST_VERTICAL_PADDING);
+    runFilterList->setCurrentRow(0);
+    runFilterLayout->addWidget(runFilterToggle);
+    runFilterLayout->addWidget(runFilterList);
+    runFilterLayout->addStretch(1);
+
+    runsEmptyState = new QLabel(section);
     runsEmptyState->setObjectName("operationChainRunsEmptyState");
     runsEmptyState->setProperty("operationChainEmptyState", true);
     runsEmptyState->setAlignment(Qt::AlignCenter);
@@ -278,10 +351,37 @@ QWidget *OperationChainsPage::createRunsSection()
     runsTable->horizontalHeader()->setSectionResizeMode(static_cast<int>(RunColumn::ACTION),
                                                         QHeaderView::ResizeToContents);
 
+    auto *runsContentLayout = new QHBoxLayout;
+    runsContentLayout->setContentsMargins(0, 0, 0, 0);
+    runsContentLayout->setSpacing(CHAIN_SECTION_SPACING);
+    auto *runsViewLayout = new QVBoxLayout;
+    runsViewLayout->setContentsMargins(0, 0, 0, 0);
+    runsViewLayout->setSpacing(0);
+    runsViewLayout->addWidget(runsEmptyState, 1);
+    runsViewLayout->addWidget(runsTable, 1);
+    runsContentLayout->addWidget(runFilterPanel);
+    runsContentLayout->addLayout(runsViewLayout, 1);
+
+    connect(runFilterToggle, &QToolButton::toggled, this, &OperationChainsPage::setRunFilterExpanded);
+    connect(runFilterList,
+            &QListWidget::currentRowChanged,
+            this,
+            [this](int)
+            {
+                updateRunFilterToggle();
+                updateRuns();
+                runFilterToggle->setChecked(false);
+            });
+    connect(runFilterList,
+            &QListWidget::itemClicked,
+            this,
+            [this](QListWidgetItem *) { runFilterToggle->setChecked(false); });
+    updateRunFilterToggle();
+    setRunFilterExpanded(false);
+
     layout->addWidget(title);
     layout->addWidget(description);
-    layout->addWidget(runsEmptyState, 1);
-    layout->addWidget(runsTable, 1);
+    layout->addLayout(runsContentLayout, 1);
     return section;
 }
 
@@ -335,16 +435,40 @@ void OperationChainsPage::populateDefinitions()
 
 void OperationChainsPage::updateRuns()
 {
-    const vector<OperationChainRunSnapshot> runs = runModel.getRuns();
+    const OperationChainRunFilter filter = getSelectedRunFilter();
+    const vector<OperationChainRunSnapshot> runs = runModel.getRuns(filter);
     runsTable->setRowCount(0);
     runsTable->setRowCount(static_cast<int>(runs.size()));
     runsTable->setVisible(!runs.empty());
     runsEmptyState->setVisible(runs.empty());
+    runsEmptyState->setText(getRunFilterEmptyText(filter));
 
     for (size_t row = 0; row < runs.size(); ++row)
     {
         populateRunRow(row, runs[row]);
     }
+}
+
+void OperationChainsPage::updateRunFilterToggle()
+{
+    const QListWidgetItem *item = runFilterList->currentItem();
+    runFilterToggle->setText("Filter: " + (item == nullptr ? QString("Active") : item->text()));
+}
+
+void OperationChainsPage::setRunFilterExpanded(bool expanded)
+{
+    runFilterToggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+    runFilterList->setVisible(expanded);
+}
+
+OperationChainRunFilter OperationChainsPage::getSelectedRunFilter() const
+{
+    const QListWidgetItem *item = runFilterList->currentItem();
+    if (item == nullptr)
+    {
+        return OperationChainRunFilter::ACTIVE;
+    }
+    return static_cast<OperationChainRunFilter>(item->data(Qt::UserRole).toInt());
 }
 
 void OperationChainsPage::populateRunRow(size_t row, const OperationChainRunSnapshot &run)

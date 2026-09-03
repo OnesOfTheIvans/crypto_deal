@@ -91,6 +91,51 @@ QLabel[operationChainEmptyState="true"] {
     font-size: 12px;
 }
 
+QToolButton[operationChainRunFilterToggle="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #dbe2ed;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 30px;
+    padding: 2px 8px;
+    text-align: left;
+}
+
+QToolButton[operationChainRunFilterToggle="true"]:hover,
+QToolButton[operationChainRunFilterToggle="true"]:checked {
+    background-color: #222b39;
+    border-color: #3a4a61;
+    color: #ffffff;
+}
+
+QListWidget[operationChainRunFilters="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    outline: 0;
+    padding: 4px;
+}
+
+QListWidget[operationChainRunFilters="true"]::item {
+    border-radius: 5px;
+    padding: 6px 8px;
+}
+
+QListWidget[operationChainRunFilters="true"]::item:hover {
+    background-color: #222b39;
+    color: #eef2f8;
+}
+
+QListWidget[operationChainRunFilters="true"]::item:selected {
+    background-color: #273b60;
+    color: #ffffff;
+    font-weight: 600;
+}
+
 QLabel[operationChainActionError="true"] {
     background-color: #301d23;
     border: 1px solid #6f3843;

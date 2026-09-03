@@ -6,11 +6,13 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QString>
 #include <QTableWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QtTest/QTest>
 #include <gtest/gtest.h>
 
@@ -200,6 +202,28 @@ namespace {
         QTest::mouseClick(&trigger, Qt::LeftButton);
         EXPECT_TRUE(handled);
     }
+
+    void selectRunFilter(QListWidget &filterList, const QString &label)
+    {
+        auto *filterToggle = filterList.window()->findChild<QToolButton *>("operationChainRunFilterToggle");
+        ASSERT_NE(filterToggle, nullptr);
+        if (!filterToggle->isChecked())
+        {
+            QTest::mouseClick(filterToggle, Qt::LeftButton);
+            QApplication::processEvents();
+        }
+
+        const QList<QListWidgetItem *> items = filterList.findItems(label, Qt::MatchExactly);
+        ASSERT_EQ(items.size(), 1);
+        const QRect itemRectangle = filterList.visualItemRect(items.front());
+        ASSERT_TRUE(itemRectangle.isValid());
+        QTest::mouseClick(filterList.viewport(), Qt::LeftButton, Qt::NoModifier, itemRectangle.center());
+        QApplication::processEvents();
+        EXPECT_FALSE(filterToggle->isChecked());
+        EXPECT_TRUE(filterList.isHidden());
+        EXPECT_EQ(filterToggle->text(), "Filter: " + label);
+        EXPECT_EQ(filterToggle->arrowType(), Qt::RightArrow);
+    }
 }
 
 TEST(OperationChainsPageTest, ShowsSeparateEmptyDefinitionAndSessionRunStates)
@@ -210,20 +234,57 @@ TEST(OperationChainsPageTest, ShowsSeparateEmptyDefinitionAndSessionRunStates)
     OperationChainRunManager manager({}, binanceService, bybitService);
     OperationChainRunModel model(manager);
     OperationChainsPage page(model);
+    page.resize(728, 640);
+    page.show();
+    QApplication::processEvents();
 
     auto *definitionsTable = page.findChild<QTableWidget *>("operationChainDefinitionsTable");
     auto *runsTable = page.findChild<QTableWidget *>("operationChainRunsTable");
     auto *definitionsEmptyState = page.findChild<QLabel *>("operationChainDefinitionsEmptyState");
     auto *runsEmptyState = page.findChild<QLabel *>("operationChainRunsEmptyState");
+    auto *filterToggle = page.findChild<QToolButton *>("operationChainRunFilterToggle");
+    auto *filterList = page.findChild<QListWidget *>("operationChainRunFilterList");
 
     ASSERT_NE(definitionsTable, nullptr);
     ASSERT_NE(runsTable, nullptr);
     ASSERT_NE(definitionsEmptyState, nullptr);
     ASSERT_NE(runsEmptyState, nullptr);
+    ASSERT_NE(filterToggle, nullptr);
+    ASSERT_NE(filterList, nullptr);
+    ASSERT_EQ(filterList->count(), 6);
+    ASSERT_NE(filterList->currentItem(), nullptr);
+    EXPECT_EQ(filterList->currentItem()->text(), QString("Active"));
+    EXPECT_EQ(filterList->item(0)->text(), QString("Active"));
+    EXPECT_EQ(filterList->item(1)->text(), QString("Completed"));
+    EXPECT_EQ(filterList->item(2)->text(), QString("Failed"));
+    EXPECT_EQ(filterList->item(3)->text(), QString("Cancelled"));
+    EXPECT_EQ(filterList->item(4)->text(), QString("Non-active"));
+    EXPECT_EQ(filterList->item(5)->text(), QString("All"));
+    EXPECT_FALSE(filterToggle->isChecked());
+    EXPECT_EQ(filterToggle->text(), QString("Filter: Active"));
+    EXPECT_EQ(filterToggle->arrowType(), Qt::RightArrow);
+    EXPECT_TRUE(filterList->isHidden());
+
+    QTest::mouseClick(filterToggle, Qt::LeftButton);
+    QApplication::processEvents();
+    EXPECT_TRUE(filterToggle->isChecked());
+    EXPECT_EQ(filterToggle->arrowType(), Qt::DownArrow);
+    EXPECT_FALSE(filterList->isHidden());
+    EXPECT_LE(filterList->visualItemRect(filterList->item(5)).bottom(), filterList->viewport()->rect().bottom());
+
+    QTest::mouseClick(filterToggle, Qt::LeftButton);
+    QApplication::processEvents();
+    EXPECT_FALSE(filterToggle->isChecked());
+    EXPECT_EQ(filterToggle->arrowType(), Qt::RightArrow);
+    EXPECT_TRUE(filterList->isHidden());
     EXPECT_TRUE(definitionsTable->isHidden());
     EXPECT_TRUE(runsTable->isHidden());
     EXPECT_FALSE(definitionsEmptyState->isHidden());
     EXPECT_FALSE(runsEmptyState->isHidden());
+    EXPECT_EQ(runsEmptyState->text(), QString("No active operation-chain runs."));
+
+    selectRunFilter(*filterList, "All");
+    EXPECT_EQ(runsEmptyState->text(), QString("No operation-chain runs have been started this session."));
 }
 
 TEST(OperationChainsPageTest, ShowsDefinitionContextAndCancelDefaultStartConfirmation)
@@ -255,7 +316,7 @@ TEST(OperationChainsPageTest, ShowsDefinitionContextAndCancelDefaultStartConfirm
     EXPECT_TRUE(model.getRuns().empty());
 }
 
-TEST(OperationChainsPageTest, StartsRepeatedRunsAndShowsTerminalHistoryInRunIdOrder)
+TEST(OperationChainsPageTest, StartsRepeatedRunsAndShowsMostRecentlyUpdatedHistory)
 {
     getApplication();
     auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
@@ -268,8 +329,11 @@ TEST(OperationChainsPageTest, StartsRepeatedRunsAndShowsTerminalHistoryInRunIdOr
 
     auto *startButton = page.findChild<QPushButton *>("startOperationChainButton");
     auto *runsTable = page.findChild<QTableWidget *>("operationChainRunsTable");
+    auto *filterList = page.findChild<QListWidget *>("operationChainRunFilterList");
     ASSERT_NE(startButton, nullptr);
     ASSERT_NE(runsTable, nullptr);
+    ASSERT_NE(filterList, nullptr);
+    selectRunFilter(*filterList, "All");
 
     clickConfirmationButton(*startButton,
                             "startOperationChainConfirmationDialog",
@@ -284,10 +348,13 @@ TEST(OperationChainsPageTest, StartsRepeatedRunsAndShowsTerminalHistoryInRunIdOr
     QTRY_COMPARE(runsTable->rowCount(), 2);
     QTRY_COMPARE(runsTable->item(0, 1)->text(), QString("Completed"));
     QTRY_COMPARE(runsTable->item(1, 1)->text(), QString("Completed"));
-    EXPECT_TRUE(runsTable->item(0, 0)->text().contains("Run #1"));
-    EXPECT_TRUE(runsTable->item(1, 0)->text().contains("Run #2"));
+    const vector<OperationChainRunSnapshot> runs = model.getRuns(OperationChainRunFilter::ALL);
+    ASSERT_EQ(runs.size(), size_t{2});
+    EXPECT_TRUE(runsTable->item(0, 0)->text().contains("Run #" + QString::number(runs[0].runId)));
+    EXPECT_TRUE(runsTable->item(1, 0)->text().contains("Run #" + QString::number(runs[1].runId)));
     EXPECT_EQ(runsTable->cellWidget(0, 7), nullptr);
     EXPECT_EQ(runsTable->cellWidget(1, 7), nullptr);
+    EXPECT_EQ(filterList->currentItem()->text(), QString("All"));
 }
 
 TEST(OperationChainsPageTest, ShowsStoppingStateAndConfirmedCancellationWithoutInventingTerminalState)
@@ -337,6 +404,12 @@ TEST(OperationChainsPageTest, ShowsStoppingStateAndConfirmedCancellationWithoutI
 
     binanceService->allowCancellationToFinish();
     QTRY_COMPARE(model.getRun(1)->chainSnapshot.status, OperationChainStatus::CANCELLED);
+    QTRY_COMPARE(runsTable->rowCount(), 0);
+
+    auto *filterList = page.findChild<QListWidget *>("operationChainRunFilterList");
+    ASSERT_NE(filterList, nullptr);
+    selectRunFilter(*filterList, "Cancelled");
+    QTRY_COMPARE(runsTable->rowCount(), 1);
     QTRY_COMPARE(runsTable->item(0, 1)->text(), QString("Cancelled"));
     EXPECT_EQ(runsTable->cellWidget(0, 7), nullptr);
 }
@@ -381,6 +454,12 @@ TEST(OperationChainsPageTest, PreservesExactCancellationFailureAndReportsSynchro
 
     QTRY_COMPARE(model.getRun(1)->chainSnapshot.status, OperationChainStatus::FAILED);
     EXPECT_EQ(model.getRun(1)->chainSnapshot.error, "Planned chain cancellation failure");
+    QTRY_COMPARE(runsTable->rowCount(), 0);
+
+    auto *filterList = page.findChild<QListWidget *>("operationChainRunFilterList");
+    ASSERT_NE(filterList, nullptr);
+    selectRunFilter(*filterList, "Failed");
+    QTRY_COMPARE(runsTable->rowCount(), 1);
     QTRY_COMPARE(runsTable->item(0, 6)->text(), QString("Planned chain cancellation failure"));
     EXPECT_EQ(runsTable->cellWidget(0, 7), nullptr);
 }

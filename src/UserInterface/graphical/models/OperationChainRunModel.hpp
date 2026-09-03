@@ -2,6 +2,7 @@
 #define OPERATION_CHAIN_RUN_MODEL_H
 
 #include "OperationChainDefinition.hpp"
+#include "OperationChainRunFilter.hpp"
 #include "OperationChainRunSnapshot.hpp"
 
 #include <QObject>
@@ -40,7 +41,7 @@ class OperationChainRunModel final : public QObject
 
     const std::vector<OperationChainDefinition> &getDefinitions() const;
 
-    std::vector<OperationChainRunSnapshot> getRuns() const;
+    std::vector<OperationChainRunSnapshot> getRuns(OperationChainRunFilter filter = OperationChainRunFilter::ALL) const;
 
     std::optional<OperationChainRunSnapshot> getRun(OperationChainRunId runId) const;
 
