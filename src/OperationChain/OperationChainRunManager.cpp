@@ -48,6 +48,16 @@ OperationChainRunManager::RunRecord::RunRecord(OperationChainRunSnapshot snapsho
     : snapshot(move(snapshot)), chain(move(chain)), cancellationCoordinator(move(cancellationCoordinator))
 {}
 
+OperationChainRunManager::RunRecord::RunRecord(OperationChainRunSnapshot snapshot,
+                                               unique_ptr<SimulatedOperationChainRun> simulatedRun)
+    : snapshot(move(snapshot)), simulatedRun(move(simulatedRun))
+{}
+
+bool OperationChainRunManager::RunRecord::isSimulated() const
+{
+    return simulatedRun != nullptr;
+}
+
 OperationChainRunManager::OperationChainRunManager(vector<OperationChainDefinition> definitions,
                                                    Exchanger binanceDealService,
                                                    Exchanger bybitDealService)
@@ -107,6 +117,7 @@ OperationChainRunId OperationChainRunManager::startRun(const string &definitionN
         initialSnapshot.runId = runId;
         initialSnapshot.chainSnapshot = chain->getSnapshot();
         initialSnapshot.updateSequence = nextUpdateSequence++;
+        initialSnapshot.kind = OperationChainRunKind::REAL;
 
         auto record = make_unique<RunRecord>(initialSnapshot, move(chain), cancellationCoordinator);
         OperationChain *chainPointer = record->chain.get();
@@ -121,6 +132,52 @@ OperationChainRunId OperationChainRunManager::startRun(const string &definitionN
                     if (waitForRunStart(*startGate, stopToken))
                     {
                         executeRun(runId, *chainPointer, stopToken);
+                    }
+                });
+        }
+        catch (...)
+        {
+            runs.erase(runId);
+            throw;
+        }
+    }
+
+    notifyRunChanged(initialSnapshot);
+    openRunStartGate(*startGate);
+    return initialSnapshot.runId;
+}
+
+OperationChainRunId OperationChainRunManager::startSimulatedRun(const SimulatedOperationChainRunPlan &plan)
+{
+    OperationChainRunSnapshot initialSnapshot;
+    auto startGate = make_shared<RunStartGate>();
+
+    {
+        lock_guard<mutex> lock(stateMutex);
+        throwIf(stopping, "Operation-chain run manager is stopping");
+        throwIf(nextRunId == 0, "Operation-chain run ID space is exhausted");
+        throwIf(nextUpdateSequence == 0, "Operation-chain update sequence space is exhausted");
+
+        const OperationChainRunId runId = nextRunId++;
+        auto simulatedRun = make_unique<SimulatedOperationChainRun>(plan);
+        initialSnapshot.runId = runId;
+        initialSnapshot.chainSnapshot = simulatedRun->getSnapshot();
+        initialSnapshot.updateSequence = nextUpdateSequence++;
+        initialSnapshot.kind = OperationChainRunKind::SIMULATED;
+
+        auto record = make_unique<RunRecord>(initialSnapshot, move(simulatedRun));
+        SimulatedOperationChainRun *simulatedRunPointer = record->simulatedRun.get();
+        const auto [run, inserted] = runs.emplace(runId, move(record));
+        throwIf(!inserted, "Operation-chain run ID collision");
+
+        try
+        {
+            run->second->worker = jthread(
+                [this, runId, simulatedRunPointer, startGate](stop_token stopToken)
+                {
+                    if (waitForRunStart(*startGate, stopToken))
+                    {
+                        executeSimulatedRun(runId, *simulatedRunPointer, stopToken);
                     }
                 });
         }
@@ -153,27 +210,61 @@ void OperationChainRunManager::requestRunCancellation(OperationChainRunId runId)
         run->second->snapshot.cancellationRequested = true;
         run->second->snapshot.updateSequence = nextUpdateSequence++;
         changedSnapshot = run->second->snapshot;
-        const shared_ptr<OperationCancellationCoordinator> cancellationCoordinator =
-            run->second->cancellationCoordinator;
-        cancellationCoordinator->requestCancellation();
 
-        try
+        if (run->second->isSimulated())
         {
-            run->second->cancellationWorker = jthread([this, cancellationCoordinator](stop_token stopToken)
-                                                      { cancelRun(cancellationCoordinator, stopToken); });
+            run->second->simulatedRun->requestCancellation();
         }
-        catch (const exception &exception)
+        else
         {
-            cancellationCoordinator->failCancellation(exception.what());
-        }
-        catch (...)
-        {
-            cancellationCoordinator->failCancellation(
-                "Operation-chain cancellation worker failed to start with a non-standard exception");
+            const shared_ptr<OperationCancellationCoordinator> cancellationCoordinator =
+                run->second->cancellationCoordinator;
+            cancellationCoordinator->requestCancellation();
+
+            try
+            {
+                run->second->cancellationWorker = jthread([this, cancellationCoordinator](stop_token stopToken)
+                                                          { cancelRun(cancellationCoordinator, stopToken); });
+            }
+            catch (const exception &exception)
+            {
+                cancellationCoordinator->failCancellation(exception.what());
+            }
+            catch (...)
+            {
+                cancellationCoordinator->failCancellation(
+                    "Operation-chain cancellation worker failed to start with a non-standard exception");
+            }
         }
     }
 
     notifyRunChanged(changedSnapshot);
+}
+
+void OperationChainRunManager::executeSimulatedRun(OperationChainRunId runId,
+                                                   SimulatedOperationChainRun &simulatedRun,
+                                                   stop_token stopToken)
+{
+    if (stopToken.stop_requested())
+    {
+        return;
+    }
+
+    try
+    {
+        simulatedRun.execute(stopToken,
+                             [this, runId](OperationChainSnapshot snapshot) { updateRun(runId, move(snapshot)); });
+    }
+    catch (const exception &exception)
+    {
+        cerr << "Simulated operation-chain run " << runId << " failed: " << exception.what() << '\n';
+        updateRun(runId, simulatedRun.getSnapshot());
+    }
+    catch (...)
+    {
+        cerr << "Simulated operation-chain run " << runId << " failed with a non-standard exception\n";
+        updateRun(runId, simulatedRun.getSnapshot());
+    }
 }
 
 void OperationChainRunManager::executeRun(OperationChainRunId runId, OperationChain &chain, stop_token stopToken)

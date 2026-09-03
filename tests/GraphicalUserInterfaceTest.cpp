@@ -1,3 +1,4 @@
+#include "graphical/GraphicalUserInterface.hpp"
 #include "OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
 #include "graphical/CryptoDealWindow.hpp"
@@ -14,6 +15,8 @@
 #include <QStackedWidget>
 #include <QString>
 #include <QTabWidget>
+#include <QTableWidget>
+#include <QTimer>
 #include <QtTest/QTest>
 #include <gtest/gtest.h>
 
@@ -157,4 +160,52 @@ TEST(GraphicalUserInterfaceTest, UsesApprovedWindowDimensions)
 
     EXPECT_EQ(window.size(), QSize(1180, 760));
     EXPECT_EQ(window.minimumSize(), QSize(960, 640));
+}
+
+TEST(GraphicalUserInterfaceTest, AutomaticallyAddsThreeSimulatedRunsAfterStartup)
+{
+    QApplication &application = getApplication();
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    GraphicalUserInterface graphicalUserInterface(binanceService, bybitService, {});
+    bool inspected = false;
+
+    QTimer::singleShot(100,
+                       [&application, &inspected]()
+                       {
+                           QWidget *window = nullptr;
+                           for (QWidget *candidate : QApplication::topLevelWidgets())
+                           {
+                               if (candidate->objectName() == "cryptoDealWindow")
+                               {
+                                   window = candidate;
+                                   break;
+                               }
+                           }
+
+                           EXPECT_NE(window, nullptr);
+                           if (window != nullptr)
+                           {
+                               auto *runsTable = window->findChild<QTableWidget *>("operationChainRunsTable");
+                               EXPECT_NE(runsTable, nullptr);
+                               if (runsTable != nullptr)
+                               {
+                                   EXPECT_EQ(runsTable->rowCount(), 3);
+                                   for (int row = 0; row < runsTable->rowCount(); ++row)
+                                   {
+                                       QTableWidgetItem *item = runsTable->item(row, 0);
+                                       EXPECT_NE(item, nullptr);
+                                       if (item != nullptr)
+                                       {
+                                           EXPECT_TRUE(item->text().contains("Simulated · Run #"));
+                                       }
+                                   }
+                                   inspected = true;
+                               }
+                           }
+                           application.quit();
+                       });
+
+    EXPECT_EQ(graphicalUserInterface.run(), 0);
+    EXPECT_TRUE(inspected);
 }

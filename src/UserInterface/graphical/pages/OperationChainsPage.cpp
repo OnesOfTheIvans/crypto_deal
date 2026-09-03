@@ -134,6 +134,13 @@ namespace {
                run.chainSnapshot.status == OperationChainStatus::RUNNING;
     }
 
+    QString formatRunLabel(const OperationChainRunSnapshot &run)
+    {
+        const QString kind = run.kind == OperationChainRunKind::SIMULATED ? "Simulated · " : "";
+        return QString::fromStdString(run.chainSnapshot.definitionName) + "\n" + kind + "Run #" +
+               QString::number(run.runId);
+    }
+
     void addRunFilterItem(QListWidget &list, const QString &label, OperationChainRunFilter filter)
     {
         auto *item = new QListWidgetItem(label, &list);
@@ -585,8 +592,7 @@ void OperationChainsPage::populateRunRow(size_t row, const OperationChainRunSnap
 {
     const int tableRow = static_cast<int>(row);
     const OperationChainSnapshot &snapshot = run.chainSnapshot;
-    auto *runItem =
-        createTableItem(QString::fromStdString(snapshot.definitionName) + "\nRun #" + QString::number(run.runId));
+    auto *runItem = createTableItem(formatRunLabel(run));
     runItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(run.runId));
     runsTable->setItem(tableRow, static_cast<int>(RunColumn::RUN), runItem);
     runsTable->setItem(tableRow, static_cast<int>(RunColumn::STATUS), createTableItem(formatRunStatus(run)));
@@ -673,8 +679,17 @@ bool OperationChainsPage::confirmRunCancellation(OperationChainRunId runId)
                              this);
     confirmation.setObjectName("cancelOperationChainRunConfirmationDialog");
     confirmation.setTextFormat(Qt::PlainText);
-    confirmation.setInformativeText("The current exchange order will be cancelled when possible, and later steps "
-                                    "will not execute. The run changes to Cancelled only after confirmation.");
+    if (run->kind == OperationChainRunKind::SIMULATED)
+    {
+        confirmation.setInformativeText("This stops only the local simulated progress. No exchange request will be "
+                                        "sent. The run will remain in session history as Cancelled.");
+    }
+    else
+    {
+        confirmation.setInformativeText("The current exchange order will be cancelled when possible, and later "
+                                        "steps will not execute. The run changes to Cancelled only after "
+                                        "confirmation.");
+    }
     auto *cancelButton = confirmation.addButton("Cancel / Stop run", QMessageBox::AcceptRole);
     cancelButton->setObjectName("confirmOperationChainRunCancellationButton");
     auto *keepButton = confirmation.addButton("Keep running", QMessageBox::RejectRole);

@@ -1,9 +1,11 @@
 #include "../src/OperationChain/OperationChainRunManager.hpp"
+#include "../src/OperationChain/DefaultSimulatedOperationChainRuns.hpp"
 #include "TestDealService.hpp"
 #include "common/OrderWaitInterrupted.hpp"
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -35,6 +37,7 @@ namespace {
         mutable mutex stateMutex;
         condition_variable stateChanged;
         map<OperationChainRunId, OperationChainRunSnapshot> snapshots;
+        map<OperationChainRunId, vector<OperationChainRunSnapshot>> histories;
 
       public:
         void record(OperationChainRunSnapshot snapshot)
@@ -44,6 +47,7 @@ namespace {
                 const auto current = snapshots.find(snapshot.runId);
                 if (current == snapshots.end() || snapshot.updateSequence > current->second.updateSequence)
                 {
+                    histories[snapshot.runId].push_back(snapshot);
                     snapshots[snapshot.runId] = move(snapshot);
                 }
             }
@@ -52,17 +56,123 @@ namespace {
 
         OperationChainRunSnapshot waitForTerminal(OperationChainRunId runId)
         {
+            return waitForSnapshot(runId,
+                                   [](const OperationChainRunSnapshot &snapshot)
+                                   { return isTerminal(snapshot.chainSnapshot.status); });
+        }
+
+        OperationChainRunSnapshot waitForSnapshot(OperationChainRunId runId,
+                                                  const function<bool(const OperationChainRunSnapshot &)> &predicate)
+        {
             unique_lock<mutex> lock(stateMutex);
-            const bool completed = stateChanged.wait_for(lock,
-                                                         chrono::seconds(2),
-                                                         [this, runId]()
-                                                         {
-                                                             const auto snapshot = snapshots.find(runId);
-                                                             return snapshot != snapshots.end() &&
-                                                                    isTerminal(snapshot->second.chainSnapshot.status);
-                                                         });
+            const bool completed =
+                stateChanged.wait_for(lock,
+                                      chrono::seconds(2),
+                                      [this, runId, &predicate]()
+                                      {
+                                          const auto snapshot = snapshots.find(runId);
+                                          return snapshot != snapshots.end() && predicate(snapshot->second);
+                                      });
             EXPECT_TRUE(completed);
             return snapshots.at(runId);
+        }
+
+        vector<OperationChainRunSnapshot> getHistory(OperationChainRunId runId) const
+        {
+            lock_guard<mutex> lock(stateMutex);
+            const auto history = histories.find(runId);
+            return history == histories.end() ? vector<OperationChainRunSnapshot>{} : history->second;
+        }
+    };
+
+    class SimulationGuardDealService final : public TestDealService
+    {
+      private:
+        atomic<size_t> operationCalls{0};
+
+        void recordOperationCall()
+        {
+            ++operationCalls;
+        }
+
+      public:
+        explicit SimulationGuardDealService(ExchangerType exchangerType) : TestDealService(exchangerType) {}
+
+        size_t getOperationCallCount() const
+        {
+            return operationCalls.load();
+        }
+
+        OrderInfo buyCrypto(const string &, const string &, Decimal) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo sellCrypto(const string &, const string &, Decimal) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo waitUntilOrderFilled(const string &, const string &) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo waitUntilOrderFilled(const string &, const string &, stop_token) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo placeOrder(const PlaceOrderRequest &) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &, stop_token) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OcoInfo placeOco(const PlaceOcoRequest &) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &, stop_token) override
+        {
+            recordOperationCall();
+            return {};
+        }
+
+        OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override
+        {
+            recordOperationCall();
+            return ocoInfo;
+        }
+
+        OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, stop_token) override
+        {
+            recordOperationCall();
+            return ocoInfo;
         }
     };
 
@@ -268,6 +378,187 @@ namespace {
             { return createAcceptedOrder(assetToBuy, assetToSell, quantity, nextOrderNumber->fetch_add(1)); },
             [](const string &symbol, const string &orderId) { return createFilledOrder(symbol, orderId); });
     }
+}
+
+TEST(OperationChainRunManagerTest, RunsDefaultSimulationsToDistinctAwaitingStepsWithoutExchangeCalls)
+{
+    auto binanceService = make_shared<SimulationGuardDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<SimulationGuardDealService>(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Real chain", "BTC")}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    const vector<SimulatedOperationChainRunPlan> plans =
+        createDefaultSimulatedOperationChainRunPlans(chrono::milliseconds{0}, chrono::milliseconds{0});
+    vector<OperationChainRunId> runIds;
+    for (const SimulatedOperationChainRunPlan &plan : plans)
+    {
+        runIds.push_back(manager.startSimulatedRun(plan));
+    }
+
+    const array<size_t, 3> awaitingIndexes{2, 3, 4};
+    const array<string, 3> expectedNames{"Simulated Binance accumulation",
+                                         "Simulated cross-exchange hedge",
+                                         "Simulated Bybit protection"};
+    const array<ExchangerType, 3> expectedCurrentExchangers{ExchangerType::BINANCE,
+                                                            ExchangerType::BYBIT,
+                                                            ExchangerType::BINANCE};
+    const array<string, 3> expectedCurrentAssets{"USDT", "USDT", "BTC"};
+    const array<string, 3> expectedCurrentQuantities{"2480", "4975", "0.05"};
+    const array<vector<OperationType>, 3> expectedTypes{vector<OperationType>{OperationType::BUY_CRYPTO,
+                                                                              OperationType::SELL_CRYPTO,
+                                                                              OperationType::PLACE_ORDER,
+                                                                              OperationType::PLACE_OCO,
+                                                                              OperationType::SEND_TO},
+                                                        vector<OperationType>{OperationType::BUY_CRYPTO,
+                                                                              OperationType::SEND_TO,
+                                                                              OperationType::SELL_CRYPTO,
+                                                                              OperationType::PLACE_ORDER,
+                                                                              OperationType::PLACE_OCO},
+                                                        vector<OperationType>{OperationType::BUY_CRYPTO,
+                                                                              OperationType::PLACE_OCO,
+                                                                              OperationType::BUY_CRYPTO,
+                                                                              OperationType::SEND_TO,
+                                                                              OperationType::PLACE_OCO}};
+
+    ASSERT_EQ(runIds, (vector<OperationChainRunId>{1, 2, 3}));
+    ASSERT_EQ(plans.size(), size_t{3});
+    for (size_t runIndex = 0; runIndex < runIds.size(); ++runIndex)
+    {
+        const OperationChainRunSnapshot snapshot = observer.waitForSnapshot(
+            runIds[runIndex],
+            [expectedIndex = awaitingIndexes[runIndex]](const OperationChainRunSnapshot &candidate)
+            {
+                return candidate.chainSnapshot.status == OperationChainStatus::RUNNING &&
+                       candidate.chainSnapshot.currentStepIndex == expectedIndex &&
+                       candidate.chainSnapshot.steps[expectedIndex].status == OperationStepStatus::AWAITING;
+            });
+
+        EXPECT_EQ(snapshot.kind, OperationChainRunKind::SIMULATED);
+        EXPECT_EQ(snapshot.chainSnapshot.definitionName, expectedNames[runIndex]);
+        ASSERT_EQ(snapshot.chainSnapshot.steps.size(), size_t{5});
+        ASSERT_TRUE(snapshot.chainSnapshot.currentStepIndex.has_value());
+        EXPECT_EQ(snapshot.chainSnapshot.currentStepIndex.value(), awaitingIndexes[runIndex]);
+        EXPECT_EQ(snapshot.chainSnapshot.currentContext.exchangerType, expectedCurrentExchangers[runIndex]);
+        EXPECT_EQ(snapshot.chainSnapshot.currentContext.asset, expectedCurrentAssets[runIndex]);
+        EXPECT_EQ(snapshot.chainSnapshot.currentContext.quantity,
+                  DecimalConverter::parseDecimal(expectedCurrentQuantities[runIndex]));
+
+        for (size_t stepIndex = 0; stepIndex < snapshot.chainSnapshot.steps.size(); ++stepIndex)
+        {
+            const OperationStepSnapshot &step = snapshot.chainSnapshot.steps[stepIndex];
+            EXPECT_EQ(step.type, expectedTypes[runIndex][stepIndex]);
+            if (stepIndex < awaitingIndexes[runIndex])
+            {
+                EXPECT_EQ(step.status, OperationStepStatus::SUCCEEDED);
+                EXPECT_TRUE(step.inputContext.has_value());
+                EXPECT_TRUE(step.outputContext.has_value());
+            }
+            else if (stepIndex == awaitingIndexes[runIndex])
+            {
+                EXPECT_EQ(step.status, OperationStepStatus::AWAITING);
+                EXPECT_TRUE(step.inputContext.has_value());
+                EXPECT_FALSE(step.outputContext.has_value());
+            }
+            else
+            {
+                EXPECT_EQ(step.status, OperationStepStatus::PENDING);
+                EXPECT_FALSE(step.inputContext.has_value());
+                EXPECT_FALSE(step.outputContext.has_value());
+            }
+        }
+    }
+
+    const OperationChainRunSnapshot binanceRun = manager.getRun(runIds[0]).value();
+    EXPECT_EQ(binanceRun.chainSnapshot.steps[0].acceptedIdentifiers.orderId, "SIM-BIN-BUY-001");
+    EXPECT_EQ(binanceRun.chainSnapshot.steps[2].acceptedIdentifiers.orderId, "SIM-BIN-MARKET-003");
+    const OperationChainRunSnapshot protectionRun = manager.getRun(runIds[2]).value();
+    EXPECT_EQ(protectionRun.chainSnapshot.steps[1].acceptedIdentifiers.ocoGroupId, "SIM-PROTECT-OCO-002");
+    EXPECT_EQ(protectionRun.chainSnapshot.steps[4].acceptedIdentifiers.takeProfitOrderId, "SIM-PROTECT-TP-005");
+    const vector<OperationChainRunSnapshot> firstRunHistory = observer.getHistory(runIds[0]);
+    ASSERT_EQ(firstRunHistory.size(), size_t{8});
+    EXPECT_EQ(firstRunHistory[0].chainSnapshot.status, OperationChainStatus::PENDING);
+    EXPECT_EQ(firstRunHistory[1].chainSnapshot.status, OperationChainStatus::RUNNING);
+    EXPECT_FALSE(firstRunHistory[1].chainSnapshot.currentStepIndex.has_value());
+    EXPECT_EQ(firstRunHistory[2].chainSnapshot.steps[0].status, OperationStepStatus::RUNNING);
+    EXPECT_EQ(firstRunHistory[3].chainSnapshot.steps[0].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(firstRunHistory[4].chainSnapshot.steps[1].status, OperationStepStatus::RUNNING);
+    EXPECT_EQ(firstRunHistory[5].chainSnapshot.steps[1].status, OperationStepStatus::SUCCEEDED);
+    EXPECT_EQ(firstRunHistory[6].chainSnapshot.steps[2].status, OperationStepStatus::RUNNING);
+    EXPECT_EQ(firstRunHistory[7].chainSnapshot.steps[2].status, OperationStepStatus::AWAITING);
+    for (size_t eventIndex = 0; eventIndex < firstRunHistory.size(); ++eventIndex)
+    {
+        EXPECT_EQ(firstRunHistory[eventIndex].chainSnapshot.revision, eventIndex);
+        if (eventIndex > 0)
+        {
+            EXPECT_GT(firstRunHistory[eventIndex].updateSequence, firstRunHistory[eventIndex - 1].updateSequence);
+        }
+    }
+    ASSERT_EQ(manager.getDefinitions().size(), size_t{1});
+    EXPECT_EQ(manager.getDefinitions().front().getName(), "Real chain");
+    EXPECT_EQ(binanceService->getOperationCallCount(), size_t{0});
+    EXPECT_EQ(bybitService->getOperationCallCount(), size_t{0});
+
+    const OperationChainRunId realRunId = manager.startRun("Real chain");
+    const OperationChainRunSnapshot realRun = observer.waitForTerminal(realRunId);
+    EXPECT_EQ(realRunId, OperationChainRunId{4});
+    EXPECT_EQ(realRun.kind, OperationChainRunKind::REAL);
+    EXPECT_EQ(realRun.chainSnapshot.status, OperationChainStatus::COMPLETED);
+    EXPECT_GT(binanceService->getOperationCallCount(), size_t{0});
+    EXPECT_EQ(bybitService->getOperationCallCount(), size_t{0});
+
+    manager.stopAndWait();
+    for (OperationChainRunId runId : runIds)
+    {
+        const OperationChainRunSnapshot stoppedSnapshot = manager.getRun(runId).value();
+        EXPECT_EQ(stoppedSnapshot.chainSnapshot.status, OperationChainStatus::RUNNING);
+        EXPECT_FALSE(stoppedSnapshot.cancellationRequested);
+    }
+}
+
+TEST(OperationChainRunManagerTest, CancelsOnlySelectedSimulationLocallyAndRetainsItsHistory)
+{
+    auto binanceService = make_shared<SimulationGuardDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<SimulationGuardDealService>(ExchangerType::BYBIT);
+    OperationChainRunManager manager({}, binanceService, bybitService);
+    RunObserver observer;
+    manager.setRunChangeHandler([&observer](OperationChainRunSnapshot snapshot) { observer.record(move(snapshot)); });
+
+    vector<OperationChainRunId> runIds;
+    for (const SimulatedOperationChainRunPlan &plan :
+         createDefaultSimulatedOperationChainRunPlans(chrono::milliseconds{0}, chrono::milliseconds{0}))
+    {
+        runIds.push_back(manager.startSimulatedRun(plan));
+    }
+    for (size_t runIndex = 0; runIndex < runIds.size(); ++runIndex)
+    {
+        observer.waitForSnapshot(runIds[runIndex],
+                                 [expectedIndex = runIndex + 2](const OperationChainRunSnapshot &candidate)
+                                 {
+                                     return candidate.chainSnapshot.currentStepIndex == expectedIndex &&
+                                            candidate.chainSnapshot.steps[expectedIndex].status ==
+                                                OperationStepStatus::AWAITING;
+                                 });
+    }
+
+    manager.requestRunCancellation(runIds[1]);
+    const OperationChainRunSnapshot cancelled = observer.waitForTerminal(runIds[1]);
+    const uint64_t terminalUpdateSequence = cancelled.updateSequence;
+    manager.requestRunCancellation(runIds[1]);
+
+    EXPECT_TRUE(cancelled.cancellationRequested);
+    EXPECT_EQ(cancelled.kind, OperationChainRunKind::SIMULATED);
+    EXPECT_EQ(cancelled.chainSnapshot.status, OperationChainStatus::CANCELLED);
+    EXPECT_FALSE(cancelled.chainSnapshot.currentStepIndex.has_value());
+    EXPECT_EQ(cancelled.chainSnapshot.steps[3].status, OperationStepStatus::CANCELLED);
+    EXPECT_EQ(manager.getRun(runIds[1])->updateSequence, terminalUpdateSequence);
+    EXPECT_EQ(manager.getRuns().size(), size_t{3});
+    EXPECT_EQ(manager.getRun(runIds[0])->chainSnapshot.steps[2].status, OperationStepStatus::AWAITING);
+    EXPECT_EQ(manager.getRun(runIds[2])->chainSnapshot.steps[4].status, OperationStepStatus::AWAITING);
+    EXPECT_EQ(binanceService->getOperationCallCount(), size_t{0});
+    EXPECT_EQ(bybitService->getOperationCallCount(), size_t{0});
+
+    manager.stopAndWait();
 }
 
 TEST(OperationChainRunManagerTest, RunsSameAndDifferentDefinitionsConcurrentlyAndRetainsOrderedHistory)

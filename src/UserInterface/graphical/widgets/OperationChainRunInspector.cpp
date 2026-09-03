@@ -496,7 +496,8 @@ void OperationChainRunInspector::setRun(const optional<OperationChainRunSnapshot
 
     emptyState->setVisible(false);
     content->setVisible(true);
-    runTitle->setText(QString::fromStdString(runSnapshot->chainSnapshot.definitionName) + " · Run #" +
+    const QString kind = runSnapshot->kind == OperationChainRunKind::SIMULATED ? " · Simulated" : "";
+    runTitle->setText(QString::fromStdString(runSnapshot->chainSnapshot.definitionName) + kind + " · Run #" +
                       QString::number(runSnapshot->runId));
     selectionNotice->setText(notice);
     selectionNotice->setVisible(!notice.isEmpty());

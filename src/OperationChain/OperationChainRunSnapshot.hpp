@@ -1,6 +1,7 @@
 #ifndef OPERATION_CHAIN_RUN_SNAPSHOT_H
 #define OPERATION_CHAIN_RUN_SNAPSHOT_H
 
+#include "OperationChainRunKind.hpp"
 #include "OperationChainSnapshot.hpp"
 #include "type_aliasing.hpp"
 
@@ -12,6 +13,7 @@ struct OperationChainRunSnapshot
     OperationChainSnapshot chainSnapshot;
     std::uint64_t updateSequence = 0;
     bool cancellationRequested = false;
+    OperationChainRunKind kind = OperationChainRunKind::REAL;
 };
 
 #endif

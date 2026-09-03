@@ -5,6 +5,8 @@
 #include "OperationChainBuilder.hpp"
 #include "OperationChainDefinition.hpp"
 #include "OperationChainRunSnapshot.hpp"
+#include "SimulatedOperationChainRun.hpp"
+#include "SimulatedOperationChainRunPlan.hpp"
 #include "type_aliasing.hpp"
 
 #include <cstddef>
@@ -28,6 +30,7 @@ class OperationChainRunManager
     {
         OperationChainRunSnapshot snapshot;
         std::unique_ptr<OperationChain> chain;
+        std::unique_ptr<SimulatedOperationChainRun> simulatedRun;
         std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator;
         std::jthread worker;
         std::jthread cancellationWorker;
@@ -35,6 +38,10 @@ class OperationChainRunManager
         RunRecord(OperationChainRunSnapshot snapshot,
                   std::unique_ptr<OperationChain> chain,
                   std::shared_ptr<OperationCancellationCoordinator> cancellationCoordinator);
+
+        RunRecord(OperationChainRunSnapshot snapshot, std::unique_ptr<SimulatedOperationChainRun> simulatedRun);
+
+        bool isSimulated() const;
     };
 
     const std::vector<OperationChainDefinition> definitions;
@@ -51,6 +58,9 @@ class OperationChainRunManager
     const OperationChainDefinition &getDefinition(const std::string &definitionName) const;
 
     void executeRun(OperationChainRunId runId, OperationChain &chain, std::stop_token stopToken);
+
+    void
+    executeSimulatedRun(OperationChainRunId runId, SimulatedOperationChainRun &simulatedRun, std::stop_token stopToken);
 
     void updateRun(OperationChainRunId runId, OperationChainSnapshot snapshot);
 
@@ -69,6 +79,8 @@ class OperationChainRunManager
     void setRunChangeHandler(OperationChainRunChangeHandler handler);
 
     OperationChainRunId startRun(const std::string &definitionName);
+
+    OperationChainRunId startSimulatedRun(const SimulatedOperationChainRunPlan &plan);
 
     void requestRunCancellation(OperationChainRunId runId);
 

@@ -1,4 +1,5 @@
 add_library(OperationChainLib
+    DefaultSimulatedOperationChainRuns.cpp
     OperationCancellationCoordinator.cpp
     OperationChain.cpp
     OperationChainBuilder.cpp
@@ -8,6 +9,7 @@ add_library(OperationChainLib
     OperationDefinition.cpp
     ExchangerPull.cpp
     OperationFactory.cpp
+    SimulatedOperationChainRun.cpp
 )
 
 target_include_directories(OperationChainLib

@@ -24,6 +24,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/DealService/common/TradablePairUtil.cpp
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
+    ../src/OperationChain/DefaultSimulatedOperationChainRuns.cpp
     ../src/OperationChain/OperationCancellationCoordinator.cpp
     ../src/OperationChain/OperationFactory.cpp
     ../src/OperationChain/OperationChain.cpp
@@ -32,6 +33,7 @@ add_executable(DealServiceUnitIntegrationTests
     ../src/OperationChain/OperationChainDefinitionLoader.cpp
     ../src/OperationChain/OperationChainRunManager.cpp
     ../src/OperationChain/OperationDefinition.cpp
+    ../src/OperationChain/SimulatedOperationChainRun.cpp
 )
 
 target_include_directories(DealServiceUnitIntegrationTests PRIVATE

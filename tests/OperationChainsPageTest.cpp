@@ -1,4 +1,5 @@
 #include "graphical/pages/OperationChainsPage.hpp"
+#include "DefaultSimulatedOperationChainRuns.hpp"
 #include "OperationChainRunManager.hpp"
 #include "TestDealService.hpp"
 #include "common/OrderWaitInterrupted.hpp"
@@ -179,27 +180,33 @@ namespace {
     void clickConfirmationButton(QPushButton &trigger,
                                  const QString &dialogObjectName,
                                  const QString &buttonObjectName,
-                                 const QString &defaultButtonObjectName)
+                                 const QString &defaultButtonObjectName,
+                                 QString expectedInformativeText = {})
     {
         bool handled = false;
-        QTimer::singleShot(0,
-                           [&handled, &dialogObjectName, &buttonObjectName, &defaultButtonObjectName]()
-                           {
-                               auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
-                               EXPECT_NE(dialog, nullptr);
-                               if (dialog == nullptr)
-                               {
-                                   return;
-                               }
+        QTimer::singleShot(
+            0,
+            [&handled, &dialogObjectName, &buttonObjectName, &defaultButtonObjectName, &expectedInformativeText]()
+            {
+                auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                EXPECT_NE(dialog, nullptr);
+                if (dialog == nullptr)
+                {
+                    return;
+                }
 
-                               EXPECT_EQ(dialog->objectName(), dialogObjectName);
-                               ASSERT_NE(dialog->defaultButton(), nullptr);
-                               EXPECT_EQ(dialog->defaultButton()->objectName(), defaultButtonObjectName);
-                               auto *button = dialog->findChild<QPushButton *>(buttonObjectName);
-                               ASSERT_NE(button, nullptr);
-                               handled = true;
-                               QTest::mouseClick(button, Qt::LeftButton);
-                           });
+                EXPECT_EQ(dialog->objectName(), dialogObjectName);
+                ASSERT_NE(dialog->defaultButton(), nullptr);
+                EXPECT_EQ(dialog->defaultButton()->objectName(), defaultButtonObjectName);
+                if (!expectedInformativeText.isEmpty())
+                {
+                    EXPECT_TRUE(dialog->informativeText().contains(expectedInformativeText));
+                }
+                auto *button = dialog->findChild<QPushButton *>(buttonObjectName);
+                ASSERT_NE(button, nullptr);
+                handled = true;
+                QTest::mouseClick(button, Qt::LeftButton);
+            });
         QTest::mouseClick(&trigger, Qt::LeftButton);
         EXPECT_TRUE(handled);
     }
@@ -225,6 +232,63 @@ namespace {
         EXPECT_EQ(filterToggle->text(), "Filter: " + label);
         EXPECT_EQ(filterToggle->arrowType(), Qt::RightArrow);
     }
+}
+
+TEST(OperationChainsPageTest, ShowsAndLocallyCancelsSimulatedRunWithTruthfulPresentation)
+{
+    getApplication();
+    auto binanceService = make_shared<TestDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    OperationChainRunManager manager({}, binanceService, bybitService);
+    OperationChainRunModel model(manager);
+    OperationChainsPage page(model);
+    page.resize(1180, 760);
+    page.show();
+    QApplication::processEvents();
+
+    for (const SimulatedOperationChainRunPlan &plan :
+         createDefaultSimulatedOperationChainRunPlans(chrono::milliseconds{0}, chrono::milliseconds{0}))
+    {
+        manager.startSimulatedRun(plan);
+    }
+
+    auto *definitionsTable = page.findChild<QTableWidget *>("operationChainDefinitionsTable");
+    auto *runsTable = page.findChild<QTableWidget *>("operationChainRunsTable");
+    auto *inspectorTitle = page.findChild<QLabel *>("operationChainRunInspectorTitle");
+    auto *filterList = page.findChild<QListWidget *>("operationChainRunFilterList");
+    ASSERT_NE(definitionsTable, nullptr);
+    ASSERT_NE(runsTable, nullptr);
+    ASSERT_NE(inspectorTitle, nullptr);
+    ASSERT_NE(filterList, nullptr);
+
+    QTRY_COMPARE(model.getRuns(OperationChainRunFilter::ACTIVE).size(), size_t{3});
+    QTRY_COMPARE(runsTable->rowCount(), 3);
+    EXPECT_EQ(definitionsTable->rowCount(), 0);
+    for (int row = 0; row < runsTable->rowCount(); ++row)
+    {
+        ASSERT_NE(runsTable->item(row, 0), nullptr);
+        EXPECT_TRUE(runsTable->item(row, 0)->text().contains("Simulated · Run #"));
+    }
+    QTRY_VERIFY(inspectorTitle->text().contains(" · Simulated · Run #"));
+
+    auto *cancelButton = qobject_cast<QPushButton *>(runsTable->cellWidget(0, 7));
+    ASSERT_NE(cancelButton, nullptr);
+    const OperationChainRunId cancelledRunId = cancelButton->property("runId").toULongLong();
+    clickConfirmationButton(*cancelButton,
+                            "cancelOperationChainRunConfirmationDialog",
+                            "confirmOperationChainRunCancellationButton",
+                            "keepOperationChainRunningButton",
+                            "No exchange request will be sent");
+
+    QTRY_VERIFY(model.getRun(cancelledRunId).has_value() &&
+                model.getRun(cancelledRunId)->chainSnapshot.status == OperationChainStatus::CANCELLED);
+    QTRY_COMPARE(runsTable->rowCount(), 2);
+    selectRunFilter(*filterList, "Cancelled");
+    QTRY_COMPARE(runsTable->rowCount(), 1);
+    EXPECT_TRUE(runsTable->item(0, 0)->text().contains("Simulated · Run #"));
+    EXPECT_EQ(runsTable->item(0, 1)->text(), QString("Cancelled"));
+
+    manager.stopAndWait();
 }
 
 TEST(OperationChainsPageTest, ShowsSeparateEmptyDefinitionAndSessionRunStates)

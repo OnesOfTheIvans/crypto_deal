@@ -2,6 +2,7 @@
 
 #include "CryptoDealWindow.hpp"
 #include "DealService.hpp"
+#include "DefaultSimulatedOperationChainRuns.hpp"
 #include "OperationChainRunManager.hpp"
 #include "async/AsyncTaskExecutor.hpp"
 #include "common/exception_handling.hpp"
@@ -41,6 +42,10 @@ int GraphicalUserInterface::run()
     OperationChainRunModel chainRunModel(chainRunManager);
     CryptoDealWindow mainWindow(pairCatalog, balanceCatalog, symbolInfoCatalog, orderSessionModel, chainRunModel);
     mainWindow.show();
+    for (const SimulatedOperationChainRunPlan &plan : createDefaultSimulatedOperationChainRunPlans())
+    {
+        chainRunManager.startSimulatedRun(plan);
+    }
     pairCatalog.loadCatalogs(taskExecutor, binanceDealService, bybitDealService);
     balanceCatalog.loadBalances();
     balanceCatalog.startLiveUpdates();
