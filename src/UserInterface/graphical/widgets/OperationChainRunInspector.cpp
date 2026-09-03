@@ -1,6 +1,7 @@
 #include "OperationChainRunInspector.hpp"
 
 #include "common/DecimalConverter.hpp"
+#include "graphical/StatusPresentation.hpp"
 
 #include <QAbstractItemView>
 #include <QDateTime>
@@ -500,6 +501,8 @@ void OperationChainRunInspector::setRun(const optional<OperationChainRunSnapshot
     runTitle->setText(QString::fromStdString(runSnapshot->chainSnapshot.definitionName) + kind + " · Run #" +
                       QString::number(runSnapshot->runId));
     selectionNotice->setText(notice);
+    applyStatusPresentation(*selectionNotice,
+                            notice.isEmpty() ? StatusPresentation::NEUTRAL : StatusPresentation::WARNING);
     selectionNotice->setVisible(!notice.isEmpty());
     rebuildProgression();
     updateDetails();

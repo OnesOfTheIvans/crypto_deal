@@ -2,6 +2,7 @@
 
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
+#include "graphical/StatusPresentation.hpp"
 #include "graphical/models/OperationChainRunModel.hpp"
 #include "graphical/widgets/OperationChainRunInspector.hpp"
 
@@ -639,6 +640,9 @@ void OperationChainsPage::populateRunRow(size_t row, const OperationChainRunSnap
 void OperationChainsPage::updateActionError()
 {
     actionError->setText(runModel.getActionError());
+    applyStatusPresentation(*actionError,
+                            runModel.getActionError().isEmpty() ? StatusPresentation::NEUTRAL
+                                                                : StatusPresentation::ERROR);
     actionError->setVisible(!runModel.getActionError().isEmpty());
 }
 

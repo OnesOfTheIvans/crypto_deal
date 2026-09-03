@@ -185,18 +185,24 @@ TEST(PairCatalogTest, DeliversIndependentCatalogStatusToOrdersPage)
     ASSERT_NE(bybitStatus, nullptr);
     EXPECT_EQ(binanceStatus->text(), QString("Binance: Waiting for startup load"));
     EXPECT_EQ(bybitStatus->text(), QString("Bybit: Waiting for startup load"));
+    EXPECT_EQ(binanceStatus->property("statusPresentation").toString(), QString("neutral"));
+    EXPECT_EQ(bybitStatus->property("statusPresentation").toString(), QString("neutral"));
 
     window.show();
     pairCatalog.loadCatalogs(taskExecutor, binanceService, bybitService);
 
     EXPECT_EQ(binanceStatus->text(), QString("Binance: Loading tradable pairs..."));
     EXPECT_EQ(bybitStatus->text(), QString("Bybit: Loading tradable pairs..."));
+    EXPECT_EQ(binanceStatus->property("statusPresentation").toString(), QString("loading"));
+    EXPECT_EQ(bybitStatus->property("statusPresentation").toString(), QString("loading"));
     QTRY_VERIFY_WITH_TIMEOUT(binanceRequestStarted.load(), 1000);
     QTRY_COMPARE_WITH_TIMEOUT(bybitStatus->text(), QString("Bybit: Unable to load pairs: Bybit status failure"), 1000);
+    EXPECT_EQ(bybitStatus->property("statusPresentation").toString(), QString("error"));
 
     releasePromise.set_value();
 
     QTRY_COMPARE_WITH_TIMEOUT(binanceStatus->text(), QString("Binance: 2 tradable pairs available"), 1000);
+    EXPECT_EQ(binanceStatus->property("statusPresentation").toString(), QString("success"));
 }
 
 TEST(PairCatalogTest, FiltersPairSelectorsAndKeepsExchangeChoiceStableDuringIndependentLoads)

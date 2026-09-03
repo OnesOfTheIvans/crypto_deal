@@ -2,6 +2,7 @@
 
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
+#include "graphical/StatusPresentation.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
 #include "graphical/models/PairCatalog.hpp"
@@ -669,6 +670,7 @@ void OrderEntryForm::updateSelectedCatalog()
     const UiTaskState &loadState = pairCatalog.getLoadState(getSelectedExchangerType());
     const QString exchangeName = getSelectedExchangeName();
     const qsizetype pairCount = static_cast<qsizetype>(pairCatalog.getPairs(getSelectedExchangerType()).size());
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
 
     switch (loadState.getStatus())
     {
@@ -677,6 +679,7 @@ void OrderEntryForm::updateSelectedCatalog()
         break;
     case UiTaskState::Status::LOADING:
         selectedCatalogStatus->setText(exchangeName + " pairs are loading. Pair controls will become available soon.");
+        presentation = StatusPresentation::LOADING;
         break;
     case UiTaskState::Status::SUCCEEDED:
         selectedCatalogStatus->setText(pairCount == 0 ? exchangeName + " has no tradable SPOT pairs available."
@@ -684,11 +687,14 @@ void OrderEntryForm::updateSelectedCatalog()
                                                             .arg(exchangeName)
                                                             .arg(pairCount)
                                                             .arg(pairCount == 1 ? "pair" : "pairs"));
+        presentation = pairCount == 0 ? StatusPresentation::WARNING : StatusPresentation::SUCCESS;
         break;
     case UiTaskState::Status::FAILED:
         selectedCatalogStatus->setText(exchangeName + " pairs are unavailable: " + loadState.getError());
+        presentation = StatusPresentation::ERROR;
         break;
     }
+    applyStatusPresentation(*selectedCatalogStatus, presentation);
     updatePairSelectors();
 }
 
@@ -697,6 +703,7 @@ void OrderEntryForm::updateSelectedBalance()
     const UiTaskState &loadState = balanceCatalog.getLoadState(getSelectedExchangerType());
     const QString exchangeName = getSelectedExchangeName();
     const bool hasSuccessfulSnapshot = balanceCatalog.hasSuccessfulSnapshot(getSelectedExchangerType());
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
     retryBalanceButton->hide();
 
     switch (loadState.getStatus())
@@ -709,18 +716,22 @@ void OrderEntryForm::updateSelectedBalance()
                                            ? "Refreshing " + exchangeName +
                                                  " balances. The latest cached snapshot remains available."
                                            : "Loading " + exchangeName + " balances required for placement...");
+        presentation = StatusPresentation::LOADING;
         break;
     case UiTaskState::Status::SUCCEEDED:
         selectedBalanceStatus->setText(exchangeName + " balances are ready for placement.");
+        presentation = StatusPresentation::SUCCESS;
         break;
     case UiTaskState::Status::FAILED:
         selectedBalanceStatus->setText(
             hasSuccessfulSnapshot
                 ? exchangeName + " balance refresh failed; using the latest cached snapshot: " + loadState.getError()
                 : exchangeName + " balances are unavailable: " + loadState.getError());
+        presentation = hasSuccessfulSnapshot ? StatusPresentation::WARNING : StatusPresentation::ERROR;
         retryBalanceButton->show();
         break;
     }
+    applyStatusPresentation(*selectedBalanceStatus, presentation);
     validateForm();
 }
 
@@ -836,6 +847,7 @@ void OrderEntryForm::updateSelectedSymbolInfo()
     if (!selectedPair.has_value())
     {
         selectedSymbolInfoStatus->setText("Select an available pair to load its trading rules.");
+        applyStatusPresentation(*selectedSymbolInfoStatus, StatusPresentation::NEUTRAL);
         return;
     }
 
@@ -847,9 +859,11 @@ void OrderEntryForm::updateSelectedSymbolInfo()
     {
         selectedSymbolInfoStatus->setText("Trading rules could not be started for " + QString::fromStdString(symbol) +
                                           ".");
+        applyStatusPresentation(*selectedSymbolInfoStatus, StatusPresentation::ERROR);
         return;
     }
 
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
     switch (loadState->getStatus())
     {
     case UiTaskState::Status::IDLE:
@@ -857,10 +871,12 @@ void OrderEntryForm::updateSelectedSymbolInfo()
         break;
     case UiTaskState::Status::LOADING:
         selectedSymbolInfoStatus->setText("Loading trading rules for " + QString::fromStdString(symbol) + "...");
+        presentation = StatusPresentation::LOADING;
         break;
     case UiTaskState::Status::FAILED:
         selectedSymbolInfoStatus->setText("Trading rules are unavailable for " + QString::fromStdString(symbol) + ": " +
                                           loadState->getError());
+        presentation = StatusPresentation::ERROR;
         retrySymbolInfoButton->show();
         break;
     case UiTaskState::Status::SUCCEEDED:
@@ -869,14 +885,17 @@ void OrderEntryForm::updateSelectedSymbolInfo()
         {
             selectedSymbolInfoStatus->setText("Trading rules returned no details for " +
                                               QString::fromStdString(symbol) + ".");
+            presentation = StatusPresentation::ERROR;
             break;
         }
         selectedSymbolInfoStatus->setText("Trading rules are ready for " + QString::fromStdString(symbol) + ".");
+        presentation = StatusPresentation::SUCCESS;
         updateTradingLimits(*symbolInfo);
         updateInputAvailability(true);
         validateForm();
         break;
     }
+    applyStatusPresentation(*selectedSymbolInfoStatus, presentation);
 }
 
 void OrderEntryForm::updateTradingLimits(const SymbolInfo &symbolInfo)

@@ -7,6 +7,7 @@ target_include_directories(UserInterfaceLib
 add_library(GraphicalUserInterfaceLib
     graphical/CryptoDealWindow.cpp
     graphical/GraphicalUserInterface.cpp
+    graphical/StatusPresentation.cpp
     graphical/async/AsyncTaskExecutor.cpp
     graphical/async/UiTaskState.cpp
     graphical/models/BalanceCatalog.cpp

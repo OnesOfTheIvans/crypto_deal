@@ -499,6 +499,7 @@ TEST(OperationChainsPageTest, PreservesExactCancellationFailureAndReportsSynchro
     auto *actionError = page.findChild<QLabel *>("operationChainActionError");
     ASSERT_NE(actionError, nullptr);
     EXPECT_TRUE(actionError->text().contains("Unknown operation-chain definition: Missing definition"));
+    EXPECT_EQ(actionError->property("statusPresentation").toString(), QString("error"));
 
     auto *startButton = page.findChild<QPushButton *>("startOperationChainButton");
     ASSERT_NE(startButton, nullptr);

@@ -359,6 +359,46 @@ QLabel[accountBalancesEmptyState="true"] {
     padding: 20px;
 }
 
+QLabel[statusPresentation="neutral"] {
+    background-color: #191f29;
+    border: 1px solid #343d4c;
+    border-radius: 6px;
+    color: #b6c0cf;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="loading"] {
+    background-color: #182a40;
+    border: 1px solid #365f8c;
+    border-radius: 6px;
+    color: #acd2fa;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="success"] {
+    background-color: #173126;
+    border: 1px solid #347257;
+    border-radius: 6px;
+    color: #9bd9b5;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="warning"] {
+    background-color: #332a18;
+    border: 1px solid #80662b;
+    border-radius: 6px;
+    color: #edca78;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="error"] {
+    background-color: #351f25;
+    border: 1px solid #84414e;
+    border-radius: 6px;
+    color: #f0a4ad;
+    padding: 7px 9px;
+}
+
 QWidget[sessionOrderActionBar="true"] {
     background-color: #151a23;
     border: 1px solid #2a3342;
@@ -400,6 +440,20 @@ QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:selected {
     color: #e3e9f2;
 }
 
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:hover,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:hover,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:hover {
+    background-color: #293241;
+    color: #ffffff;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:selected:focus,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected:focus,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:selected:focus {
+    border-color: #73b7ff;
+    color: #ffffff;
+}
+
 QWidget#binanceBalancesTab,
 QWidget#bybitBalancesTab {
     background-color: #151a23;
@@ -435,6 +489,15 @@ QTreeWidget[sessionOrdersTable="true"]::item:selected,
 QTableWidget[accountBalancesTable="true"]::item:selected,
 QTableWidget[operationChainTable="true"]::item:selected {
     background-color: #273b60;
+    color: #ffffff;
+}
+
+QTreeWidget[sessionOrdersTable="true"]:focus,
+QTableWidget[accountBalancesTable="true"]:focus,
+QTableWidget[operationChainTable="true"]:focus,
+QTableWidget[operationChainStepDetails="true"]:focus,
+QListWidget[operationChainRunFilters="true"]:focus {
+    border: 1px solid #73b7ff;
 }
 
 QHeaderView::section {
@@ -447,9 +510,29 @@ QHeaderView::section {
     padding: 6px;
 }
 
-QDialog#orderConfirmationDialog {
+QDialog#orderConfirmationDialog,
+QMessageBox {
     background-color: #191e28;
     color: #eef2f8;
+}
+
+QMessageBox QLabel {
+    color: #dbe2ed;
+}
+
+QMessageBox QPushButton {
+    background-color: #252d3b;
+    border: 1px solid #46546a;
+    border-radius: 6px;
+    color: #e3e9f2;
+    min-height: 30px;
+    min-width: 96px;
+    padding: 2px 10px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #303a4b;
+    border-color: #60718c;
 }
 
 QLabel[orderFieldLabel="true"] {
@@ -507,6 +590,10 @@ QCheckBox#placeOcoUseStopLimit {
     color: #c2cad7;
     font-size: 13px;
     spacing: 8px;
+}
+
+QCheckBox#placeOcoUseStopLimit:focus {
+    color: #ffffff;
 }
 
 QLabel[validationError="true"] {
@@ -591,6 +678,11 @@ QPushButton[primaryChainAction="true"]:hover {
     background-color: #3477e7;
 }
 
+QPushButton[primaryChainAction="true"]:disabled {
+    background-color: #242b37;
+    color: #667184;
+}
+
 QPushButton[dangerChainAction="true"] {
     background-color: #42242b;
     border: 1px solid #74404a;
@@ -609,6 +701,58 @@ QPushButton[dangerChainAction="true"]:disabled {
     background-color: #20242d;
     border-color: #2b313d;
     color: #626b7a;
+}
+
+QPushButton:focus,
+QToolButton:focus {
+    border: 2px solid #73b7ff;
+}
+
+QToolTip {
+    background-color: #222936;
+    border: 1px solid #52617a;
+    color: #eef2f8;
+    padding: 4px 6px;
+}
+
+QScrollBar:vertical {
+    background-color: #151a23;
+    margin: 2px;
+    width: 10px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #465267;
+    border-radius: 4px;
+    min-height: 28px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #60708a;
+}
+
+QScrollBar:horizontal {
+    background-color: #151a23;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #465267;
+    border-radius: 4px;
+    min-width: 28px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #60708a;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+    border: 0;
 }
 
 QFrame[orderFormDivider="true"] {

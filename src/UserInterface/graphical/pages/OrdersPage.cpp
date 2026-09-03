@@ -2,6 +2,7 @@
 
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
+#include "graphical/StatusPresentation.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
 #include "graphical/models/OrderSessionModel.hpp"
@@ -916,6 +917,7 @@ void OrdersPage::updateCatalogStatus(ExchangerType exchangerType, QLabel &status
     const UiTaskState &loadState = pairCatalog.getLoadState(exchangerType);
     const qsizetype pairCount = static_cast<qsizetype>(pairCatalog.getPairs(exchangerType).size());
     QString status;
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
 
     switch (loadState.getStatus())
     {
@@ -924,16 +926,20 @@ void OrdersPage::updateCatalogStatus(ExchangerType exchangerType, QLabel &status
         break;
     case UiTaskState::Status::LOADING:
         status = "Loading tradable pairs...";
+        presentation = StatusPresentation::LOADING;
         break;
     case UiTaskState::Status::SUCCEEDED:
         status = pairCount == 0
                      ? "No tradable pairs available"
                      : QString("%1 tradable %2 available").arg(pairCount).arg(pairCount == 1 ? "pair" : "pairs");
+        presentation = pairCount == 0 ? StatusPresentation::WARNING : StatusPresentation::SUCCESS;
         break;
     case UiTaskState::Status::FAILED:
         status = "Unable to load pairs: " + loadState.getError();
+        presentation = StatusPresentation::ERROR;
         break;
     }
 
     statusLabel.setText(exchangeName + ": " + status);
+    applyStatusPresentation(statusLabel, presentation);
 }

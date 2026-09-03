@@ -2,6 +2,7 @@
 
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
+#include "graphical/StatusPresentation.hpp"
 #include "graphical/async/UiTaskState.hpp"
 #include "graphical/models/BalanceCatalog.hpp"
 
@@ -194,6 +195,7 @@ void AccountsPage::updateExchange(ExchangerType exchangerType)
     const UiTaskState &loadState = balanceCatalog.getLoadState(exchangerType);
     const QString exchangeName = getExchangeName(exchangerType);
     const bool hasSuccessfulSnapshot = balanceCatalog.hasSuccessfulSnapshot(exchangerType);
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
     view.refreshButton->setEnabled(!loadState.isLoading());
 
     switch (loadState.getStatus())
@@ -205,19 +207,23 @@ void AccountsPage::updateExchange(ExchangerType exchangerType)
         view.status->setText(hasSuccessfulSnapshot ? "Refreshing " + exchangeName +
                                                          " balances. The latest cached snapshot remains visible."
                                                    : "Loading " + exchangeName + " balances...");
+        presentation = StatusPresentation::LOADING;
         break;
     case UiTaskState::Status::SUCCEEDED:
         view.status->setText(balanceCatalog.getBalances(exchangerType).empty()
                                  ? exchangeName + " returned an empty balance snapshot."
                                  : exchangeName + " balances are ready.");
+        presentation = StatusPresentation::SUCCESS;
         break;
     case UiTaskState::Status::FAILED:
         view.status->setText(
             hasSuccessfulSnapshot
                 ? exchangeName + " balance refresh failed. Showing the latest cached snapshot: " + loadState.getError()
                 : exchangeName + " balances are unavailable: " + loadState.getError());
+        presentation = hasSuccessfulSnapshot ? StatusPresentation::WARNING : StatusPresentation::ERROR;
         break;
     }
+    applyStatusPresentation(*view.status, presentation);
 
     updateLiveStatus(exchangerType);
     updateBalanceRows(exchangerType);
@@ -228,6 +234,7 @@ void AccountsPage::updateLiveStatus(ExchangerType exchangerType)
     ExchangeView &view = getExchangeView(exchangerType);
     const QString exchangeName = getExchangeName(exchangerType);
     const QString error = balanceCatalog.getLiveUpdateError(exchangerType);
+    StatusPresentation presentation = StatusPresentation::NEUTRAL;
     switch (balanceCatalog.getLiveUpdateStatus(exchangerType))
     {
     case BalanceCatalog::LiveUpdateStatus::IDLE:
@@ -237,23 +244,28 @@ void AccountsPage::updateLiveStatus(ExchangerType exchangerType)
         view.liveStatus->setText(error.isEmpty()
                                      ? "Starting " + exchangeName + " live balance updates..."
                                      : "Restarting " + exchangeName + " live balance updates after: " + error);
+        presentation = error.isEmpty() ? StatusPresentation::LOADING : StatusPresentation::WARNING;
         break;
     case BalanceCatalog::LiveUpdateStatus::CONNECTING:
         view.liveStatus->setText("Connecting " + exchangeName + " live balance updates...");
+        presentation = StatusPresentation::LOADING;
         break;
     case BalanceCatalog::LiveUpdateStatus::CONNECTED:
         view.liveStatus->setText(exchangeName + " live balance updates are connected.");
+        presentation = StatusPresentation::SUCCESS;
         break;
     case BalanceCatalog::LiveUpdateStatus::RETRY_WAITING:
         view.liveStatus->setText(
             error.isEmpty()
                 ? exchangeName + " live balance updates stopped unexpectedly. Reconnecting automatically..."
                 : exchangeName + " live balance updates are unavailable: " + error + ". Reconnecting automatically...");
+        presentation = StatusPresentation::WARNING;
         break;
     case BalanceCatalog::LiveUpdateStatus::STOPPED:
         view.liveStatus->setText(exchangeName + " live balance updates are stopped.");
         break;
     }
+    applyStatusPresentation(*view.liveStatus, presentation);
 }
 
 void AccountsPage::updateBalanceRows(ExchangerType exchangerType)

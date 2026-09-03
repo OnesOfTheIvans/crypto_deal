@@ -155,11 +155,13 @@ TEST(AccountsPageTest, PresentsIndependentLoadingFailureAndEmptyStates)
 
     QTRY_COMPARE_WITH_TIMEOUT(binanceStarted.load(), 1, 1000);
     EXPECT_EQ(binanceStatus->text(), QString("Loading Binance balances..."));
+    EXPECT_EQ(binanceStatus->property("statusPresentation").toString(), QString("loading"));
     EXPECT_FALSE(binanceRefresh->isEnabled());
     QTRY_COMPARE_WITH_TIMEOUT(balanceCatalog.getLoadState(ExchangerType::BYBIT).getStatus(),
                               UiTaskState::Status::FAILED,
                               1000);
     EXPECT_EQ(bybitStatus->text(), QString("Bybit balances are unavailable: Bybit startup failure"));
+    EXPECT_EQ(bybitStatus->property("statusPresentation").toString(), QString("error"));
     EXPECT_EQ(bybitEmptyState->text(), QString("A successful Bybit balance snapshot is not available yet."));
     EXPECT_TRUE(bybitRefresh->isEnabled());
 
@@ -169,6 +171,7 @@ TEST(AccountsPageTest, PresentsIndependentLoadingFailureAndEmptyStates)
                               UiTaskState::Status::SUCCEEDED,
                               1000);
     EXPECT_EQ(bybitStatus->text(), QString("Bybit returned an empty balance snapshot."));
+    EXPECT_EQ(bybitStatus->property("statusPresentation").toString(), QString("success"));
     EXPECT_EQ(bybitEmptyState->text(), QString("No balances were returned for Bybit."));
     EXPECT_EQ(bybitService->getBalanceRequestCount(), 2u);
 
@@ -177,6 +180,7 @@ TEST(AccountsPageTest, PresentsIndependentLoadingFailureAndEmptyStates)
                               UiTaskState::Status::SUCCEEDED,
                               1000);
     EXPECT_EQ(binanceStatus->text(), QString("Binance balances are ready."));
+    EXPECT_EQ(binanceStatus->property("statusPresentation").toString(), QString("success"));
     EXPECT_EQ(binanceEmptyState->text(), QString("No non-zero balances were returned for Binance."));
 }
 
@@ -293,6 +297,8 @@ TEST(AccountsPageTest, AppliesLiveRowsAndPresentsIndependentStreamFailure)
     balanceCatalog.startLiveUpdates();
     QTRY_COMPARE_WITH_TIMEOUT(binanceLiveStatus->text(), QString("Binance live balance updates are connected."), 1000);
     QTRY_COMPARE_WITH_TIMEOUT(bybitLiveStatus->text(), QString("Bybit live balance updates are connected."), 1000);
+    EXPECT_EQ(binanceLiveStatus->property("statusPresentation").toString(), QString("success"));
+    EXPECT_EQ(bybitLiveStatus->property("statusPresentation").toString(), QString("success"));
 
     binanceService->publishBalanceUpdate(createBalance("BTC", "0", "0"));
     binanceService->publishBalanceUpdate(createBalance("ETH", "3.5", "0.25"));
@@ -305,5 +311,6 @@ TEST(AccountsPageTest, AppliesLiveRowsAndPresentsIndependentStreamFailure)
         bybitLiveStatus->text(),
         QString("Bybit live balance updates are unavailable: Bybit socket read failed. Reconnecting automatically..."),
         1000);
+    EXPECT_EQ(bybitLiveStatus->property("statusPresentation").toString(), QString("warning"));
     EXPECT_EQ(binanceLiveStatus->text(), QString("Binance live balance updates are connected."));
 }
