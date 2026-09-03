@@ -3,6 +3,7 @@
 #include "TestDealService.hpp"
 #include "common/OrderWaitInterrupted.hpp"
 #include "graphical/models/OperationChainRunModel.hpp"
+#include "graphical/widgets/OperationChainRunInspector.hpp"
 
 #include <QApplication>
 #include <QLabel>
@@ -238,6 +239,9 @@ TEST(OperationChainsPageTest, ShowsSeparateEmptyDefinitionAndSessionRunStates)
     page.show();
     QApplication::processEvents();
 
+    EXPECT_LE(page.minimumSizeHint().height(), 640);
+    EXPECT_EQ(page.height(), 640);
+
     auto *definitionsTable = page.findChild<QTableWidget *>("operationChainDefinitionsTable");
     auto *runsTable = page.findChild<QTableWidget *>("operationChainRunsTable");
     auto *definitionsEmptyState = page.findChild<QLabel *>("operationChainDefinitionsEmptyState");
@@ -462,4 +466,66 @@ TEST(OperationChainsPageTest, PreservesExactCancellationFailureAndReportsSynchro
     QTRY_COMPARE(runsTable->rowCount(), 1);
     QTRY_COMPARE(runsTable->item(0, 6)->text(), QString("Planned chain cancellation failure"));
     EXPECT_EQ(runsTable->cellWidget(0, 7), nullptr);
+}
+
+TEST(OperationChainsPageTest, PreservesRunSelectionAcrossReorderingAndPinsItAfterFilterExit)
+{
+    getApplication();
+    auto binanceService = make_shared<ControllableChainDealService>(ExchangerType::BINANCE);
+    auto bybitService = make_shared<TestDealService>(ExchangerType::BYBIT);
+    OperationChainRunManager manager({createBuyDefinition("Selection chain")}, binanceService, bybitService);
+    WorkReleaseGuard releaseGuard(binanceService);
+    OperationChainRunModel model(manager);
+    OperationChainsPage page(model);
+    page.show();
+    QApplication::processEvents();
+
+    auto *startButton = page.findChild<QPushButton *>("startOperationChainButton");
+    auto *runsTable = page.findChild<QTableWidget *>("operationChainRunsTable");
+    auto *inspector = page.findChild<OperationChainRunInspector *>("operationChainRunInspector");
+    ASSERT_NE(startButton, nullptr);
+    ASSERT_NE(runsTable, nullptr);
+    ASSERT_NE(inspector, nullptr);
+
+    clickConfirmationButton(*startButton,
+                            "startOperationChainConfirmationDialog",
+                            "confirmOperationChainStartButton",
+                            "keepOperationChainIdleButton");
+    QTRY_COMPARE(model.getRuns(OperationChainRunFilter::ACTIVE).size(), size_t{1});
+    QTRY_VERIFY(inspector->getSelectedRunId().has_value() && inspector->getSelectedRunId().value() == 1);
+
+    clickConfirmationButton(*startButton,
+                            "startOperationChainConfirmationDialog",
+                            "confirmOperationChainStartButton",
+                            "keepOperationChainIdleButton");
+    QTRY_COMPARE(model.getRuns(OperationChainRunFilter::ACTIVE).size(), size_t{2});
+    QTRY_COMPARE(runsTable->rowCount(), 2);
+    QTRY_VERIFY(runsTable->item(0, 0) != nullptr && runsTable->item(0, 0)->text().contains("Run #2"));
+    QTRY_VERIFY(runsTable->item(1, 0) != nullptr && runsTable->item(1, 0)->text().contains("Run #1"));
+    EXPECT_TRUE(inspector->getSelectedRunId().has_value());
+    EXPECT_EQ(inspector->getSelectedRunId().value(), OperationChainRunId{1});
+    EXPECT_EQ(runsTable->currentRow(), 1);
+
+    runsTable->selectRow(0);
+    QApplication::processEvents();
+    ASSERT_TRUE(inspector->getSelectedRunId().has_value());
+    EXPECT_EQ(inspector->getSelectedRunId().value(), OperationChainRunId{2});
+
+    EXPECT_TRUE(model.requestRunCancellation(2));
+    QTRY_VERIFY(binanceService->hasCancellationStarted());
+    binanceService->allowCancellationToFinish();
+    QTRY_VERIFY(model.getRun(2).has_value() &&
+                model.getRun(2)->chainSnapshot.status == OperationChainStatus::CANCELLED);
+    QTRY_COMPARE(runsTable->rowCount(), 1);
+    EXPECT_TRUE(inspector->getSelectedRunId().has_value());
+    EXPECT_EQ(inspector->getSelectedRunId().value(), OperationChainRunId{2});
+    EXPECT_EQ(runsTable->currentRow(), -1);
+
+    auto *notice = inspector->findChild<QLabel *>("operationChainRunInspectorNotice");
+    ASSERT_NE(notice, nullptr);
+    EXPECT_FALSE(notice->isHidden());
+    EXPECT_TRUE(notice->text().contains("no longer matches Filter: Active"));
+    QToolButton *stepButton = inspector->findChild<QToolButton *>("operationChainStepButton");
+    ASSERT_NE(stepButton, nullptr);
+    EXPECT_EQ(stepButton->property("operationChainStepState").toString(), QString("cancelled"));
 }

@@ -8,13 +8,16 @@
 #include <QWidget>
 
 #include <cstddef>
+#include <optional>
 #include <string>
+#include <vector>
 
 class QLabel;
 class QListWidget;
 class QTableWidget;
 class QToolButton;
 class OperationChainRunModel;
+class OperationChainRunInspector;
 
 class OperationChainsPage final : public QWidget
 {
@@ -27,6 +30,8 @@ class OperationChainsPage final : public QWidget
     QListWidget *runFilterList;
     QTableWidget *definitionsTable;
     QTableWidget *runsTable;
+    OperationChainRunInspector *runInspector;
+    std::optional<OperationChainRunId> selectedRunId;
 
     void createLayout();
 
@@ -38,11 +43,17 @@ class OperationChainsPage final : public QWidget
 
     void updateRuns();
 
+    void selectRunFromTable();
+
+    void updateRunInspector(const std::vector<OperationChainRunSnapshot> &visibleRuns);
+
     void updateRunFilterToggle();
 
     void setRunFilterExpanded(bool expanded);
 
     OperationChainRunFilter getSelectedRunFilter() const;
+
+    std::optional<OperationChainRunId> getSelectedTableRunId() const;
 
     void populateRunRow(std::size_t row, const OperationChainRunSnapshot &run);
 

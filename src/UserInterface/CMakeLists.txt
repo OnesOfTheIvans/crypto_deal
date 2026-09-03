@@ -20,6 +20,7 @@ add_library(GraphicalUserInterfaceLib
     graphical/pages/OrdersPage.cpp
     graphical/validation/OrderInputValidation.cpp
     graphical/widgets/DecimalInputField.cpp
+    graphical/widgets/OperationChainRunInspector.cpp
     graphical/widgets/OrderConfirmationDialog.cpp
     graphical/widgets/OrderEntryForm.cpp
 )

@@ -3,6 +3,7 @@
 #include "common/DecimalConverter.hpp"
 #include "graphical/GuiLayoutConstants.hpp"
 #include "graphical/models/OperationChainRunModel.hpp"
+#include "graphical/widgets/OperationChainRunInspector.hpp"
 
 #include <QAbstractItemView>
 #include <QDateTime>
@@ -13,7 +14,9 @@
 #include <QListWidgetItem>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSize>
+#include <QSplitter>
 #include <QString>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -41,6 +44,8 @@ namespace {
     constexpr int CHAIN_FILTER_PANEL_WIDTH = 136;
     constexpr int CHAIN_FILTER_ITEM_HEIGHT = 30;
     constexpr int CHAIN_FILTER_LIST_VERTICAL_PADDING = 10;
+    constexpr int CHAIN_RUN_SUMMARY_INITIAL_HEIGHT = 160;
+    constexpr int CHAIN_RUN_INSPECTOR_INITIAL_HEIGHT = 220;
 
     enum class DefinitionColumn
     {
@@ -180,7 +185,7 @@ namespace {
 OperationChainsPage::OperationChainsPage(OperationChainRunModel &runModel, QWidget *parent)
     : QWidget(parent), runModel(runModel), actionError(nullptr), definitionsEmptyState(nullptr),
       runsEmptyState(nullptr), runFilterToggle(nullptr), runFilterList(nullptr), definitionsTable(nullptr),
-      runsTable(nullptr)
+      runsTable(nullptr), runInspector(nullptr)
 {
     setObjectName("operationChainsPage");
     setProperty("primaryPage", true);
@@ -351,16 +356,30 @@ QWidget *OperationChainsPage::createRunsSection()
     runsTable->horizontalHeader()->setSectionResizeMode(static_cast<int>(RunColumn::ACTION),
                                                         QHeaderView::ResizeToContents);
 
+    auto *runsSummary = new QWidget(section);
+    runsSummary->setObjectName("operationChainRunSummary");
+    auto *runsSummaryLayout = new QVBoxLayout(runsSummary);
+    runsSummaryLayout->setContentsMargins(0, 0, 0, 0);
+    runsSummaryLayout->setSpacing(0);
+    runsSummaryLayout->addWidget(runsEmptyState, 1);
+    runsSummaryLayout->addWidget(runsTable, 1);
+
+    runInspector = new OperationChainRunInspector(section);
+
+    auto *runsSplitter = new QSplitter(Qt::Vertical, section);
+    runsSplitter->setObjectName("operationChainRunsSplitter");
+    runsSplitter->setChildrenCollapsible(false);
+    runsSplitter->addWidget(runsSummary);
+    runsSplitter->addWidget(runInspector);
+    runsSplitter->setStretchFactor(0, 1);
+    runsSplitter->setStretchFactor(1, 1);
+    runsSplitter->setSizes({CHAIN_RUN_SUMMARY_INITIAL_HEIGHT, CHAIN_RUN_INSPECTOR_INITIAL_HEIGHT});
+
     auto *runsContentLayout = new QHBoxLayout;
     runsContentLayout->setContentsMargins(0, 0, 0, 0);
     runsContentLayout->setSpacing(CHAIN_SECTION_SPACING);
-    auto *runsViewLayout = new QVBoxLayout;
-    runsViewLayout->setContentsMargins(0, 0, 0, 0);
-    runsViewLayout->setSpacing(0);
-    runsViewLayout->addWidget(runsEmptyState, 1);
-    runsViewLayout->addWidget(runsTable, 1);
     runsContentLayout->addWidget(runFilterPanel);
-    runsContentLayout->addLayout(runsViewLayout, 1);
+    runsContentLayout->addWidget(runsSplitter, 1);
 
     connect(runFilterToggle, &QToolButton::toggled, this, &OperationChainsPage::setRunFilterExpanded);
     connect(runFilterList,
@@ -376,6 +395,7 @@ QWidget *OperationChainsPage::createRunsSection()
             &QListWidget::itemClicked,
             this,
             [this](QListWidgetItem *) { runFilterToggle->setChecked(false); });
+    connect(runsTable, &QTableWidget::itemSelectionChanged, this, &OperationChainsPage::selectRunFromTable);
     updateRunFilterToggle();
     setRunFilterExpanded(false);
 
@@ -437,6 +457,7 @@ void OperationChainsPage::updateRuns()
 {
     const OperationChainRunFilter filter = getSelectedRunFilter();
     const vector<OperationChainRunSnapshot> runs = runModel.getRuns(filter);
+    const QSignalBlocker signalBlocker(runsTable);
     runsTable->setRowCount(0);
     runsTable->setRowCount(static_cast<int>(runs.size()));
     runsTable->setVisible(!runs.empty());
@@ -447,6 +468,76 @@ void OperationChainsPage::updateRuns()
     {
         populateRunRow(row, runs[row]);
     }
+
+    int selectedRow = -1;
+    if (!selectedRunId.has_value() && !runs.empty())
+    {
+        selectedRunId = runs.front().runId;
+    }
+    if (selectedRunId.has_value())
+    {
+        for (size_t row = 0; row < runs.size(); ++row)
+        {
+            if (runs[row].runId == selectedRunId.value())
+            {
+                selectedRow = static_cast<int>(row);
+                break;
+            }
+        }
+    }
+    if (selectedRow >= 0)
+    {
+        runsTable->selectRow(selectedRow);
+    }
+    updateRunInspector(runs);
+}
+
+void OperationChainsPage::selectRunFromTable()
+{
+    const optional<OperationChainRunId> runId = getSelectedTableRunId();
+    if (!runId.has_value())
+    {
+        return;
+    }
+
+    selectedRunId = runId.value();
+    updateRunInspector(runModel.getRuns(getSelectedRunFilter()));
+}
+
+void OperationChainsPage::updateRunInspector(const vector<OperationChainRunSnapshot> &visibleRuns)
+{
+    if (!selectedRunId.has_value())
+    {
+        runInspector->setRun(nullopt);
+        return;
+    }
+
+    const optional<OperationChainRunSnapshot> run = runModel.getRun(selectedRunId.value());
+    if (!run.has_value())
+    {
+        selectedRunId.reset();
+        runInspector->setRun(nullopt);
+        return;
+    }
+
+    bool isVisible = false;
+    for (const OperationChainRunSnapshot &visibleRun : visibleRuns)
+    {
+        if (visibleRun.runId == selectedRunId.value())
+        {
+            isVisible = true;
+            break;
+        }
+    }
+
+    QString notice;
+    if (!isVisible)
+    {
+        const QListWidgetItem *filterItem = runFilterList->currentItem();
+        const QString filterName = filterItem == nullptr ? QString("Active") : filterItem->text();
+        notice = "This selected run is pinned because it no longer matches Filter: " + filterName + ".";
+    }
+    runInspector->setRun(run, notice);
 }
 
 void OperationChainsPage::updateRunFilterToggle()
@@ -471,14 +562,33 @@ OperationChainRunFilter OperationChainsPage::getSelectedRunFilter() const
     return static_cast<OperationChainRunFilter>(item->data(Qt::UserRole).toInt());
 }
 
+optional<OperationChainRunId> OperationChainsPage::getSelectedTableRunId() const
+{
+    const int row = runsTable->currentRow();
+    if (row < 0)
+    {
+        return nullopt;
+    }
+
+    const QTableWidgetItem *item = runsTable->item(row, static_cast<int>(RunColumn::RUN));
+    if (item == nullptr)
+    {
+        return nullopt;
+    }
+
+    bool isValid = false;
+    const OperationChainRunId runId = item->data(Qt::UserRole).toULongLong(&isValid);
+    return isValid ? optional<OperationChainRunId>{runId} : nullopt;
+}
+
 void OperationChainsPage::populateRunRow(size_t row, const OperationChainRunSnapshot &run)
 {
     const int tableRow = static_cast<int>(row);
     const OperationChainSnapshot &snapshot = run.chainSnapshot;
-    runsTable->setItem(
-        tableRow,
-        static_cast<int>(RunColumn::RUN),
-        createTableItem(QString::fromStdString(snapshot.definitionName) + "\nRun #" + QString::number(run.runId)));
+    auto *runItem =
+        createTableItem(QString::fromStdString(snapshot.definitionName) + "\nRun #" + QString::number(run.runId));
+    runItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(run.runId));
+    runsTable->setItem(tableRow, static_cast<int>(RunColumn::RUN), runItem);
     runsTable->setItem(tableRow, static_cast<int>(RunColumn::STATUS), createTableItem(formatRunStatus(run)));
     runsTable->setItem(tableRow,
                        static_cast<int>(RunColumn::INITIAL_CONTEXT),

@@ -69,6 +69,7 @@ add_executable(GraphicalUserInterfaceTests
     BalanceCatalogTest.cpp
     GraphicalUserInterfaceTest.cpp
     OperationChainRunFilterTest.cpp
+    OperationChainRunInspectorTest.cpp
     OperationChainsPageTest.cpp
     OrderEntryFormTest.cpp
     OrderInputValidationTest.cpp
