@@ -3,14 +3,17 @@
 
 #include "ExchangerType.hpp"
 #include "common/StreamStatus.hpp"
+#include "common/UserStreamEventHandlers.hpp"
 #include "common/domain/AssetBalance.hpp"
 #include "common/domain/OcoInfo.hpp"
+#include "common/domain/OcoWaitResult.hpp"
 #include "common/domain/OrderInfo.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderQuery.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/PlaceOrderRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "common/domain/TradablePair.hpp"
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -20,15 +23,22 @@
 
 #include <atomic>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
+#include <stop_token>
 #include <string>
 #include <thread>
+#include <vector>
 
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
 class DealService
 {
+  private:
+    std::mutex userStreamEventHandlersMutex;
+    UserStreamEventHandlers userStreamEventHandlers;
+
   protected:
     boost::asio::io_context ioc;
     boost::asio::ssl::context ctx;
@@ -44,6 +54,10 @@ class DealService
     std::string hmac_sha256(const std::string &key, const std::string &data) const;
 
     void setUrlParameters(boost::urls::url &url, const std::map<std::string, std::string> &params) const;
+
+    void notifyBalanceCacheChanged();
+
+    void notifyUserStreamStatusChanged();
 
     template <typename T>
     void setParameterIfPresent(std::map<std::string, std::string> &parameterMap,
@@ -75,7 +89,12 @@ class DealService
 
     virtual OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) = 0;
 
-    virtual OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
+    virtual OrderInfo
+    waitUntilOrderFilled(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
+
+    virtual OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) = 0;
+
+    virtual OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, std::stop_token stopToken);
 
     virtual flat_map<std::string, AssetBalance> getBalances() const = 0;
 
@@ -93,9 +112,15 @@ class DealService
 
     virtual OrderInfo cancelOrder(const OrderQuery &request) = 0;
 
+    virtual OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request) = 0;
+
+    virtual OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request, std::stop_token stopToken);
+
     virtual OrderInfo getOrder(const OrderQuery &request) = 0;
 
     virtual SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory category = OrderCategory::SPOT) = 0;
+
+    virtual std::vector<TradablePair> getTradablePairs() = 0;
 
     virtual Decimal
     ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory category = OrderCategory::SPOT) = 0;
@@ -104,9 +129,17 @@ class DealService
 
     virtual void cancelOco(const OrderListQuery &request) = 0;
 
+    virtual OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) = 0;
+
+    virtual OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, std::stop_token stopToken);
+
     virtual void cancelAllOpenOrders(const std::string &symbol, OrderCategory category) = 0;
 
     virtual flat_map<std::string, AssetBalance> getBalancesRest() = 0;
+
+    void setUserStreamEventHandlers(UserStreamEventHandlers handlers);
+
+    void clearUserStreamEventHandlers();
 
     ExchangerType getExchangerType() const;
 

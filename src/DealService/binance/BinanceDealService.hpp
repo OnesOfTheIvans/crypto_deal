@@ -11,6 +11,7 @@
 #include "common/domain/OrderType.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
 #include "common/domain/SymbolInfo.hpp"
+#include "common/domain/TradablePair.hpp"
 #include "domain/AccountBalanceDto.hpp"
 #include "domain/OcoDto.hpp"
 #include "domain/OrderDto.hpp"
@@ -27,6 +28,7 @@
 #include <boost/json.hpp>
 
 #include <condition_variable>
+#include <cstddef>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -47,6 +49,13 @@ class BinanceDealService : public DealService
 {
   private:
     using OrderKey = std::pair<std::string, std::string>;
+
+    struct PendingOrderWait
+    {
+        std::optional<OrderInfo> orderInfo;
+        std::size_t registrationCount = 0;
+    };
+
     using PendingOrderUpdate = std::optional<OrderInfo>;
 
     class PendingOrderRegistration
@@ -78,12 +87,12 @@ class BinanceDealService : public DealService
     std::string streamLastError;
     mutable std::mutex streamStatusMutex;
 
-    std::map<OrderKey, PendingOrderUpdate> pendingOrderWaits;
+    std::map<OrderKey, PendingOrderWait> pendingOrderWaits;
     std::mutex pendingOrderWaitsMutex;
-    std::condition_variable orderUpdateCondition;
+    std::condition_variable_any orderUpdateCondition;
     std::mutex streamLifecycleMutex;
 
-    long long serverTimeOffset = 0;
+    std::atomic<long long> serverTimeOffset{0};
     std::atomic<long long> lastSyncMonoMs{0};
     std::mutex timeSyncMutex;
 
@@ -103,9 +112,9 @@ class BinanceDealService : public DealService
 
     Decimal getTickerPrice(const std::string &symbol);
 
-    bool isQuantityStepValid(Decimal quantity, Decimal stepSize) const;
-
     std::optional<std::string> validateQuantity(Decimal quantity, Decimal price, const SymbolInfo &info) const;
+
+    std::optional<std::string> validatePrice(Decimal price, const SymbolInfo &info) const;
 
     void validatePlaceOrderRequest(const PlaceOrderRequest &request) const;
 
@@ -141,6 +150,10 @@ class BinanceDealService : public DealService
 
     std::shared_ptr<WebsocketStream> prepareUserWebsocketStream();
 
+    void startUserStreamConcurrent();
+
+    void stopUserStreamConcurrent();
+
     OrderInfo createOrderInfo(const binance::OrderDto &order);
 
     SymbolInfo createSymbolInfo(const binance::SymbolDto &symbol);
@@ -161,8 +174,10 @@ class BinanceDealService : public DealService
 
     const PendingOrderUpdate &getPendingOrderUpdate(const OrderKey &orderKey) const
     {
-        return pendingOrderWaits.at(orderKey);
+        return pendingOrderWaits.at(orderKey).orderInfo;
     }
+
+    PendingOrderUpdate getPendingOrderUpdate(const std::string &symbol, const std::string &orderId);
 
     void publishOrderUpdate(const OrderInfo &orderInfo);
 
@@ -172,7 +187,12 @@ class BinanceDealService : public DealService
 
     void prepareOrderSubscription(const std::string &symbol, const std::string &orderId);
 
-    PendingOrderUpdate waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId);
+    PendingOrderUpdate
+    waitForOrderTerminalStatus(const std::string &symbol, const std::string &orderId, std::stop_token stopToken);
+
+    OrderInfo processOrderCancellationUpdate(const std::string &symbol,
+                                             const std::string &orderId,
+                                             const PendingOrderUpdate &pendingUpdate);
 
     OrderInfo
     processOrderUpdate(const std::string &symbol, const std::string &orderId, const PendingOrderUpdate &pendingUpdate);
@@ -181,13 +201,24 @@ class BinanceDealService : public DealService
 
     void waitForOcoTerminalStatus(const OcoInfo &ocoInfo,
                                   PendingOrderUpdate &takeProfitUpdate,
-                                  PendingOrderUpdate &stopLossUpdate);
+                                  PendingOrderUpdate &stopLossUpdate,
+                                  std::stop_token stopToken);
 
-    OrderInfo processOcoOrdersUpdate(const OcoInfo &ocoInfo,
-                                     const PendingOrderUpdate &takeProfitUpdate,
-                                     const PendingOrderUpdate &stopLossUpdate);
+    void waitForOcoCancellationTerminalStatus(const OcoInfo &ocoInfo,
+                                              PendingOrderUpdate &takeProfitUpdate,
+                                              PendingOrderUpdate &stopLossUpdate,
+                                              std::stop_token stopToken);
 
-    OrderInfo reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
+    PendingOrderUpdate
+    waitForOcoSiblingTerminalStatus(const OrderInfo &filledOrder, const OcoInfo &ocoInfo, std::stop_token stopToken);
+
+    OcoWaitResult processOcoOrdersUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderUpdate &takeProfitUpdate,
+                                         const PendingOrderUpdate &stopLossUpdate,
+                                         std::stop_token stopToken);
+
+    OcoWaitResult
+    reconcileOcoAfterUnfilledTerminalChild(const OcoInfo &ocoInfo, bool isTakeProfitFailed, std::stop_token stopToken);
 
     std::optional<std::string> reconcileOcoSiblingOrder(const OcoInfo &ocoInfo, bool isTakeProfitFailed);
 
@@ -197,6 +228,17 @@ class BinanceDealService : public DealService
                                                              const std::optional<std::string> &reconciliationError);
 
     std::optional<std::string> cancelOcoAfterFailure(const OcoInfo &ocoInfo);
+
+    OcoWaitResult completeOcoWait(const OcoInfo &ocoInfo, const OrderInfo &filledOrder, std::stop_token stopToken);
+
+    OcoInfo
+    createTerminalOcoInfo(const OcoInfo &ocoInfo, const OrderInfo &firstOrder, const OrderInfo &secondOrder) const;
+
+    std::optional<OcoInfo> getTerminalOcoInfo(const OcoInfo &ocoInfo);
+
+    OcoInfo processOcoCancellationUpdate(const OcoInfo &ocoInfo,
+                                         const PendingOrderUpdate &takeProfitUpdate,
+                                         const PendingOrderUpdate &stopLossUpdate);
 
     [[noreturn]] void throwOrderWaitFailure(const OrderInfo &orderInfo) const;
 
@@ -233,7 +275,12 @@ class BinanceDealService : public DealService
 
     OrderInfo waitUntilOrderFilled(const std::string &symbol, const std::string &orderId) override;
 
-    OrderInfo waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
+    OrderInfo
+    waitUntilOrderFilled(const std::string &symbol, const std::string &orderId, std::stop_token stopToken) override;
+
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo) override;
+
+    OcoWaitResult waitUntilOcoOrderFilled(const OcoInfo &ocoInfo, std::stop_token stopToken) override;
 
     flat_map<std::string, AssetBalance> getBalances() const override;
 
@@ -245,9 +292,15 @@ class BinanceDealService : public DealService
 
     OrderInfo cancelOrder(const OrderQuery &request) override;
 
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request) override;
+
+    OrderInfo cancelOrderAndWaitUntilTerminal(const OrderQuery &request, std::stop_token stopToken) override;
+
     OrderInfo getOrder(const OrderQuery &request) override;
 
     SymbolInfo getSymbolInfo(const std::string &symbol, OrderCategory = OrderCategory::SPOT) override;
+
+    std::vector<TradablePair> getTradablePairs() override;
 
     Decimal
     ceilQuantityToStep(const std::string &symbol, Decimal quantity, OrderCategory = OrderCategory::SPOT) override;
@@ -255,6 +308,10 @@ class BinanceDealService : public DealService
     OcoInfo placeOco(const PlaceOcoRequest &request) override;
 
     void cancelOco(const OrderListQuery &request) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo) override;
+
+    OcoInfo cancelOcoAndWaitUntilTerminal(const OcoInfo &ocoInfo, std::stop_token stopToken) override;
 
     void stopUserStream() override;
 

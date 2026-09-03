@@ -1,57 +1,46 @@
-#include "DealService.hpp"
+#include "ApplicationConfigurationUtil.hpp"
+#include "OperationChainDefinitionLoader.hpp"
 #include "binance/BinanceDealService.hpp"
 #include "bybit/BybitDealService.hpp"
+#include "graphical/GraphicalUserInterface.hpp"
 
-// Boost.PropertyTree
-#include <boost/property_tree/ini_parser.hpp>
-#include <boost/property_tree/ptree.hpp>
+#include <QApplication>
+#include <QMessageBox>
+#include <QString>
 
-#include <cctype>
-#include <chrono>
-#include <cmath>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <thread>
+#include <utility>
 
 using namespace std;
 
-string binanceHost;
-string binanceApiKey;
-string binanceSecretKey;
-string binanceWebsocketHost;
-string bybitHost;
-string bybitApiKey;
-string bybitSecretKey;
-string bybitWebsocketHost;
-
-void initConfigVariables()
+int main(int argc, char *argv[])
 {
-    boost::property_tree::ptree pt;
-    boost::property_tree::ini_parser::read_ini(CONFIG_FILE, pt);
+    QApplication application(argc, argv);
 
-    binanceHost = pt.get<string>("API.BINANCE_HOST");
-    binanceApiKey = pt.get<string>("API.BINANCE_API_KEY");
-    binanceSecretKey = pt.get<string>("API.BINANCE_SECRET_KEY");
-    binanceWebsocketHost = pt.get<string>("API.BINANCE_WEBSOCKET_HOST");
-
-    bybitHost = pt.get<string>("API.BYBIT_HOST");
-    bybitApiKey = pt.get<string>("API.BYBIT_API_KEY");
-    bybitSecretKey = pt.get<string>("API.BYBIT_SECRET_KEY");
-    bybitWebsocketHost = pt.get<string>("API.BYBIT_WEBSOCKET_HOST");
-}
-
-int main()
-{
     try
     {
-        initConfigVariables();
+        auto operationChainDefinitions = OperationChainDefinitionLoader::load(OPERATION_CHAINS_FILE);
+        const ApplicationConfiguration configuration = loadApplicationConfiguration(CONFIG_FILE);
+        const auto binanceDealService = std::make_shared<BinanceDealService>(configuration.binance.host,
+                                                                             configuration.binance.apiKey,
+                                                                             configuration.binance.secretKey,
+                                                                             configuration.binance.websocketHost);
+        const auto bybitDealService = std::make_shared<BybitDealService>(configuration.bybit.host,
+                                                                         configuration.bybit.apiKey,
+                                                                         configuration.bybit.secretKey,
+                                                                         configuration.bybit.websocketHost);
+
+        GraphicalUserInterface userInterface(binanceDealService, bybitDealService, move(operationChainDefinitions));
+        return userInterface.run();
     }
-    catch (const exception &e)
+    catch (const std::exception &exception)
     {
-        cerr << "Unhandled exception in main: " << e.what() << endl;
+        const string errorMessage = "Application startup failed: " + string(exception.what());
+        cerr << errorMessage << endl;
+        QMessageBox::critical(nullptr, "CryptoDeal startup failed", QString::fromStdString(errorMessage));
         return 1;
     }
-
-    return 0;
 }

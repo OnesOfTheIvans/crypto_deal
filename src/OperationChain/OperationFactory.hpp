@@ -1,7 +1,7 @@
 #ifndef OPERATION_FACTORY_H
 #define OPERATION_FACTORY_H
 
-#include "OperationContext.hpp"
+#include "Operation.hpp"
 #include "OperationType.hpp"
 #include "config.hpp"
 
@@ -9,7 +9,6 @@
 
 #include <functional>
 
-using operation = std::function<void(OperationContext &)>;
 template <typename K, typename V> using flat_map = boost::container::flat_map<K, V>;
 
 class OperationFactory

@@ -4,19 +4,36 @@ add_executable(DealServiceUnitIntegrationTests
     MockHttpRequest.cpp
     MockHttpRequestContext.cpp
     DealServiceTest.cpp
+    OrderStatusUtilTest.cpp
+    SymbolRuleValidatorTest.cpp
+    TradablePairUtilTest.cpp
     BinanceDealServiceIntegrationTest.cpp
     BybitDealServiceIntegrationTest.cpp
+    DealServiceConcurrencyTest.cpp
     OperationFactoryTest.cpp
     OperationChainTest.cpp
+    OperationChainDefinitionLoaderTest.cpp
     OperationChainIntegrationTest.cpp
+    OperationChainRunManagerTest.cpp
     ../src/DealService/DealService.cpp
     ../src/DealService/binance/BinanceDealService.cpp
     ../src/DealService/bybit/BybitDealService.cpp
     ../src/DealService/common/DecimalConverter.cpp
+    ../src/DealService/common/OrderStatusUtil.cpp
+    ../src/DealService/common/SymbolRuleValidator.cpp
+    ../src/DealService/common/TradablePairUtil.cpp
     ../src/DealService/common/exception_handling.cpp
     ../src/OperationChain/ExchangerPull.cpp
+    ../src/OperationChain/DefaultSimulatedOperationChainRuns.cpp
+    ../src/OperationChain/OperationCancellationCoordinator.cpp
     ../src/OperationChain/OperationFactory.cpp
     ../src/OperationChain/OperationChain.cpp
+    ../src/OperationChain/OperationChainBuilder.cpp
+    ../src/OperationChain/OperationChainDefinition.cpp
+    ../src/OperationChain/OperationChainDefinitionLoader.cpp
+    ../src/OperationChain/OperationChainRunManager.cpp
+    ../src/OperationChain/OperationDefinition.cpp
+    ../src/OperationChain/SimulatedOperationChainRun.cpp
 )
 
 target_include_directories(DealServiceUnitIntegrationTests PRIVATE
@@ -35,3 +52,41 @@ target_link_libraries(DealServiceUnitIntegrationTests PRIVATE
 )
 
 add_test(NAME DealServiceUnitIntegrationTests COMMAND DealServiceUnitIntegrationTests)
+
+add_executable(ApplicationUnitTests
+    ApplicationConfigurationTest.cpp
+)
+
+target_link_libraries(ApplicationUnitTests PRIVATE
+    ApplicationLib
+    GTest::GTest
+    GTest::Main
+)
+
+add_test(NAME ApplicationUnitTests COMMAND ApplicationUnitTests)
+
+add_executable(GraphicalUserInterfaceTests
+    AccountsPageTest.cpp
+    AsyncTaskExecutorTest.cpp
+    BalanceCatalogTest.cpp
+    GraphicalUserInterfaceTest.cpp
+    OperationChainRunFilterTest.cpp
+    OperationChainRunInspectorTest.cpp
+    OperationChainsPageTest.cpp
+    OrderEntryFormTest.cpp
+    OrderInputValidationTest.cpp
+    OrderSessionModelTest.cpp
+    PairCatalogTest.cpp
+    StatusPresentationTest.cpp
+    SymbolInfoCatalogTest.cpp
+)
+
+target_link_libraries(GraphicalUserInterfaceTests PRIVATE
+    GraphicalUserInterfaceLib
+    GTest::GTest
+    GTest::Main
+    Qt6::Test
+)
+
+add_test(NAME GraphicalUserInterfaceTests COMMAND GraphicalUserInterfaceTests)
+set_tests_properties(GraphicalUserInterfaceTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -1,7 +1,15 @@
 add_library(OperationChainLib
+    DefaultSimulatedOperationChainRuns.cpp
+    OperationCancellationCoordinator.cpp
     OperationChain.cpp
+    OperationChainBuilder.cpp
+    OperationChainDefinition.cpp
+    OperationChainDefinitionLoader.cpp
+    OperationChainRunManager.cpp
+    OperationDefinition.cpp
     ExchangerPull.cpp
     OperationFactory.cpp
+    SimulatedOperationChainRun.cpp
 )
 
 target_include_directories(OperationChainLib
@@ -9,5 +17,7 @@ target_include_directories(OperationChainLib
 )
 
 target_link_libraries(OperationChainLib
-    PRIVATE DealLib
+    PRIVATE
+        Boost::json
+        DealLib
 )

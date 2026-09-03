@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "chains": [
+    {
+      "name": "Binance testnet BTC round trip",
+      "initial": {
+        "exchange": "BINANCE",
+        "asset": "USDT",
+        "quantity": "0.00010"
+      },
+      "operations": [
+        {
+          "type": "BUY_CRYPTO",
+          "config": {
+            "outAsset": "BTC"
+          }
+        },
+        {
+          "type": "SELL_CRYPTO",
+          "config": {
+            "outAsset": "USDT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bybit testnet BTC round trip",
+      "initial": {
+        "exchange": "BYBIT",
+        "asset": "USDT",
+        "quantity": "0.00010"
+      },
+      "operations": [
+        {
+          "type": "BUY_CRYPTO",
+          "config": {
+            "outAsset": "BTC"
+          }
+        },
+        {
+          "type": "SELL_CRYPTO",
+          "config": {
+            "outAsset": "USDT"
+          }
+        }
+      ]
+    }
+  ]
+}

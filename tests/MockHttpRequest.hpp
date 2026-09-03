@@ -2,8 +2,11 @@
 #define MOCK_HTTP_REQUEST_H
 
 #include "../src/DealService/common/HttpRequestContext.hpp"
+#include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <queue>
 #include <string>
 #include <vector>
@@ -27,6 +30,7 @@ class MockNetwork
 
     void reset()
     {
+        std::lock_guard<std::mutex> lock(mutex);
         responses.clear();
         requests.clear();
         defaultResponse = "{}";
@@ -34,16 +38,19 @@ class MockNetwork
 
     void setResponse(const std::string &targetSubstring, const std::string &response)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         responses[targetSubstring].push(response);
     }
 
     void setDefaultResponse(const std::string &response)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         defaultResponse = response;
     }
 
     std::string getResponse(const std::string &target)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         auto best = responses.end();
         for (auto it = responses.begin(); it != responses.end(); ++it)
         {
@@ -88,26 +95,56 @@ class MockNetwork
             recorded.headers.emplace(std::string(field.name_string()), std::string(field.value()));
         }
 
-        requests.push_back(recorded);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            requests.push_back(recorded);
+        }
+        requestCondition.notify_all();
     }
 
-    const std::vector<RecordedRequest> &getRequests() const
+    std::vector<RecordedRequest> getRequests() const
     {
+        std::lock_guard<std::mutex> lock(mutex);
         return requests;
     }
 
-    const RecordedRequest &lastRequest() const
+    RecordedRequest lastRequest() const
     {
+        std::lock_guard<std::mutex> lock(mutex);
         return requests.back();
     }
 
+    bool waitForRequestCount(const std::string &targetSubstring,
+                             std::size_t expectedCount,
+                             std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        return requestCondition.wait_for(lock,
+                                         timeout,
+                                         [this, &targetSubstring, expectedCount]()
+                                         {
+                                             std::size_t count = 0;
+                                             for (const RecordedRequest &request : requests)
+                                             {
+                                                 if (request.target.find(targetSubstring) != std::string::npos)
+                                                 {
+                                                     ++count;
+                                                 }
+                                             }
+                                             return count >= expectedCount;
+                                         });
+    }
+
   private:
+    mutable std::mutex mutex;
+    std::condition_variable requestCondition;
     std::map<std::string, std::queue<std::string>> responses;
     std::vector<RecordedRequest> requests;
     std::string defaultResponse = "{}";
 };
 
 std::string httpsGet(HttpRequestContext &context);
+
 std::string httpsPost(HttpRequestContext &context);
 
 #endif

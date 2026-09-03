@@ -1,0 +1,762 @@
+QMainWindow#cryptoDealWindow,
+QWidget#windowContent {
+    background-color: #12151c;
+    color: #eef2f8;
+}
+
+QWidget#primarySidebar {
+    background-color: #191d27;
+    border-right: 1px solid #2a303d;
+}
+
+QLabel#brandLabel {
+    color: #f7f9fc;
+    font-size: 23px;
+    font-weight: 700;
+}
+
+QLabel#brandDescription,
+QLabel#navigationLabel,
+QLabel#proofOfConceptLabel {
+    color: #737e92;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QPushButton[navigation="true"] {
+    background-color: transparent;
+    border: 0;
+    border-radius: 7px;
+    color: #aeb7c7;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0 14px;
+    text-align: left;
+}
+
+QPushButton[navigation="true"]:hover {
+    background-color: #222836;
+    color: #f4f7fb;
+}
+
+QPushButton[navigation="true"]:checked {
+    background-color: #2768d9;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+QStackedWidget#primaryPageStack,
+QWidget[primaryPage="true"] {
+    background-color: #12151c;
+}
+
+QLabel[pageTitle="true"] {
+    color: #f7f9fc;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+QLabel[pageDescription="true"] {
+    color: #929caf;
+    font-size: 14px;
+}
+
+QWidget[placeholderCard="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
+QWidget[orderCard="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
+QWidget[operationChainSection="true"] {
+    background-color: #191e28;
+    border: 1px solid #2b3240;
+    border-radius: 10px;
+}
+
+QLabel[operationChainSectionTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[operationChainSectionDescription="true"],
+QLabel[operationChainEmptyState="true"] {
+    color: #7f899b;
+    font-size: 12px;
+}
+
+QToolButton[operationChainRunFilterToggle="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #dbe2ed;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 30px;
+    padding: 2px 8px;
+    text-align: left;
+}
+
+QToolButton[operationChainRunFilterToggle="true"]:hover,
+QToolButton[operationChainRunFilterToggle="true"]:checked {
+    background-color: #222b39;
+    border-color: #3a4a61;
+    color: #ffffff;
+}
+
+QListWidget[operationChainRunFilters="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    outline: 0;
+    padding: 4px;
+}
+
+QListWidget[operationChainRunFilters="true"]::item {
+    border-radius: 5px;
+    padding: 6px 8px;
+}
+
+QListWidget[operationChainRunFilters="true"]::item:hover {
+    background-color: #222b39;
+    color: #eef2f8;
+}
+
+QListWidget[operationChainRunFilters="true"]::item:selected {
+    background-color: #273b60;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+QWidget[operationChainRunInspector="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 8px;
+}
+
+QLabel[operationChainInspectorTitle="true"] {
+    color: #e3e9f2;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel[operationChainInspectorHeading="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel[operationChainInspectorNotice="true"] {
+    background-color: #302817;
+    border: 1px solid #6d5724;
+    border-radius: 5px;
+    color: #e4c470;
+    font-size: 11px;
+    padding: 5px 7px;
+}
+
+QScrollArea[operationChainStepProgress="true"],
+QWidget#operationChainStepProgressContent {
+    background-color: transparent;
+    border: 0;
+}
+
+QLabel[operationChainStepArrow="true"] {
+    color: #667085;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+QToolButton[operationChainStepButton="true"] {
+    background-color: #202631;
+    border: 1px solid #3a4352;
+    border-radius: 7px;
+    color: #c4ccd8;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 9px;
+}
+
+QToolButton[operationChainStepButton="true"]:hover {
+    border-color: #738098;
+    color: #ffffff;
+}
+
+QToolButton[operationChainStepState="running"] {
+    background-color: #19324f;
+    border-color: #3c79b7;
+    color: #a9d3ff;
+}
+
+QToolButton[operationChainStepState="awaiting"] {
+    background-color: #342b18;
+    border-color: #8d6f2d;
+    color: #f0ca72;
+}
+
+QToolButton[operationChainStepState="succeeded"] {
+    background-color: #173326;
+    border-color: #347859;
+    color: #8ed5ad;
+}
+
+QToolButton[operationChainStepState="failed"] {
+    background-color: #3a2026;
+    border-color: #9b4553;
+    color: #f0a0a9;
+}
+
+QToolButton[operationChainStepState="cancelled"] {
+    background-color: #2a2535;
+    border-color: #66557e;
+    color: #c0acd9;
+}
+
+QToolButton[operationChainStepCurrent="true"] {
+    border: 2px solid #73b7ff;
+}
+
+QToolButton[operationChainStepSelected="true"] {
+    border: 2px solid #e3e9f2;
+    color: #ffffff;
+}
+
+QToolButton[operationChainStepCurrent="true"][operationChainStepSelected="true"] {
+    border-color: #8ec5ff;
+}
+
+QTableWidget[operationChainStepDetails="true"] {
+    alternate-background-color: #181e28;
+    background-color: #151a23;
+    border: 1px solid #252d3a;
+    border-radius: 5px;
+    color: #c8d0dc;
+    font-size: 11px;
+}
+
+QTableWidget[operationChainStepDetails="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 4px 6px;
+}
+
+QSplitter#operationChainRunsSplitter::handle {
+    background-color: #2a3342;
+    height: 2px;
+}
+
+QLabel[operationChainActionError="true"] {
+    background-color: #301d23;
+    border: 1px solid #6f3843;
+    border-radius: 6px;
+    color: #ef9ca5;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+QLabel[placeholderTitle="true"] {
+    color: #dbe2ed;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+QLabel[placeholderDescription="true"] {
+    color: #7f899b;
+    font-size: 13px;
+}
+
+QLabel[pairCatalogStatus="true"] {
+    color: #aeb7c7;
+    font-size: 13px;
+    padding-top: 4px;
+}
+
+QScrollArea#orderWorkspaceScrollArea,
+QWidget#orderWorkspaceContent,
+QWidget#orderEntryForm,
+QWidget#orderPairDependentControls,
+QStackedWidget#orderOperationFormStack,
+QStackedWidget#orderOperationFormStack > QWidget {
+    background-color: transparent;
+    border: 0;
+}
+
+QLabel[selectedCatalogStatus="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+QLabel[symbolInfoStatus="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
+QLabel[tradingLimits="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #9da8b9;
+    font-size: 12px;
+    padding: 9px 10px;
+}
+
+QLabel[confirmationSummary="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+}
+
+QLabel[confirmationTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[confirmationSummary="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
+QLabel[confirmationSummary="true"] {
+    padding: 12px;
+}
+
+QLabel[sessionOrdersEmptyState="true"] {
+    color: #7f899b;
+    font-size: 12px;
+    padding: 10px 2px;
+}
+
+QLabel[accountSectionTitle="true"] {
+    color: #dbe2ed;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+QLabel[accountBalanceStatus="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+QLabel[accountBalancesEmptyState="true"] {
+    color: #7f899b;
+    font-size: 13px;
+    padding: 20px;
+}
+
+QLabel[statusPresentation="neutral"] {
+    background-color: #191f29;
+    border: 1px solid #343d4c;
+    border-radius: 6px;
+    color: #b6c0cf;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="loading"] {
+    background-color: #182a40;
+    border: 1px solid #365f8c;
+    border-radius: 6px;
+    color: #acd2fa;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="success"] {
+    background-color: #173126;
+    border: 1px solid #347257;
+    border-radius: 6px;
+    color: #9bd9b5;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="warning"] {
+    background-color: #332a18;
+    border: 1px solid #80662b;
+    border-radius: 6px;
+    color: #edca78;
+    padding: 7px 9px;
+}
+
+QLabel[statusPresentation="error"] {
+    background-color: #351f25;
+    border: 1px solid #84414e;
+    border-radius: 6px;
+    color: #f0a4ad;
+    padding: 7px 9px;
+}
+
+QWidget[sessionOrderActionBar="true"] {
+    background-color: #151a23;
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    padding: 9px;
+}
+
+QLabel[sessionOrderActionContext="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"]::pane,
+QTabWidget[sessionOrdersTabs="true"]::pane,
+QTabWidget[accountsExchangeTabs="true"]::pane {
+    border: 1px solid #2a3342;
+    border-radius: 6px;
+    background-color: #151a23;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab {
+    background-color: #202631;
+    border: 1px solid #2a3342;
+    border-bottom: 0;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    color: #aeb7c7;
+    font-size: 12px;
+    margin-right: 3px;
+    padding: 7px 11px;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:selected,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:selected {
+    background-color: #151a23;
+    color: #e3e9f2;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:hover,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:hover,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:hover {
+    background-color: #293241;
+    color: #ffffff;
+}
+
+QTabWidget[ordersWorkspaceTabs="true"] QTabBar::tab:selected:focus,
+QTabWidget[sessionOrdersTabs="true"] QTabBar::tab:selected:focus,
+QTabWidget[accountsExchangeTabs="true"] QTabBar::tab:selected:focus {
+    border-color: #73b7ff;
+    color: #ffffff;
+}
+
+QWidget#binanceBalancesTab,
+QWidget#bybitBalancesTab {
+    background-color: #151a23;
+}
+
+QTreeWidget[sessionOrdersTable="true"],
+QTableWidget[accountBalancesTable="true"],
+QTableWidget[operationChainTable="true"] {
+    alternate-background-color: #181e28;
+    background-color: #151a23;
+    border: 0;
+    color: #c8d0dc;
+    font-size: 12px;
+    gridline-color: #2a3342;
+}
+
+QTreeWidget[sessionOrdersTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 5px;
+}
+
+QTableWidget[accountBalancesTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 6px;
+}
+
+QTableWidget[operationChainTable="true"]::item {
+    border-bottom: 1px solid #252d3a;
+    padding: 5px;
+}
+
+QTreeWidget[sessionOrdersTable="true"]::item:selected,
+QTableWidget[accountBalancesTable="true"]::item:selected,
+QTableWidget[operationChainTable="true"]::item:selected {
+    background-color: #273b60;
+    color: #ffffff;
+}
+
+QTreeWidget[sessionOrdersTable="true"]:focus,
+QTableWidget[accountBalancesTable="true"]:focus,
+QTableWidget[operationChainTable="true"]:focus,
+QTableWidget[operationChainStepDetails="true"]:focus,
+QListWidget[operationChainRunFilters="true"]:focus {
+    border: 1px solid #73b7ff;
+}
+
+QHeaderView::section {
+    background-color: #202631;
+    border: 0;
+    border-bottom: 1px solid #2a3342;
+    color: #9da8b9;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px;
+}
+
+QDialog#orderConfirmationDialog,
+QMessageBox {
+    background-color: #191e28;
+    color: #eef2f8;
+}
+
+QMessageBox QLabel {
+    color: #dbe2ed;
+}
+
+QMessageBox QPushButton {
+    background-color: #252d3b;
+    border: 1px solid #46546a;
+    border-radius: 6px;
+    color: #e3e9f2;
+    min-height: 30px;
+    min-width: 96px;
+    padding: 2px 10px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #303a4b;
+    border-color: #60718c;
+}
+
+QLabel[orderFieldLabel="true"] {
+    color: #aeb7c7;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QLabel[operationDescription="true"] {
+    color: #7f899b;
+    font-size: 12px;
+    padding: 3px 0;
+}
+
+QComboBox[orderInput="true"],
+QLineEdit[orderInput="true"] {
+    background-color: #11161f;
+    border: 1px solid #323b4b;
+    border-radius: 6px;
+    color: #e3e9f2;
+    font-size: 13px;
+    padding: 0 10px;
+    selection-background-color: #2768d9;
+}
+
+QComboBox[orderInput="true"]:focus,
+QLineEdit[orderInput="true"]:focus {
+    border-color: #4b84e6;
+}
+
+QLineEdit[orderInput="true"][validationError="true"] {
+    border-color: #d45c68;
+}
+
+QComboBox[orderInput="true"]:disabled,
+QLineEdit[orderInput="true"]:disabled {
+    background-color: #171b23;
+    border-color: #282e39;
+    color: #646d7c;
+}
+
+QLineEdit[readOnlyContext="true"] {
+    background-color: #202631;
+    color: #9da8b9;
+}
+
+QComboBox[orderInput="true"] QAbstractItemView {
+    background-color: #191f2a;
+    border: 1px solid #384253;
+    color: #e3e9f2;
+    selection-background-color: #2768d9;
+}
+
+QCheckBox#placeOcoUseStopLimit {
+    color: #c2cad7;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QCheckBox#placeOcoUseStopLimit:focus {
+    color: #ffffff;
+}
+
+QLabel[validationError="true"] {
+    color: #ef8791;
+    font-size: 12px;
+}
+
+QWidget[correctionPanel="true"] {
+    background-color: transparent;
+}
+
+QLabel[correctionDescription="true"] {
+    color: #e2bd73;
+    font-size: 12px;
+}
+
+QPushButton[secondaryOrderAction="true"] {
+    background-color: #252d3b;
+    border: 1px solid #3a4659;
+    border-radius: 6px;
+    color: #d7deea;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+QPushButton[secondaryOrderAction="true"]:hover {
+    background-color: #303a4b;
+    border-color: #4b5a70;
+}
+
+QPushButton[dangerOrderAction="true"] {
+    background-color: #42242b;
+    border: 1px solid #74404a;
+    border-radius: 6px;
+    color: #f2c4c9;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+QPushButton[dangerOrderAction="true"]:hover {
+    background-color: #553039;
+    border-color: #94505d;
+}
+
+QPushButton[dangerOrderAction="true"]:disabled,
+QPushButton[secondaryOrderAction="true"]:disabled {
+    background-color: #20242d;
+    border-color: #2b313d;
+    color: #626b7a;
+}
+
+QPushButton[primaryOrderAction="true"] {
+    background-color: #2768d9;
+    border: 0;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 18px;
+}
+
+QPushButton[primaryOrderAction="true"]:hover {
+    background-color: #3477e7;
+}
+
+QPushButton[primaryOrderAction="true"]:disabled {
+    background-color: #242b37;
+    color: #667184;
+}
+
+QPushButton[primaryChainAction="true"] {
+    background-color: #2768d9;
+    border: 0;
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 14px;
+}
+
+QPushButton[primaryChainAction="true"]:hover {
+    background-color: #3477e7;
+}
+
+QPushButton[primaryChainAction="true"]:disabled {
+    background-color: #242b37;
+    color: #667184;
+}
+
+QPushButton[dangerChainAction="true"] {
+    background-color: #42242b;
+    border: 1px solid #74404a;
+    border-radius: 6px;
+    color: #f2c4c9;
+    font-size: 12px;
+    padding: 0 12px;
+}
+
+QPushButton[dangerChainAction="true"]:hover {
+    background-color: #553039;
+    border-color: #94505d;
+}
+
+QPushButton[dangerChainAction="true"]:disabled {
+    background-color: #20242d;
+    border-color: #2b313d;
+    color: #626b7a;
+}
+
+QPushButton:focus,
+QToolButton:focus {
+    border: 2px solid #73b7ff;
+}
+
+QToolTip {
+    background-color: #222936;
+    border: 1px solid #52617a;
+    color: #eef2f8;
+    padding: 4px 6px;
+}
+
+QScrollBar:vertical {
+    background-color: #151a23;
+    margin: 2px;
+    width: 10px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #465267;
+    border-radius: 4px;
+    min-height: 28px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #60708a;
+}
+
+QScrollBar:horizontal {
+    background-color: #151a23;
+    height: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #465267;
+    border-radius: 4px;
+    min-width: 28px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: #60708a;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+    border: 0;
+}
+
+QFrame[orderFormDivider="true"] {
+    border: 0;
+    border-top: 1px solid #2b3240;
+    max-height: 1px;
+}

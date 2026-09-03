@@ -1,5 +1,6 @@
 #include "OperationFactory.hpp"
 #include "DealService.hpp"
+#include "OperationCancellationCoordinator.hpp"
 #include "common/domain/OrderListQuery.hpp"
 #include "common/domain/OrderQuery.hpp"
 #include "common/domain/PlaceOcoRequest.hpp"
@@ -9,11 +10,81 @@
 
 // DEBUG
 #include <iostream>
+#include <optional>
+#include <string>
+#include <utility>
 
 using namespace std;
 using namespace exception_handling;
 
 namespace {
+    optional<string> getIdentifierIfPresent(const string &identifier)
+    {
+        return identifier.empty() ? nullopt : optional<string>(identifier);
+    }
+
+    OperationAcceptedIdentifiers createAcceptedIdentifiers(const OrderInfo &orderInfo)
+    {
+        OperationAcceptedIdentifiers identifiers;
+        identifiers.orderId = getIdentifierIfPresent(orderInfo.orderId);
+        return identifiers;
+    }
+
+    OperationAcceptedIdentifiers createAcceptedIdentifiers(const OcoInfo &ocoInfo)
+    {
+        OperationAcceptedIdentifiers identifiers;
+        identifiers.ocoGroupId = getIdentifierIfPresent(ocoInfo.orderListId);
+        identifiers.takeProfitOrderId = getIdentifierIfPresent(ocoInfo.takeProfitOrder.orderId);
+        identifiers.stopLossOrderId = getIdentifierIfPresent(ocoInfo.stopLossOrder.orderId);
+        return identifiers;
+    }
+
+    void reportAwaiting(const OperationProgressHandler &progressHandler, OperationAcceptedIdentifiers identifiers)
+    {
+        if (progressHandler)
+        {
+            progressHandler(move(identifiers));
+        }
+    }
+
+    void throwIfCancellationRequested(const OperationContext &context)
+    {
+        if (context.cancellationCoordinator != nullptr)
+        {
+            context.cancellationCoordinator->throwIfCancellationRequested();
+        }
+    }
+
+    void registerOrdinaryOrder(OperationContext &context, const Exchanger &service, const OrderInfo &orderInfo)
+    {
+        if (context.cancellationCoordinator != nullptr)
+        {
+            context.cancellationCoordinator->registerOrdinaryOrder(service, orderInfo);
+        }
+    }
+
+    void registerOcoOrder(OperationContext &context, const Exchanger &service, const OcoInfo &ocoInfo)
+    {
+        if (context.cancellationCoordinator != nullptr)
+        {
+            context.cancellationCoordinator->registerOcoOrder(service, ocoInfo);
+        }
+    }
+
+    stop_token getWaitStopToken(const OperationContext &context)
+    {
+        return context.cancellationCoordinator == nullptr ? stop_token{}
+                                                          : context.cancellationCoordinator->getWaitStopToken();
+    }
+
+    void completeActionNaturally(OperationContext &context)
+    {
+        if (context.cancellationCoordinator != nullptr)
+        {
+            context.cancellationCoordinator->completeActionNaturally();
+        }
+    }
+
     Decimal getReceivedQuantity(const OrderInfo &orderInfo, OrderOperation side)
     {
         if (side == OrderOperation::SELL)
@@ -27,50 +98,59 @@ namespace {
 
 OperationFactory::OperationFactory()
 {
-    factories.emplace(OperationType::BUY_CRYPTO,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context)
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderInfo orderInfo =
-                                  service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
+    factories.emplace(
+        OperationType::BUY_CRYPTO,
+        [](const Config &config) -> operation
+        {
+            const auto preset = get<BaseConfig>(config);
+            return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
+            {
+                throwIfCancellationRequested(context);
+                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                OrderInfo orderInfo = service->buyCrypto(preset.outAsset, context.inAsset, context.quantity);
+                registerOrdinaryOrder(context, service, orderInfo);
+                reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
-                              OrderInfo completeOrderInfo =
-                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                OrderInfo completeOrderInfo =
+                    service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId, getWaitStopToken(context));
+                completeActionNaturally(context);
 
-                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::BUY);
+                context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::BUY);
 
-                              context.inAsset = preset.outAsset;
-                          };
-                      });
+                context.inAsset = preset.outAsset;
+            };
+        });
 
-    factories.emplace(OperationType::SELL_CRYPTO,
-                      [](const Config &config) -> operation
-                      {
-                          const auto preset = get<BaseConfig>(config);
-                          return [preset](OperationContext &context)
-                          {
-                              auto &service = context.exchangersPull.getExchanger(context.exchangerType);
-                              OrderInfo orderInfo =
-                                  service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
+    factories.emplace(
+        OperationType::SELL_CRYPTO,
+        [](const Config &config) -> operation
+        {
+            const auto preset = get<BaseConfig>(config);
+            return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
+            {
+                throwIfCancellationRequested(context);
+                auto &service = context.exchangersPull.getExchanger(context.exchangerType);
+                OrderInfo orderInfo = service->sellCrypto(context.inAsset, preset.outAsset, context.quantity);
+                registerOrdinaryOrder(context, service, orderInfo);
+                reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
-                              OrderInfo completeOrderInfo =
-                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                OrderInfo completeOrderInfo =
+                    service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId, getWaitStopToken(context));
+                completeActionNaturally(context);
 
-                              context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::SELL);
+                context.quantity = getReceivedQuantity(completeOrderInfo, OrderOperation::SELL);
 
-                              context.inAsset = preset.outAsset;
-                          };
-                      });
+                context.inAsset = preset.outAsset;
+            };
+        });
 
     factories.emplace(OperationType::PLACE_ORDER,
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOrderConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
+                              throwIfCancellationRequested(context);
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
                               PlaceOrderRequest request;
@@ -95,9 +175,13 @@ OperationFactory::OperationFactory()
                               request.quantity = context.quantity;
                               request.price = preset.price;
                               OrderInfo orderInfo = service->placeOrder(request);
+                              registerOrdinaryOrder(context, service, orderInfo);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(orderInfo));
 
-                              OrderInfo completeOrderInfo =
-                                  service->waitUntilOrderFilled(orderInfo.symbol, orderInfo.orderId);
+                              OrderInfo completeOrderInfo = service->waitUntilOrderFilled(orderInfo.symbol,
+                                                                                          orderInfo.orderId,
+                                                                                          getWaitStopToken(context));
+                              completeActionNaturally(context);
 
                               context.quantity = getReceivedQuantity(completeOrderInfo, preset.side);
 
@@ -109,8 +193,9 @@ OperationFactory::OperationFactory()
                       [](const Config &config) -> operation
                       {
                           const auto preset = get<PlaceOcoConfig>(config);
-                          return [preset](OperationContext &context)
+                          return [preset](OperationContext &context, const OperationProgressHandler &progressHandler)
                           {
+                              throwIfCancellationRequested(context);
                               auto &service = context.exchangersPull.getExchanger(context.exchangerType);
 
                               PlaceOcoRequest request;
@@ -135,10 +220,14 @@ OperationFactory::OperationFactory()
                               request.limitClientOrderId = preset.limitClientOrderId;
                               request.stopClientOrderId = preset.stopClientOrderId;
                               OcoInfo ocoInfo = service->placeOco(request);
+                              registerOcoOrder(context, service, ocoInfo);
+                              reportAwaiting(progressHandler, createAcceptedIdentifiers(ocoInfo));
 
-                              const OrderInfo filledOrder = service->waitUntilOcoOrderFilled(ocoInfo);
+                              const OcoWaitResult result =
+                                  service->waitUntilOcoOrderFilled(ocoInfo, getWaitStopToken(context));
+                              completeActionNaturally(context);
 
-                              context.quantity = getReceivedQuantity(filledOrder, preset.side);
+                              context.quantity = getReceivedQuantity(result.filledOrder, preset.side);
                               context.inAsset = preset.outAsset;
                           };
                       });
@@ -152,8 +241,9 @@ OperationFactory::OperationFactory()
         [](const Config &config) -> operation
         {
             const auto preset = get<SendToConfig>(config);
-            return [preset](OperationContext &context)
+            return [preset](OperationContext &context, const OperationProgressHandler &)
             {
+                throwIfCancellationRequested(context);
                 string targetExchanger = context.exchangerType == ExchangerType::BYBIT ? "Bybit" : "Binance";
                 string destinationExchanger = preset.destinationExchanger == ExchangerType::BYBIT ? "Bybit" : "Binance";
                 cout << "Crypto currency " << context.inAsset << " in amount " << context.quantity << " had sent from "

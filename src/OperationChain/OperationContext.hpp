@@ -12,12 +12,15 @@
 
 using Decimal = boost::decimal::decimal128_t;
 
+class OperationCancellationCoordinator;
+
 struct OperationContext
 {
     ExchangerType exchangerType;
     const ExchangerPull exchangersPull;
     std::string inAsset;
     Decimal quantity{};
+    OperationCancellationCoordinator *cancellationCoordinator = nullptr;
 
     OperationContext(const std::vector<Exchanger> &exchangers) : exchangersPull(exchangers) {}
 };
